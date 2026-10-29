@@ -7,6 +7,12 @@ defmodule Core.Semantic.ParticipantQuestionsTest do
     assert {:forward, "bird", :predicate, %{}} ==
       ParticipantQuestions.parse("What is the bird doing?")
 
+    for text <- ["what is the bird doing", "What was the bird doing?",
+                 "what was the bird doing"] do
+      assert {:forward, "bird", :predicate, %{}} ==
+        ParticipantQuestions.parse(text)
+    end
+
     assert {:forward, "bird", :location, %{}} ==
       ParticipantQuestions.parse("Where is the bird?")
 
@@ -23,7 +29,8 @@ defmodule Core.Semantic.ParticipantQuestionsTest do
 
   test "question parser abstains on unsupported questions instead of inventing roles" do
     assert nil == ParticipantQuestions.parse("Where was the bird?")
-    assert nil == ParticipantQuestions.parse("What is the bird doing")
+    assert nil == ParticipantQuestions.parse("What was the bird doing yesterday?")
+    assert nil == ParticipantQuestions.parse("What were the birds doing?")
     assert nil == ParticipantQuestions.parse("Which bird is flapping?")
     assert nil == ParticipantQuestions.parse("The bird is flapping.")
   end
