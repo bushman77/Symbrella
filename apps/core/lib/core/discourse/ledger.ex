@@ -139,7 +139,6 @@ defmodule Core.Discourse.Ledger do
            actor: ^subject, original: ^original, proposed: ^proposed,
            source_turn_sha256: ^digest,
            source_tokens: source_tokens,
-           source_syntax: source_syntax,
            verification: :conversation_context_only,
            factual_authority?: false
          } <- request,
@@ -159,7 +158,7 @@ defmodule Core.Discourse.Ledger do
         position: clause.position,
         source_turn_sha256: digest,
         source_request_seq: request_seq,
-        role_evidence: if(valid_gap_syntax?(source_syntax),
+        role_evidence: if(valid_gap_syntax?(Map.get(request, :source_syntax)),
           do: :attested_core_syntax_gap, else: :surface_clause_only),
         status: :speaker_confirmed_spelling,
         source: :same_session_clarification,
