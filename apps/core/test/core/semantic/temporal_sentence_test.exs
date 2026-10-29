@@ -95,6 +95,33 @@ defmodule Core.Semantic.TemporalSentenceTest do
       lifg_choices: choices}
   end
 
+  test "noun-winning after preserves tied conjunction senses and composes by POS" do
+    si = live_tied_after()
+
+    assert {:ok, witness} =
+      Core.Semantic.Composition.RoleWitness.resolve(
+        si, :temporal_connective, 7, ["conjunction", "preposition"])
+
+    assert witness.selection_basis == :construction_pos_only
+    assert witness.original_lifg_id == "after|noun|1"
+    assert witness.pos == "conjunction"
+    assert witness.sense_id == nil
+    assert witness.attested_sense_ids ==
+      ["after|conjunction|1", "after|conjunction|2"]
+
+    attached = SentenceMeaning.attach(si)
+    assert {:ok, meaning} = TemporalSentence.verified(attached)
+    assert meaning.kind == :explicit_temporal_report
+    assert meaning.connective == :after
+    assert meaning.temporal_claim.earlier_event_property.predicate == :sleep
+    assert meaning.temporal_claim.later_event_property.predicate == :sit
+    assert Enum.at(meaning.compositional_evidence.lexical_witnesses, 7) ==
+      witness
+    assert :exact_dictionary_senses in meaning.unresolved
+    refute meaning.factual_authority?
+    refute meaning.temporal_claim.external_chronology_verified?
+  end
+
   test "live alternatives require current dictionary witnesses" do
     si = live_style_input()
     without_verb = %{si | active_cells:
