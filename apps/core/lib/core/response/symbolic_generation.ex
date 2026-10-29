@@ -22,40 +22,50 @@ defmodule Core.Response.SymbolicGeneration do
 
   @spec generate(String.t(), map(), map(), map()) ::
           {:ok, String.t(), map()} | :not_applicable
-  def generate(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
+  def generate(user_text, %{risk_bucket: :low} = features,
+               %{action: action} = decision, si)
       when is_binary(user_text) and is_map(si) and
-             intent in @social_intents and action in [:answer, :offer_options, :act_first] do
+             action in [:answer, :offer_options, :act_first, :ask_first] do
+    # Exact temporal operations revalidate the saved meaning and the live
+    # session ledger, independently of a fallible surface intent label or
+    # a cautious :ask_first action. Generic generation remains gated below.
     case maybe_realize_temporal_first(user_text, si) do
-      {:ok, _, _} = temporal ->
-        temporal
+      {:ok, _, _} = temporal -> temporal
+      :not_applicable -> generate_ordinary(user_text, features, decision, si)
+    end
+  end
+
+  def generate(_text, _features, _decision, _si), do: :not_applicable
+
+  defp generate_ordinary(user_text, %{risk_bucket: :low, intent: intent},
+                         %{action: action}, si)
+       when intent in @social_intents and
+            action in [:answer, :offer_options, :act_first] do
+    case social_realization(user_text, si) do
+      {:ok, _, _} = realized ->
+        realized
 
       :not_applicable ->
-        case social_realization(user_text, si) do
-          {:ok, _, _} = realized ->
-            realized
+        case maybe_realize_compositional_nominal(user_text, intent, si) do
+          {:ok, _, _} = nominal ->
+            nominal
 
           :not_applicable ->
-            case maybe_realize_compositional_nominal(user_text, intent, si) do
-              {:ok, _, _} = nominal ->
-                nominal
+            case maybe_realize_anaphoric_spatial(user_text, intent, si) do
+              {:ok, _, _} = anaphoric ->
+                anaphoric
 
               :not_applicable ->
-                case maybe_realize_anaphoric_spatial(user_text, intent, si) do
-                  {:ok, _, _} = anaphoric ->
-                    anaphoric
-
-                  :not_applicable ->
-                    case maybe_realize_compositional_event(user_text, intent, si) do
-                      {:ok, _, _} = event -> event
-                      :not_applicable -> maybe_realize_report(user_text, intent, si)
-                    end
+                case maybe_realize_compositional_event(user_text, intent, si) do
+                  {:ok, _, _} = event -> event
+                  :not_applicable -> maybe_realize_report(user_text, intent, si)
                 end
             end
         end
     end
   end
 
-  def generate(_text, _features, _decision, _si), do: :not_applicable
+  defp generate_ordinary(_text, _features, _decision, _si), do: :not_applicable
 
   defp social_realization(user_text, si) do
     case Map.get(si, :speech_act_frame) do
