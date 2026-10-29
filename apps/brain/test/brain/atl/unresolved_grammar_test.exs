@@ -21,6 +21,9 @@ defmodule Brain.ATL.UnresolvedGrammarTest do
 
     signature = %{
       id: :progressive_lexical_gap_candidate,
+      source_span_sha256:
+        (:crypto.hash(:sha256, "the fox is flarping on the fence")
+          |> Base.encode16(case: :lower)),
       source: :core_syntax,
       span: {0, 6},
       roles: %{
@@ -82,7 +85,10 @@ defmodule Brain.ATL.UnresolvedGrammarTest do
       %{si | sentence_signatures: []},
       %{si | active_cells: Enum.reject(si.active_cells, &(&1.norm == "fox"))},
       %{si | tokens: List.replace_at(si.tokens, 3,
-        %{phrase: "dancing", index: 3, n: 1})}
+        %{phrase: "dancing", index: 3, n: 1})},
+      %{si | sentence_signatures:
+        [%{hd(si.sentence_signatures) |
+          source_span_sha256: String.duplicate("0", 64)}]}
     ] do
       assert UnresolvedGrammar.attach(changed, slate).unresolved_grammar == []
       assert UnresolvedGrammar.attach(changed, slate).unresolved_grammar_count == 0
