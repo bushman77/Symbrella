@@ -47,7 +47,7 @@ defmodule Core.Semantic.TemporalEventComposition do
         sentence: sentence,
         definition: nil,
         speech_act: :request_information,
-        source: :revalidated_discorde_report_order,
+        source: :revalidated_discourse_report_order,
         operation: :recall_earlier_report,
         temporal_evidence: pair,
         grounding: %{basis: :session_report_sequence,
