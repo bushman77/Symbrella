@@ -11,7 +11,7 @@ defmodule Core.Semantic.Composition.RoleWitness do
   """
 
   @pos_only_roles [:preposition, :modifier_1, :modifier_2]
-  @alternative_roles [:auxiliary, :predicate, :location_head | @pos_only_roles]
+  @alternative_roles [:temporal_connective, :auxiliary, :predicate, :location_head | @pos_only_roles]
   @max_scores 128
 
   @spec resolve(map(), atom(), non_neg_integer(), [String.t()]) ::
@@ -167,6 +167,39 @@ defmodule Core.Semantic.Composition.RoleWitness do
       # which adjective or preposition dictionary sense was intended.
       # Bind every attested score to the current SI for replay verification.
       case {role, candidates} do
+        # A full two-clause temporal construction can license the conjunction
+        # POS of "before"/"after" even when the noun sense wins Stage-1.
+        # Several tied conjunction senses do not justify choosing an exact
+        # dictionary sense. Preserve every independently scored candidate;
+        # the caller must verify the complete grammatical scope separately.
+        {:temporal_connective, _}
+            when word in ["before", "after"] and index == 7 and
+                 expected_pos == ["conjunction", "preposition"] ->
+          conjunctions =
+            Enum.filter(candidates, fn {id, score} ->
+              score > 0 and
+                match?([_, "conjunction", _], String.split(id, "|", parts: 3))
+            end)
+
+          case conjunctions do
+            [{_id, best_score} | _] ->
+              {:ok, %{
+                token_index: index,
+                word: word,
+                pos: "conjunction",
+                sense_id: nil,
+                attested_sense_ids: Enum.map(conjunctions, &elem(&1, 0)),
+                attested_candidate_scores: conjunctions,
+                role: role,
+                selection_basis: :construction_pos_only,
+                original_lifg_id: selected_id,
+                candidate_score: best_score
+              }}
+
+            [] ->
+              :unsupported
+          end
+
         {pos_role, [{_id, score} | _]} when pos_role in @pos_only_roles ->
           {:ok, %{
             token_index: index,
