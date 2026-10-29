@@ -4,6 +4,7 @@ defmodule Core.Brain.ATL do
   """
 
   alias Core.Brain.Runtime
+  alias Brain.ATL.UnresolvedGrammar
 
   @spec ingest(map(), keyword()) :: map()
   def ingest(%{lifg_choices: choices, tokens: tokens} = si, _opts)
@@ -33,6 +34,8 @@ defmodule Core.Brain.ATL do
         end
 
       if is_map(slate) do
+        slate = UnresolvedGrammar.attach(si, slate)
+
         si
         |> Map.put(:atl_slate, slate)
         |> Map.update(:trace, [], fn tr ->
@@ -41,7 +44,8 @@ defmodule Core.Brain.ATL do
               stage: :atl,
               ts_ms: System.system_time(:millisecond),
               winners: Map.get(slate, :winner_count, 0),
-              concepts: slate |> Map.get(:by_norm, %{}) |> map_size()
+              concepts: slate |> Map.get(:by_norm, %{}) |> map_size(),
+              unresolved_grammar_count: Map.get(slate, :unresolved_grammar_count, 0)
             }
             | tr
           ]
