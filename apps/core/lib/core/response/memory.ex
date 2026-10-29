@@ -134,6 +134,24 @@ defmodule Core.Response.Memory do
 
   def acknowledge_projected(_, _, _, _, _), do: nil
 
+  # A single lexical reply bypasses the WM attention planner on some live
+  # turns. Route only the exact proposed word through the recently issued
+  # same-session clarification ledger; leave all longer or unrelated turns
+  # to the normal response policy.
+  defp pending_bare_fuzzy_confirmation(session_id, text_in) when is_binary(text_in) do
+    case Ledger.pending_fuzzy_confirmation(session_id, text_in) do
+      {:ok, %{proposed: proposed} = request} when is_binary(proposed) ->
+        trimmed = text_in |> String.trim() |> String.downcase()
+        expected = String.downcase(proposed)
+        if trimmed in [expected, expected <> "."],
+          do: {:ok, request}, else: :not_applicable
+
+      _ -> :not_applicable
+    end
+  end
+
+  defp pending_bare_fuzzy_confirmation(_, _), do: :not_applicable
+
   @spec reply_for(map()) :: {atom(), String.t(), map()} | nil
   def reply_for(%{
         intent0: intent0,
@@ -146,6 +164,7 @@ defmodule Core.Response.Memory do
         fact_query_key: fact_query_key,
         semantic_context: semantic_context
       }) do
+    bare_confirmation = pending_bare_fuzzy_confirmation(session_id, text_in)
     clarified_event = Core.Semantic.ClarifiedEvent.answer(session_id, text_in)
     pending_gap = Ledger.pending_unresolved_activity(session_id, text_in)
     conversation_recall = ConversationRecall.reply(text_in, session_id)
@@ -154,6 +173,41 @@ defmodule Core.Response.Memory do
     lexical_reply = UserLexicalMemory.reply(text_in)
 
     cond do
+      match?({:ok, _}, bare_confirmation) ->
+        {:ok, pending} = bare_confirmation
+        original = pending.original
+        proposed = pending.proposed
+        text =
+          "I understand your correction: you meant \"#{proposed}\" when you " <>
+            "said \"#{original}\". That resolves the word you clarified, " <>
+            "though I haven't independently verified the entire sentence."
+
+        reflection = %{
+          status: :fuzzy_clarification_confirmed,
+          provenance: :immediate_same_session_fuzzy_question,
+          source_request_seq: pending.seq,
+          original_term: original,
+          confirmed_term: proposed,
+          evidence_level: :speaker_confirmed_spelling,
+          semantic_verified?: false,
+          factual_claims?: false,
+          dictionary_learned?: false,
+          llm_called?: false
+        }
+
+        finish_reply(session_id, text_in, text, %{
+          action: :clarification_confirmation,
+          response_source: :wm_attention_fallback,
+          risk_bucket: :low,
+          response_reflection: reflection,
+          session_id: session_id,
+          intent_original: intent0,
+          confidence: conf,
+          semantic_verified?: false,
+          factual_authority?: false,
+          llm_called?: false
+        })
+
       asking_for_assistant_name?(text_in, session_id) ->
         name = SideEffects.assistant_name()
         text = "My name is #{name}."
