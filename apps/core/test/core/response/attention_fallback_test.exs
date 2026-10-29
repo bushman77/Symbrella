@@ -1008,10 +1008,12 @@ defmodule Core.Response.AttentionFallbackTest do
     assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "no flapping")
     assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "yes flaring")
     assert {:ok, _} = Ledger.pending_fuzzy_confirmation(sid, "yes, flapping.")
+    assert {:ok, _} = Ledger.pending_fuzzy_confirmation(sid, "flapping")
 
     # Any intervening turn, even an uninterpreted one, ends the pending state.
     intervening = repair_si(sid, "What?", verified?: false, uncertain: [])
     Ledger.record(intervening, discourse_ledger?: true)
     assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "yes flapping")
+    assert :not_applicable == Ledger.pending_fuzzy_confirmation(sid, "flapping")
   end
 end
