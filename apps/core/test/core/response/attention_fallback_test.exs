@@ -437,4 +437,48 @@ defmodule Core.Response.AttentionFallbackTest do
     refute String.contains?(reply, ~s|"sleeping"|)
   end
 
+
+  test "context-guided fuzzy repair offers a provisional guess without asserting it" do
+    sid = "attention-fuzzy-hypothesis-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "The bird is flarping on the fence."
+
+    si = repair_si(sid, sentence, verified?: false,
+      uncertain: ["flarping"])
+
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, si)
+
+    assert reply ==
+      ~s|I'm not sure how you're using "flarping" here. Did you mean "flapping"?|
+    assert meta.status == :attention_comprehension_repair
+    assert meta.unresolved_term == "flarping"
+    assert meta.fuzzy_suggestion.replacement == "flapping"
+    assert meta.fuzzy_suggestion.status == :hypothesis_only
+    assert meta.semantic_verified? == false
+    assert meta.factual_claims? == false
+    assert meta.llm_called? == false
+
+    assert si.sentence == sentence
+    assert si.wm_context.turn_sha256 != nil
+  end
+
+  test "non-contextual unknown keeps ordinary targeted clarification" do
+    sid = "attention-fuzzy-abstains-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "The cat is flarping on the fence."
+    si = repair_si(sid, sentence, verified?: false, uncertain: ["flarping"])
+
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, si)
+
+    assert reply == ~s|I'm not sure how you're using "flarping" here. Could you clarify what you mean?|
+    assert meta.fuzzy_suggestion == nil
+    assert meta.llm_called? == false
+  end
+
 end
