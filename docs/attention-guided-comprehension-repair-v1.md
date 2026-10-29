@@ -552,3 +552,51 @@ mix test apps/core/test/core/semantic/clarified_event_test.exs \
   apps/core/test/core/response/episodic_memory_test.exs \
   apps/core/test/core/semantic/participant_questions_test.exs
 \`\`\`
+
+
+## LiveView regression: missed unknown predicate and stale older action
+
+A fresh live run of "The bird is flarping on the fence." produced the
+generic reply "I can identify bird and fence..." rather than issuing
+the expected clarification. The subsequent question "What is the bird
+doing?" returned "Sitting." There was **no speaker-confirmed
+flarping→flapping correction** in that run, so the response must not
+treat either the corrected predicate or the older sitting episode as
+current evidence.
+
+\`Core.Response.AttentionFallback\` now prefers the independently
+revalidated \`:unresolved_progressive_predicate\` frame over weak-sense
+reports about familiar actor/landmark nouns. It asks specifically about
+the missing predicate. A contextual \`Fuzzy.suggest_word/2\` result is
+still *only* a suggested replacement requiring speaker confirmation.
+
+\`Core.Discourse.Ledger.fuzzy_dialogue_record/1\` can record this
+actual selected question even when the generic comprehension summary
+omitted the unknown word, but only after independently replaying the
+original provisional semantic witness. If no clarification was
+selected, an independently validated provisional frame is retained as
+a compact, nonfactual \`:unresolved_progressive_predicate\` observation.
+Both unresolved observations and outstanding clarification requests
+are rechecked against their original source lexemes and SHA digests
+by \`Ledger.pending_unresolved_activity/2\`.
+
+\`Core.Response.Memory\` now places this specific same-session lexical
+uncertainty ahead of older spatial or owner-wide episodic answers for
+the same actor, preventing an unrelated "Sitting." recollection from
+silently overriding a newer unresolved clause. It asks for clarification,
+not a fabricated event. Other actors and unsupported questions do
+not trigger the gate; after an explicit correction, the existing
+question-directed recomposition pathway takes precedence.
+
+Tests include a simulated weak-comprehension summary mentioning only
+"bird" and "fence", explicit issuance and ledger admission of the
+flarping question, and a replay of the generic live failure response.
+These are **focused regression tests**, not proof of production
+LiveView behavior; the test must be repeated in a fresh chat session.
+
+\`\`\`bash
+mix test apps/core/test/core/response/attention_fallback_test.exs \
+  apps/core/test/core/semantic/provisional_interpretation_test.exs \
+  apps/core/test/core/semantic/clarified_event_test.exs \
+  apps/core/test/core/response/episodic_memory_test.exs
+\`\`\`
