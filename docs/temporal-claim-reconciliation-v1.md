@@ -72,6 +72,8 @@ Run:
       apps/core/test/core/semantic/temporal_event_composition_test.exs
 
 The record store remains in-memory ETS, not durable across restarts.
-There is no automatic correction, consolidation, preference for the last
-statement, or resolution of event identity. Clarification is informational;
-a later answer from the user does not yet update or retract either claim.
+There is no automatic preference for the last factual statement, nor any
+resolution of real-world event identity. Temporal Clarification Resolution V1
+now accepts the immediately following exact report-selection answer and
+appends an independent, speaker-attributed preference record. It never edits
+or retracts either original report. See temporal-clarification-resolution-v1.md.
