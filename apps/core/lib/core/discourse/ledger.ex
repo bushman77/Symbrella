@@ -137,16 +137,26 @@ defmodule Core.Discourse.Ledger do
            seq: ^request_seq,
            actor: ^subject, original: ^original, proposed: ^proposed,
            source_turn_sha256: ^digest,
+           source_tokens: source_tokens,
            verification: :conversation_context_only,
            factual_authority?: false
          } <- request,
          true <- is_binary(subject) and String.downcase(actor) == subject,
          true <- is_binary(original) and is_binary(proposed) and
-                   original != proposed do
+                   original != proposed,
+         {:ok, clause} <- replay_fuzzy_source(source_tokens, original, digest),
+         true <- clause.actor == subject,
+         true <- String.ends_with?(original, "ing") and
+                   String.ends_with?(proposed, "ing") do
       {:ok, %{
         actor: subject,
         original: original,
         proposed: proposed,
+        aspect: :progressive,
+        location: clause.location,
+        position: clause.position,
+        source_turn_sha256: digest,
+        source_request_seq: request_seq,
         status: :speaker_confirmed_spelling,
         source: :same_session_clarification,
         factual_authority?: false
@@ -309,21 +319,24 @@ defmodule Core.Discourse.Ledger do
               %{original: original, replacement: proposed, status: :hypothesis_only}
               when is_binary(original) and is_binary(proposed) ->
                 if String.ends_with?(response, ~s|Did you mean "#{proposed}"?|) do
-                  actor = fuzzy_surface_actor(sentence, original)
-                  if is_binary(actor) do
-                    %{
-                    kind: :fuzzy_clarification_request,
-                    status: :provisional,
-                    original: original,
-                    proposed: proposed,
-                    actor: actor,
-                    source_turn_sha256: :crypto.hash(:sha256, sentence)
-                      |> Base.encode16(case: :lower),
-                    asked_at_ms: System.system_time(:millisecond),
-                    provenance: :actual_attention_fuzzy_question,
-                    verification: :conversation_context_only,
-                    factual_authority?: false
-                    }
+                  case fuzzy_surface_clause(sentence, original) do
+                    {:ok, %{actor: actor, tokens: tokens}} ->
+                      %{
+                        kind: :fuzzy_clarification_request,
+                        status: :provisional,
+                        original: original,
+                        proposed: proposed,
+                        actor: actor,
+                        source_tokens: tokens,
+                        source_turn_sha256: :crypto.hash(:sha256, sentence)
+                          |> Base.encode16(case: :lower),
+                        asked_at_ms: System.system_time(:millisecond),
+                        provenance: :actual_attention_fuzzy_question,
+                        verification: :conversation_context_only,
+                        factual_authority?: false
+                      }
+
+                    _ -> nil
                   end
                 end
 
@@ -355,22 +368,48 @@ defmodule Core.Discourse.Ledger do
     end
   end
 
-  # Bounded surface alignment, not a verified semantic event. We can
-  # attribute the actor named by the speaker, but cannot assert a real bird,
-  # an exact verb sense, or movement. Reject free-form or ambiguous grammar.
-  defp fuzzy_surface_actor(sentence, unknown) when is_binary(unknown) do
-    regex =
-      ~r/\A(?:the|a|an) (\p{L}{2,32}) is (\p{L}{5,24}) (?:on|in|under|beside|above|below) (?:the|a|an) \p{L}{2,32}\.\z/iu
+  # A source record retains bounded source tokens rather than replacing the
+  # utterance. Replay the same strict structural grammar and exact original
+  # SHA before the inferred subject/activity/location can be used as a frame.
+  @fuzzy_clause ~r/\A(the|a|an) (\p{L}{2,32}) (is) (\p{L}{5,24}) (on|in|under|beside|above|below) (the|a|an) (\p{L}{2,32})\.\z/iu
 
-    case Regex.run(regex, String.trim(sentence)) do
-      [_, actor, activity] ->
-        if String.downcase(activity) == unknown, do: String.downcase(actor)
+  defp fuzzy_surface_clause(sentence, unknown) when is_binary(sentence) do
+    case Regex.run(@fuzzy_clause, sentence) do
+      [_, subject_det, actor, aux, activity, position, location_det, landmark] ->
+        if String.downcase(activity) == unknown do
+          {:ok, %{
+            actor: String.downcase(actor),
+            position: String.downcase(position),
+            location: String.downcase(location_det <> " " <> landmark),
+            tokens: [subject_det, actor, aux, activity,
+              position, location_det, landmark]
+          }}
+        else
+          :not_applicable
+        end
 
-      _ -> nil
+      _ -> :not_applicable
     end
   end
 
-  defp fuzzy_surface_actor(_, _), do: nil
+  defp fuzzy_surface_clause(_, _), do: :not_applicable
+
+  defp replay_fuzzy_source(tokens, original, digest)
+       when is_list(tokens) and length(tokens) == 7 and
+            is_binary(original) and is_binary(digest) do
+    with true <- Enum.all?(tokens, &(is_binary(&1) and byte_size(&1) in 1..40)),
+         sentence <- Enum.join(tokens, " ") <> ".",
+         ^digest <- (:crypto.hash(:sha256, sentence)
+                     |> Base.encode16(case: :lower)),
+         {:ok, clause} <- fuzzy_surface_clause(sentence, original),
+         true <- clause.tokens == tokens do
+      {:ok, clause}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp replay_fuzzy_source(_, _, _), do: :not_applicable
 
   defp ordinary_semantic_record(si) do
     core = %{kind: :uninterpreted, status: :no_verified_semantics,
