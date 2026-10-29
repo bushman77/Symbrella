@@ -33,7 +33,7 @@ defmodule Core.Semantic.TemporalActivityRecall do
            session, "What is the #{Atom.to_string(actor)} doing?"),
          reports <- Ledger.entries(session) |> Enum.take(@max_records),
          qualified <- Enum.filter(reports, &qualified?(&1, actor)),
-         {:ok, chosen} <- select(mode, qualified),
+         {:ok, chosen} <- select(mode, qualified, actor),
          {:ok, description} <- describe(chosen) do
       wording =
         case mode do
@@ -76,10 +76,11 @@ defmodule Core.Semantic.TemporalActivityRecall do
     end
   end
 
-  defp select(:latest, [latest | _]), do: {:ok, latest}
-  defp select(:earlier, [_latest, previous]), do: {:ok, previous}
-  defp select(:earlier, [_latest, _previous | _]), do: :not_applicable
-  defp select(_, _), do: :not_applicable
+  defp select(:latest, [latest | _], _actor), do: {:ok, latest}
+  defp select(:earlier, [_latest, previous], _actor), do: {:ok, previous}
+  defp select(:earlier, [_latest, _previous | _], actor),
+    do: {:ambiguous, :earlier, actor}
+  defp select(_, _, _), do: :not_applicable
 
   # The ledger is append-only and server-owned. Still validate the complete
   # compact witness before using it for a temporal answer.
