@@ -487,11 +487,18 @@ defmodule Brain.LIFG.RoleCompetition do
     |> Enum.filter(fn
       %{id: :progressive_lexical_gap_candidate,
         source: :core_syntax, span: {0, 6},
-        roles: roles, evidence: evidence}
-      when is_map(roles) and is_list(evidence) ->
+        roles: roles, evidence: evidence,
+        source_span_sha256: source_digest}
+      when is_map(roles) and is_list(evidence) and is_binary(source_digest) ->
         roles == @gap_roles and
           Enum.all?(@gap_evidence, &(&1 in evidence)) and
+          byte_size(source_digest) == 64 and
           Enum.sort(Map.keys(tokens)) == Enum.to_list(0..6) and
+          Enum.all?(0..6, &(is_binary(Map.get(tokens, &1)))) and
+          source_digest ==
+            (:crypto.hash(:sha256,
+              Enum.map_join(0..6, " ", &Map.get(tokens, &1)))
+            |> Base.encode16(case: :lower)) and
           Map.get(tokens, 2) == "is" and
           Map.get(tokens, 4) in ~w(on in under beside above below) and
           Map.get(tokens, 0) in ~w(a an the) and
