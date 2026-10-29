@@ -20,7 +20,8 @@ defmodule Core.Discourse.Ledger do
   """
   alias Core.Brain.WM.Comprehension, as: WMComprehension
   alias Core.Discourse.Ledger.Owner
-  alias Core.Semantic.{Composition, DiscourseComposition, TemporalSentence}
+  alias Core.Semantic.{Composition, DiscourseComposition, TemporalSentence,
+    TemporalClaimReconciliation, TemporalClarificationResolution}
   alias Core.Pipeline.Trace
 
   @max_query_bytes 256
@@ -164,7 +165,15 @@ defmodule Core.Discourse.Ledger do
   defp semantic_record(si) do
     case TemporalSentence.verified(si) do
       {:ok, meaning} -> temporal_claim_record(meaning)
-      :not_applicable -> ordinary_semantic_record(si)
+      :not_applicable ->
+        case TemporalClarificationResolution.verified(si) do
+          {:ok, meaning} -> temporal_resolution_record(meaning)
+          :not_applicable ->
+            case TemporalClaimReconciliation.verified(si) do
+              {:ok, meaning} -> temporal_request_record(meaning)
+              :not_applicable -> ordinary_semantic_record(si)
+            end
+        end
     end
   end
 
@@ -288,6 +297,68 @@ defmodule Core.Discourse.Ledger do
     %{kind: :uninterpreted, status: :no_verified_semantics,
       factual_authority?: false}
   end
+
+  # A conflict question becomes an explicit pending request, not a hidden
+  # dialogue-state assumption. Its report identifiers and proof fingerprints
+  # must match the unique independently revalidated candidate.
+  defp temporal_request_record(%{
+         conflict_evidence: %{
+           older_report: %{seq: old_seq, proof_sha256: old_sha},
+           newer_report: %{seq: new_seq, proof_sha256: new_sha},
+           contradiction_verified?: false,
+           factual_authority?: false
+         },
+         factual_authority?: false
+       }) do
+    %{
+      kind: :temporal_clarification_request,
+      status: :provisional,
+      older_report_seq: old_seq,
+      newer_report_seq: new_seq,
+      older_proof_sha256: old_sha,
+      newer_proof_sha256: new_sha,
+      provenance: :revalidated_temporal_claim_reconciliation,
+      verification: :conversation_context_only,
+      contradiction_verified?: false,
+      factual_authority?: false
+    }
+  end
+
+  defp temporal_request_record(_), do: uninterpreted_record()
+
+  # This is a separate correction-of-intent record. It never changes the
+  # source reports, their mathematical proofs, or event occurrence status.
+  defp temporal_resolution_record(%{
+         pending_request_seq: pending_seq,
+         conflict_pair: pair,
+         chosen_report_seq: chosen_seq,
+         chosen_claim: claim,
+         speaker_attributed?: true,
+         contradiction_verified?: false,
+         event_occurrence_verified?: false,
+         actual_event_chronology_verified?: false,
+         referent_identity_verified?: false,
+         factual_authority?: false
+       }) do
+    %{
+      kind: :temporal_clarification_resolution,
+      status: :provisional,
+      pending_request_seq: pending_seq,
+      conflict_pair: pair,
+      chosen_report_seq: chosen_seq,
+      chosen_claim: claim,
+      provenance: :revalidated_temporal_clarification_answer,
+      verification: :conversation_context_only,
+      speaker_attributed?: true,
+      contradiction_verified?: false,
+      event_occurrence_verified?: false,
+      actual_event_chronology_verified?: false,
+      referent_identity_verified?: false,
+      factual_authority?: false
+    }
+  end
+
+  defp temporal_resolution_record(_), do: uninterpreted_record()
 
   defp verified_nominal(si) do
     context = WMComprehension.context_from(si, Map.get(si, :comprehension) || %{})
