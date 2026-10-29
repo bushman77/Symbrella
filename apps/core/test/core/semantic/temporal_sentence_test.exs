@@ -122,6 +122,31 @@ defmodule Core.Semantic.TemporalSentenceTest do
     refute meaning.temporal_claim.external_chronology_verified?
   end
 
+  test "after fallback abstains without attested conjunction evidence" do
+    si = live_tied_after()
+    removed = %{si | active_cells:
+      Enum.reject(si.active_cells, fn cell ->
+        cell.norm == "after" and cell.pos == "conjunction"
+      end)}
+    assert TemporalSentence.build(removed) == nil
+
+    no_scores = %{si | lifg_choices:
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 7} = choice ->
+          Map.delete(choice, :candidate_probs)
+        choice -> choice
+      end)}
+    assert TemporalSentence.build(no_scores) == nil
+
+    zero_scores = %{si | lifg_choices:
+      Enum.map(si.lifg_choices, fn
+        %{token_index: 7} = choice ->
+          %{choice | candidate_probs: %{"after|conjunction|1" => 0.0}}
+        choice -> choice
+      end)}
+    assert TemporalSentence.build(zero_scores) == nil
+  end
+
   test "live alternatives require current dictionary witnesses" do
     si = live_style_input()
     without_verb = %{si | active_cells:
