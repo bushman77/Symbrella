@@ -83,12 +83,15 @@ defmodule Core.Semantic.ClarifiedEvent do
          :validated_original_provisional_frame,
          %{
            kind: :unresolved_progressive_predicate,
-           actor: actor, predicate: predicate,
-           position: position, location: location,
+           actor: original_actor, predicate: original_predicate,
+           position: original_position, location: original_location,
            factual_authority?: false,
            event_occurrence_verified?: false
          },
-         actor, predicate, position, location), do: true
+         actor, predicate, position, location)
+       when original_actor == actor and original_predicate == predicate and
+              original_position == position and original_location == location,
+       do: true
 
   defp valid_original_role_binding?(role_evidence, nil, _actor, _predicate,
                                     _position, _location)
