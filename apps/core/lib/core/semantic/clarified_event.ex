@@ -29,12 +29,18 @@ defmodule Core.Semantic.ClarifiedEvent do
            source_turn_sha256: source_digest,
            source_request_seq: request_seq,
            role_evidence: role_evidence,
+           source_provisional: original_provisional,
            status: :speaker_confirmed_spelling,
            source: :same_session_clarification,
            factual_authority?: false
          }} <- Ledger.confirmed_fuzzy_activity(session, text),
          true <- requested_actor == actor,
-         true <- role_evidence in [:attested_core_syntax_gap, :surface_clause_only],
+         true <- role_evidence in [
+           :validated_original_provisional_frame,
+           :attested_core_syntax_gap, :surface_clause_only
+         ],
+         true <- valid_original_role_binding?(role_evidence, original_provisional,
+           actor, original, position, location),
          true <- is_binary(original) and is_binary(proposed) and
                    original != proposed,
          true <- is_binary(position) and is_binary(location) and
@@ -50,6 +56,8 @@ defmodule Core.Semantic.ClarifiedEvent do
         aspect: :progressive,
         spatial: %{relation: position, location: location,
                    event_location_verified?: false},
+        original_interpretation: original_interpretation(role_evidence,
+          original_provisional),
         source_request_seq: request_seq,
         source_turn_sha256: source_digest,
         evidence: %{
@@ -57,7 +65,11 @@ defmodule Core.Semantic.ClarifiedEvent do
           speaker_clarification_verified?: true,
           question_role: :predicate,
           role_binding: role_evidence,
-          pre_lifg_gap_observed?: role_evidence == :attested_core_syntax_gap,
+          pre_lifg_gap_observed?: role_evidence in [
+            :attested_core_syntax_gap, :validated_original_provisional_frame
+          ],
+          original_semantic_frame_replayed?:
+            role_evidence == :validated_original_provisional_frame,
           event_occurrence_verified?: false
         },
         factual_authority?: false
@@ -66,6 +78,41 @@ defmodule Core.Semantic.ClarifiedEvent do
       _ -> :not_applicable
     end
   end
+
+  defp valid_original_role_binding?(
+         :validated_original_provisional_frame,
+         %{
+           kind: :unresolved_progressive_predicate,
+           actor: actor, predicate: predicate,
+           position: position, location: location,
+           factual_authority?: false,
+           event_occurrence_verified?: false
+         },
+         actor, predicate, position, location), do: true
+
+  defp valid_original_role_binding?(role_evidence, nil, _actor, _predicate,
+                                    _position, _location)
+       when role_evidence in [:attested_core_syntax_gap, :surface_clause_only],
+       do: true
+
+  defp valid_original_role_binding?(_, _, _, _, _, _), do: false
+
+  defp original_interpretation(:validated_original_provisional_frame,
+         %{source_span_sha256: digest,
+           kind: :unresolved_progressive_predicate,
+           event_occurrence_verified?: false,
+           factual_authority?: false}) do
+    %{
+      kind: :unresolved_progressive_predicate,
+      status: :provisional,
+      source_span_sha256: digest,
+      speaker_clarification_confirmed_at_source?: false,
+      event_occurrence_verified?: false,
+      factual_authority?: false
+    }
+  end
+
+  defp original_interpretation(_, _), do: nil
 
   def build(_, _), do: :not_applicable
 
