@@ -283,19 +283,8 @@ defmodule Core.Response.Memory do
 
         finish_reply(session_id, text_in, text, meta)
 
-      match?({_, _}, spatial_reply) ->
-        {text, spatial_meta} = spatial_reply
-
-        meta =
-          spatial_meta
-          |> Map.put(:session_id, session_id)
-          |> Map.put(:intent_original, intent0)
-          |> Map.put(:confidence, conf)
-
-        finish_reply(session_id, text_in, text, meta)
-
-      # A revalidated, speaker-attributed event frame supplies the activity
-      # role before an older owner-wide Hippocampal activity is considered.
+      # A revalidated, speaker-attributed event frame supplies the requested predicate or location
+      # role before older user-episode or spatial memories are considered.
       # The original utterance and lexical senses remain unchanged.
       match?({:ok, _, _}, clarified_event) ->
         {:ok, response, frame_meta} = clarified_event
@@ -307,6 +296,17 @@ defmodule Core.Response.Memory do
           |> Map.put(:confidence, conf)
 
         finish_reply(session_id, text_in, response, meta)
+
+      match?({_, _}, spatial_reply) ->
+        {text, spatial_meta} = spatial_reply
+
+        meta =
+          spatial_meta
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:intent_original, intent0)
+          |> Map.put(:confidence, conf)
+
+        finish_reply(session_id, text_in, text, meta)
 
       match?({_, _}, episodic_reply) ->
         {text, event_meta} = episodic_reply
