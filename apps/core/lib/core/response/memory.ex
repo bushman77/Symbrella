@@ -12,6 +12,7 @@ defmodule Core.Response.Memory do
   alias Core.Response.SpatialDialogue
   alias Core.Response.EpisodicMemory
   alias Core.Response.UserLexicalMemory
+  alias Core.Discourse.Ledger
   alias Core.Semantic.EpisodicProjection
 
   @memory_recall_event [:core, :response, :memory_recall]
@@ -146,6 +147,7 @@ defmodule Core.Response.Memory do
         semantic_context: semantic_context
       }) do
     clarified_event = Core.Semantic.ClarifiedEvent.answer(session_id, text_in)
+    pending_gap = Ledger.pending_unresolved_activity(session_id, text_in)
     conversation_recall = ConversationRecall.reply(text_in, session_id)
     spatial_reply = SpatialDialogue.reply(text_in, session_id)
     episodic_reply = EpisodicMemory.reply(text_in, session_id, semantic_context)
@@ -296,6 +298,29 @@ defmodule Core.Response.Memory do
           |> Map.put(:confidence, conf)
 
         finish_reply(session_id, text_in, response, meta)
+
+      # The newest same-session statement says this actor's action is
+      # unresolved. An older owner-wide episode (e.g. "sitting") must not
+      # answer as if it described the current sentence. Do not guess a
+      # corrected predicate; require speaker clarification.
+      match?({:ok, _}, pending_gap) -> 
+        {:ok, %{actor: actor, unresolved_predicate: term}} = pending_gap
+
+        text =
+          ~s|I haven't resolved what "#{term}" means in your latest description of the #{actor}. Could you clarify that word?|
+
+        finish_reply(session_id, text_in, text, %{
+          action: :clarify,
+          memory_source: :same_session_unresolved_predicate,
+          response_source: :symbolic_unresolved,
+          retrieval_found?: false,
+          semantic_verified?: false,
+          factual_authority?: false,
+          llm_called?: false,
+          session_id: session_id,
+          intent_original: intent0,
+          confidence: conf
+        })
 
       match?({_, _}, spatial_reply) ->
         {text, spatial_meta} = spatial_reply
