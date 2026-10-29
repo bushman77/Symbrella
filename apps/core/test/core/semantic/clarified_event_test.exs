@@ -122,6 +122,110 @@ defmodule Core.Semantic.ClarifiedEventTest do
       ClarifiedEvent.answer(sid, "Where is the bird?")
   end
 
+  defp remember_role_query(sid, text) do
+    {:ok, response, meta} = ClarifiedEvent.answer(sid, text)
+
+    Ledger.record(%{
+      source: :user, session_id: sid, sentence: text,
+      response_text: response, response_meta: meta, trace: []
+    }, discourse_ledger?: true)
+  end
+
+  test "multiple recorded, revalidated questions retain one corrected frame briefly", %{sid: sid} do
+    {request, resolution} = records()
+    record_pair(sid, request, resolution)
+
+    assert {:ok, immediate} = ClarifiedEvent.build(sid, "What is the bird doing?")
+    assert immediate.continuity_questions == 0
+    assert immediate.evidence.bounded_question_continuity? == false
+    remember_role_query(sid, "What is the bird doing?")
+
+    assert [%{kind: :clarified_event_query, requested_role: :predicate,
+      actor: "bird", factual_authority?: false} | _] = Ledger.entries(sid)
+
+    assert :not_applicable ==
+      Ledger.confirmed_fuzzy_activity(sid, "What is the bird doing?")
+
+    assert {:ok, location} = ClarifiedEvent.build(sid, "Where is the bird?")
+    assert location.continuity_questions == 1
+    assert location.evidence.bounded_question_continuity? == true
+    assert location.source_turn_sha256 == immediate.source_turn_sha256
+    assert location.predicate == immediate.predicate
+    assert location.spatial == immediate.spatial
+    assert location.factual_authority? == false
+    assert {:ok, "In your description, the bird is on the fence.", loc_meta} =
+      ClarifiedEvent.answer(sid, "Where is the bird?")
+    assert loc_meta.requested_role == :location
+
+    remember_role_query(sid, "Where is the bird?")
+    assert {:ok, later} = ClarifiedEvent.build(sid, "What is the bird flapping on?")
+    assert later.continuity_questions == 2
+    assert later.original_interpretation == immediate.original_interpretation
+
+    remember_role_query(sid, "What is the bird flapping on?")
+    assert {:ok, final} = ClarifiedEvent.build(sid, "Where is the bird?")
+    assert final.continuity_questions == 3
+    remember_role_query(sid, "Where is the bird?")
+
+    assert :not_applicable == ClarifiedEvent.build(sid, "What is the bird doing?")
+    assert :not_applicable == Ledger.confirmed_fuzzy_event(sid, "Where is the bird?")
+  end
+
+  test "a later statement or unrelated actor ends corrected-frame continuity", %{sid: sid} do
+    {request, resolution} = records()
+    record_pair(sid, request, resolution)
+
+    remember_role_query(sid, "What is the bird doing?")
+    assert {:ok, _} = ClarifiedEvent.build(sid, "Where is the bird?")
+
+    Ledger.record(%{
+      source: :user, session_id: sid, sentence: "The cat sleeps.",
+      trace: []
+    }, discourse_ledger?: true)
+    assert :not_applicable == ClarifiedEvent.build(sid, "Where is the bird?")
+
+    Ledger.clear(sid)
+    record_pair(sid, request, resolution)
+    remember_role_query(sid, "What is the bird doing?")
+    assert :not_applicable == ClarifiedEvent.build(sid, "Where is the cat?")
+    assert :not_applicable == ClarifiedEvent.build(sid <> "-other", "Where is the bird?")
+
+    Ledger.record(%{
+      source: :user, session_id: sid, sentence: "Where is the cat?",
+      trace: []
+    }, discourse_ledger?: true)
+    assert :not_applicable == ClarifiedEvent.build(sid, "Where is the bird?")
+  end
+
+  test "unselected and altered responses never extend the active corrected frame", %{sid: sid} do
+    {request, resolution} = records()
+    record_pair(sid, request, resolution)
+
+    {:ok, reply, meta} = ClarifiedEvent.answer(sid, "What is the bird doing?")
+
+    Ledger.record(%{
+      source: :user, session_id: sid, sentence: "What is the bird doing?",
+      response_text: "The bird is dancing.",
+      response_meta: meta, trace: []
+    }, discourse_ledger?: true)
+
+    refute match?(%{kind: :clarified_event_query}, hd(Ledger.entries(sid)))
+    assert :not_applicable == ClarifiedEvent.build(sid, "Where is the bird?")
+
+    Ledger.clear(sid)
+    record_pair(sid, request, resolution)
+
+    forged = Map.put(meta, :requested_role, :location)
+
+    Ledger.record(%{
+      source: :user, session_id: sid, sentence: "What is the bird doing?",
+      response_text: reply, response_meta: forged, trace: []
+    }, discourse_ledger?: true)
+
+    refute match?(%{kind: :clarified_event_query}, hd(Ledger.entries(sid)))
+    assert :not_applicable == ClarifiedEvent.build(sid, "Where is the bird?")
+  end
+
   test "replayed pre-LIFG syntax gap enriches provenance but not factual authority", %{sid: sid} do
     alias Core.SemanticInput
     alias Core.Syntax.Signatures
