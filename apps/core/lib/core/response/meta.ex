@@ -87,6 +87,7 @@ defmodule Core.Response.Meta do
     |> maybe_put_symbolic_realization(reflection)
     |> maybe_put_lexical_definition(reflection)
     |> maybe_put_open_question_boundary(reflection)
+    |> maybe_put_news_discovery(reflection)
   end
 
   defp reflection_summary(_), do: nil
@@ -123,6 +124,20 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_open_question_boundary(summary, _), do: summary
+
+  # News discovery reports bounded retrieval status only. Raw headlines and
+  # query strings belong in source evidence, not in Explain metadata.
+  defp maybe_put_news_discovery(summary,
+         %{status: :symbolic_news_discovery} = reflection) do
+    Map.merge(summary, Map.take(reflection, [
+      :outcome, :requested_operation, :provenance, :retrieval_status,
+      :retrieval_resolution, :source_count, :content_scope,
+      :article_contents_verified?, :external_facts_verified?,
+      :factual_claims?, :llm_called?
+    ]))
+  end
+
+  defp maybe_put_news_discovery(summary, _), do: summary
 
   # Only the requested word and bounded lexical counts leave the response
   # planner, not the raw dictionary slate or untrusted gloss text.
