@@ -264,7 +264,7 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
              })
 
     assert latest ==
-             "You most recently described a bird flying into a tree. This does not verify current activity, arrival, or that it is the same individual."
+             "Among the reports I can interpret, the latest describes a bird flying into a tree. This does not verify current activity, arrival, or that it is the same individual."
     assert latest_meta.requested_temporal_role == :latest
     assert latest_meta.report_seq == 2
     assert latest_meta.event_occurrence_verified? == false
