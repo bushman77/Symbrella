@@ -152,11 +152,11 @@ defmodule Core.Semantic.TemporalSentence do
     end
   end
 
-  # Each role is backed by current LIFG and an exact dictionary row. Only
-  # auxiliaries and progressive predicates may use RoleWitness's uniquely
-  # scored, independently attested alternatives. Predicate alternatives must
-  # satisfy the existing participle morphology guard. Other roles require
-  # the selected witness, including the temporal connective.
+  # Each role is backed by current LIFG and an exact dictionary row.
+  # Auxiliary and progressive predicate alternatives require a unique scored
+  # winner; the explicit temporal connective can instead preserve multiple
+  # attested conjunction senses in a POS-only witness. That witness does NOT
+  # resolve the exact lexical sense. All other roles require the selected POS.
   defp lexical_witnesses(si) do
     roles = [
       {0, :subject_determiner, ["determiner"]},
@@ -179,6 +179,12 @@ defmodule Core.Semantic.TemporalSentence do
     Enum.reduce_while(roles, {:ok, []}, fn {index, role, pos}, {:ok, acc} ->
       case RoleWitness.resolve(si, role, index, pos) do
         {:ok, %{selection_basis: :selected} = witness} ->
+          {:cont, {:ok, [witness | acc]}}
+        {:ok, %{selection_basis: :construction_pos_only,
+                pos: "conjunction", sense_id: nil,
+                attested_sense_ids: [_ | _],
+                attested_candidate_scores: [_ | _]} = witness}
+            when role == :temporal_connective and index == 7 ->
           {:cont, {:ok, [witness | acc]}}
         {:ok, %{selection_basis: :construction_alternative,
                 candidate_score: score} = witness}
