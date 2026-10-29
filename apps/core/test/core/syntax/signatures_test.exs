@@ -76,6 +76,9 @@ defmodule Core.Syntax.SignaturesTest do
       Enum.filter(signatures, &(&1.id == :progressive_lexical_gap_candidate))
 
     assert :unresolved_progressive_predicate in gap.evidence
+    assert gap.source_span_sha256 ==
+      (:crypto.hash(:sha256, "the bird is flarping on the fence")
+       |> Base.encode16(case: :lower))
     refute :attested_present_participle in gap.evidence
 
     # No candidate can manufacture a missing dictionary verb cell.
