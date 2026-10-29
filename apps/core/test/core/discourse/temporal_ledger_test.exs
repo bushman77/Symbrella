@@ -83,6 +83,35 @@ defmodule Core.Discourse.TemporalLedgerTest do
         %{action: :sleep, relation: :under, landmark: :tree})
   end
 
+  test "forged, stale and missing lexical evidence cannot enter temporal memory",
+       %{sid: sid} do
+    valid = claim(sid, @before_words)
+    assert {:ok, _} = TemporalSentence.verified(valid)
+
+    forged = put_in(valid, [Access.key!(:sentence_meaning),
+      Access.key!(:temporal_claim), Access.key!(:external_chronology_verified?)],
+      true)
+    assert TemporalSentence.verified(forged) == :not_applicable
+    Ledger.record(forged)
+
+    stale = %{valid | sentence:
+      "The bird is sitting on the fence after the cat is sleeping under the tree."}
+    assert TemporalSentence.verified(stale) == :not_applicable
+    Ledger.record(stale)
+
+    no_conjunction = %{valid | active_cells:
+      Enum.reject(valid.active_cells, &(&1.norm == "before"))}
+    assert TemporalSentence.verified(no_conjunction) == :not_applicable
+    Ledger.record(no_conjunction)
+
+    assert Enum.map(Ledger.entries(sid), & &1.kind) ==
+      [:uninterpreted, :uninterpreted, :uninterpreted]
+
+    ignored = %{valid | source: :assistant}
+    Ledger.record(ignored)
+    assert length(Ledger.entries(sid)) == 3
+  end
+
   test "memory is session scoped, remains bounded to a turn and survives other reports",
        %{sid: sid, other: other} do
     claim(sid, @after_words) |> Ledger.record()
