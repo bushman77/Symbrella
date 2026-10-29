@@ -29,6 +29,26 @@ defmodule Core.Semantic.TemporalSentenceTest do
     }
   end
 
+  defp live_style_input(words \\ @before_words) do
+    si = input(words)
+    winners = %{2 => "is|auxiliary|0", 3 => "sitting|adjective|1",
+                10 => "is|auxiliary|0", 11 => "sleeping|adjective|1"}
+    choices = Enum.map(si.lifg_choices, fn choice ->
+      case Map.fetch(winners, choice.token_index) do
+        {:ok, winner} ->
+          choice
+          |> Map.put(:id, winner)
+          |> Map.put(:candidate_probs, %{choice.id => 0.7})
+        :error -> choice
+      end
+    end)
+    tokens = Enum.map(si.tokens, fn
+      %{index: 14} = token -> %{token | phrase: token.phrase <> "."}
+      token -> token
+    end)
+    %{si | tokens: tokens, lifg_choices: choices, source: :prod}
+  end
+
   test "a witnessed before clause composes a speaker-attributed typed temporal meaning" do
     si = input() |> SentenceMeaning.attach()
 
