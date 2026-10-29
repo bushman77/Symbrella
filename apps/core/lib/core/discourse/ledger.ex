@@ -531,6 +531,24 @@ defmodule Core.Discourse.Ledger do
     sentence = Map.get(si, :sentence)
     comprehension = Map.get(si, :comprehension, %{})
     unresolved = if is_map(comprehension), do: Map.get(comprehension, :unresolved, []), else: []
+    # The selected lexical repair may identify an unresolved predicate that
+    # a weak-choice comprehension summary omitted. Independently revalidate
+    # its source semantic slot before admitting it as a clarification request.
+    selected_unresolved =
+      case reflection do
+        %{status: :attention_comprehension_repair,
+          provenance: :revalidated_provisional_predicate_gap,
+          unresolved_term: word} when is_binary(word) ->
+          case ProvisionalInterpretation.verified(si) do
+            {:ok, %{kind: :unresolved_progressive_predicate,
+                    target: %{lemma: ^word}, factual_authority?: false}} ->
+              [word]
+
+            _ -> []
+          end
+
+        _ -> List.wrap(unresolved)
+      end
 
     cond do
       not is_map(meta) or
@@ -543,7 +561,7 @@ defmodule Core.Discourse.Ledger do
         nil
 
       match?(%{status: :attention_comprehension_repair}, reflection) ->
-        Enum.find_value(List.wrap(unresolved), fn term ->
+        Enum.find_value(selected_unresolved, fn term ->
           if is_binary(term) do
             case Fuzzy.suggest_word(term, sentence) do
               %{original: original, replacement: proposed, status: :hypothesis_only}
