@@ -86,4 +86,150 @@ defmodule Core.Response.AttentionFallbackTest do
     assert :not_applicable ==
       AttentionFallback.generate(si.sentence, features, action, si)
   end
+
+  defp repair_si(session, sentence, opts \\ []) do
+    verified? = Keyword.get(opts, :verified?, true)
+    recognized? = Keyword.get(opts, :recognized?, false)
+    uncertain = Keyword.get(opts, :uncertain, ["flarped", "blorp"])
+
+    lexical =
+      if verified? do
+        [%{dictionary_verified?: true, id: "bird|noun|1",
+          phrase: "bird", definition: "an animal", context_score: 0.9}]
+      else
+        []
+      end
+
+    WMComprehension.store(%{
+      source: :user,
+      session_id: session,
+      sentence: sentence,
+      intent: :statement,
+      lexical_constructions: lexical,
+      symbolic_frame: if(recognized?, do: %{subject: "bird"}, else: %{}),
+      comprehension: %{
+        recognized_topics: [],
+        understood: if(verified?, do: ["bird"], else: []),
+        uncertain: uncertain,
+        degraded?: true
+      },
+      trace: []
+    }, comprehension_wm?: true)
+  end
+
+  test "unknown term and verified lexical anchor yield a targeted partial-comprehension repair" do
+    sid = "attention-repair-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "The bird flarped beside the blorp."
+    si = repair_si(sid, sentence)
+
+    assert si.wm_context.attention.goal_terms == ["bird", "flarped", "blorp"]
+    assert si.wm_context.attention.salience > 0.0
+
+    assert {:ok, reply, metadata} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, si)
+
+    assert reply ==
+      "I understand \"bird\", but I'm not sure how you're using \"flarped\" here. Could you clarify that part?"
+    assert metadata.status == :attention_comprehension_repair
+    assert metadata.recognized_level == :dictionary_verified
+    assert metadata.unresolved_term == "flarped"
+    assert metadata.attention_selected? == true
+    assert metadata.provenance == :admitted_same_session_comprehension
+    assert metadata.evidence_level == :conversation_context_only
+    assert metadata.factual_claims? == false
+    assert metadata.llm_called? == false
+
+    {_tone, planned, meta} =
+      Response.plan(Map.merge(si, %{text: sentence, confidence: 0.7}), %{})
+    assert planned == reply
+    assert meta.response_source == :wm_attention_fallback
+    assert meta.curiosity_probe == nil
+
+    attached = Core.Response.Attach.maybe_build_response_plan(
+      Map.merge(si, %{confidence: 0.7}), [])
+    assert attached.response_text == reply
+    assert attached.response_meta.response_source == :wm_attention_fallback
+  end
+
+  test "recognized focus is distinguished from verified lexical understanding" do
+    sid = "attention-recognized-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "The bird flarped."
+    si = repair_si(sid, sentence, verified?: false, recognized?: true,
+      uncertain: ["flarped"])
+
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, si)
+
+    assert reply ==
+      "I'm following \"bird\", but I'm not sure how you're using \"flarped\" here. Could you clarify that part?"
+    assert meta.recognized_level == :recognized_focus
+    assert meta.factual_claims? == false
+  end
+
+  test "an unresolved word can be selected without inventing a known referent" do
+    sid = "attention-unresolved-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "Flarped."
+    si = repair_si(sid, sentence, verified?: false,
+      uncertain: ["Flarped"])
+
+    assert si.wm_context.entities == []
+    assert si.wm_context.attention.goal_terms == ["Flarped"]
+
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :unknown}, %{action: :ask_first}, si)
+
+    assert reply ==
+      "I'm not sure how you're using \"Flarped\" here. Could you clarify what you mean?"
+    assert meta.recognized_level == :none
+    assert meta.recognized_term == nil
+    assert meta.unresolved_term == "Flarped"
+  end
+
+  test "repair refuses a forged unknown, missing witness, and already-interpreted meaning" do
+    sid = "attention-boundary-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Brain.defocus(WMComprehension.frame_id(sid)) end)
+    sentence = "The bird flarped."
+    si = repair_si(sid, sentence, uncertain: ["flarped"])
+
+    # An unknown must occur on the current surface, not only in cached WM.
+    ungrounded = %{si | sentence: "The bird arrived."}
+    assert :not_applicable ==
+      AttentionFallback.generate(ungrounded.sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, ungrounded)
+
+    # A dictionary-verified lexical witness is needed before using
+    # the stronger "I understand" wording.
+    unverified = Map.put(si, :lexical_constructions, [])
+    assert {:ok, reply, meta} =
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, unverified)
+    refute String.contains?(reply, "I understand")
+    assert meta.recognized_level == :none
+
+    completed = Map.put(si, :sentence_meaning, %{kind: :explicit_temporal_report})
+    assert :not_applicable ==
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :ask_first}, completed)
+
+    assert :not_applicable ==
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :high, intent: :statement},
+        %{action: :ask_first}, si)
+    assert :not_applicable ==
+      AttentionFallback.generate(sentence,
+        %{risk_bucket: :low, intent: :statement},
+        %{action: :safe_redirect}, si)
+  end
+
 end
