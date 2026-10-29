@@ -506,3 +506,49 @@ mix test apps/core/test/core/semantic/clarified_event_test.exs \
   apps/core/test/core/response/episodic_memory_test.exs \
   apps/core/test/core/semantic/participant_questions_test.exs
 \`\`\`
+
+
+## Surgery 7 — bounded multi-turn continuity for a corrected semantic frame
+
+The original same-session correction pair can now be reused **only**
+across a short chain of previously answered, question-directed
+projections. \`Core.Discourse.Ledger\` records a compact
+\`:clarified_event_query\` marker after an actual answer selected from
+\`Core.Semantic.ClarifiedEvent\`, if and only if the recorded
+\`response_text\`, \`response_meta\`, semantic frame, requested role and
+replayed event answer all agree. No question transcript, answer text,
+arbitrary reasoning trace, lexical sense or external fact is stored
+in the marker.
+
+\`confirmed_fuzzy_event/2\` may scan at most three consecutive,
+newest-first \`:clarified_event_query\` records and then must find
+the original immediately adjacent resolution/request pair.
+Each marker must belong to the same actor and the exact source
+request sequence and fingerprint, with consecutive ledger sequence
+numbers and an audited \`:role_projected\` provenance. A new
+statement, question about a different actor, unsupported record,
+another clarification or excess queries terminates this *active*
+recall path. No unbounded or owner-wide transcript scan is used.
+The old \`confirmed_fuzzy_activity/2\` compatibility API retains
+its immediate-pair requirement.
+
+The semantic frame records \`:continuity_questions\` and
+\`frame.evidence.bounded_question_continuity?\` as provenance
+metadata. The natural answer is still speaker-attributed, the
+lexical sense remains unverified, and the event occurrence is
+**not independently verified**.
+
+This is deliberately not general contradiction recognition:
+an intervening assertion **blocks** reuse, even when unrelated,
+because it might change the described state. A later milestone
+can adjudicate explicit updates, conflicts and referents with
+verified structural evidence.
+
+Focused regression:
+
+\`\`\`bash
+mix test apps/core/test/core/semantic/clarified_event_test.exs \
+  apps/core/test/core/response/attention_fallback_test.exs \
+  apps/core/test/core/response/episodic_memory_test.exs \
+  apps/core/test/core/semantic/participant_questions_test.exs
+\`\`\`
