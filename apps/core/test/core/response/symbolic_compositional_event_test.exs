@@ -178,6 +178,56 @@ defmodule Core.Response.SymbolicCompositionalEventTest do
     si
   end
 
+  test "39 complete pipeline event transitions cover each actor and legal action-relation pair" do
+    relations =
+      for verb <- ~w(sitting sleeping),
+          preposition <- ~w(on in under beside above below),
+          do: {verb, preposition}
+
+    relations = relations ++ [{"flying", "into"}]
+    landmarks = ~w(fence tree table)
+
+    for actor <- ~w(bird cat dog),
+        {{verb, preposition}, index} <- Enum.with_index(relations) do
+      landmark = Enum.at(landmarks, rem(index, length(landmarks)))
+      session =
+        "pipeline-matrix-#{actor}-#{verb}-#{preposition}-#{landmark}-" <>
+          Integer.to_string(System.unique_integer([:positive]))
+
+      try do
+        record_proved_report(session, actor, "sitting", "on", "fence")
+        record_proved_report(session, actor, verb, preposition, landmark)
+
+        assert [%{kind: :reported_progressive_event, action: action, seq: 2},
+                %{kind: :reported_progressive_event, action: :sit, seq: 1}] =
+                 Ledger.entries(session)
+
+        assert action in [:sit, :sleep, :fly]
+
+        assert {:ok, current, meta} =
+                 Core.Semantic.TemporalActivityRecall.reply(
+                   session, "What is the #{actor} doing now?"
+                 )
+
+        assert current =~
+                 "a #{actor} #{verb} #{preposition} a #{landmark}"
+        assert meta.report_seq == 2
+        assert meta.event_occurrence_verified? == false
+
+        assert {:ok, previous, old_meta} =
+                 Core.Semantic.TemporalActivityRecall.reply(
+                   session, "What was the #{actor} doing?"
+                 )
+
+        assert previous =~ "a #{actor} sitting on a fence"
+        assert old_meta.report_seq == 1
+        assert old_meta.same_actor_identity_verified? == false
+      after
+        Ledger.clear(session)
+      end
+    end
+  end
+
   test "two proved activity reports answer earlier versus latest without asserting identity" do
     session = "temporal-bird-#{System.unique_integer([:positive])}"
     on_exit(fn -> Ledger.clear(session) end)
