@@ -227,15 +227,21 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
         initialisms =
           Regex.replace(~r/\b([A-Z])\.([A-Z])\./u, topic, "\\1\\2")
 
-        names =
-          Regex.scan(
-            ~r/\b(?:[A-Z]{2,}|[A-Z][\p{Ll}]{2,}|[\p{Ll}]{3,}(?:ian|can|ese|ish))\b/u,
-            initialisms
-          )
+        # Users routinely type country/actor names in lowercase. Require
+        # two non-generic subject tokens instead of two capitalized names.
+        # They are search hints only, not verified identities.
+        parties =
+          initialisms
+          |> then(&Regex.scan(~r/[\p{L}\p{N}]+/u, &1))
           |> List.flatten()
           |> Enum.map(&String.downcase/1)
-          |> Enum.reject(&(&1 in ["war", "conflict", "hostilities",
-                                 "fighting", "ceasefire", "the", "between"]))
+          |> Enum.reject(&(&1 in [
+            "the", "a", "an", "between", "with", "and", "versus", "vs",
+            "of", "about", "on", "in", "over", "is", "was", "are", "were",
+            "war", "conflict", "hostilities", "fighting", "ceasefire",
+            "ongoing", "current", "currently", "possible", "potential",
+            "recent", "latest", "new", "military", "violent", "civil"
+          ]))
           |> Enum.uniq()
 
         conflict? =
@@ -251,7 +257,7 @@ defmodule Core.Tools.WebRetrieval.RequestRouter do
             topic
           )
 
-        if conflict? and public? and length(names) >= 2 do
+        if conflict? and public? and length(parties) >= 2 do
           nonempty(topic)
         end
 
