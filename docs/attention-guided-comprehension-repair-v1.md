@@ -177,3 +177,41 @@ To validate on the Elixir runtime:
 mix test apps/core/test/core/text/fuzzy_test.exs \
   apps/core/test/core/response/attention_fallback_test.exs
 \`\`\`
+
+
+## Immediate fuzzy confirmation V1
+
+LiveView verified that “The bird is flarping on the fence.” could ask
+“Did you mean ‘flapping’?”, but a following “yes flapping” was previously
+misclassified as fresh lexical uncertainty. This was not a fuzzy-candidate
+failure: it was a missing **pending clarification state**.
+
+After an actual low-risk \`wm_attention_fallback\` response is finalized,
+\`Core.Discourse.Ledger.record/2\` now admits a bounded
+\`:fuzzy_clarification_request\` record only if the response visibly contains
+the corresponding “Did you mean …?” question and the current SI still
+revalidates the candidate. It retains original and proposed tokens, a hash
+of the source sentence, session sequence and timestamp; never the full
+source utterance or a validated dictionary sense.
+
+\`Ledger.pending_fuzzy_confirmation/2\` admits an explicit “yes”, “yes
+flapping”, or similarly bounded affirmative **only when** that request is
+the latest ledger record in the same session and less than five minutes
+old. \`AttentionFallback\` handles this ahead of ordinary lexical-gap
+reporting, with a provisional speaker-intent acknowledgment. The finalized
+confirmation is itself stored as
+\`:fuzzy_clarification_resolution\` so the question cannot be answered
+twice. Unmatched replies, interrupted conversations, stale requests,
+unknown sessions, and negative answers abstain.
+
+This does not modify the source sentence, rerun a corrected semantic parse,
+assert event occurrence, or write a learned dictionary definition or
+synaptic correction. Those are separate future capabilities that need
+independent verification and explicit user intent.
+
+Focused regression command:
+
+\`\`\`bash
+mix test apps/core/test/core/response/attention_fallback_test.exs \
+  apps/core/test/core/text/fuzzy_test.exs
+\`\`\`
