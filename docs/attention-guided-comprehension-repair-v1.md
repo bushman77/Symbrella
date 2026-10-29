@@ -106,3 +106,45 @@ The suite exercises WM admission from comprehension-only lexical goals,
 verified-vs-recognized wording, unknown-only repair, live response planner
 integration, stale/safety exclusions and unchanged legacy focused-topic
 continuation.
+
+
+## 2026-10-29: evidenced parts versus genuinely unknown parts
+
+The first live test of a bird/fence/cat/tree report returned a weak
+attention continuation about `sleeping`. The diagnostic snapshot reported:
+
+- Working memory admitted one session frame (salience 1.0) with goals such
+  as `bird`, `sitting`, `before`, `cat`;
+- 7 weak LIFG decisions and 16 low-confidence decisions;
+- structural competition `:no_complete_candidate`;
+- the general composition stage `:no_admissible_composition`;
+- intent classification keyword `sleeping` and domain `:health_sleep`.
+
+These observations are not proof that `sleeping` was the subject of the
+sentence. The general composition stage is also separate from the
+closed, proof-revalidating `Core.Semantic.TemporalSentence` path.
+
+The response fallback now distinguishes three evidence levels:
+
+1. **Reverified temporal speaker report.** `TemporalSentence.verified/1`
+   replays the two event properties and connective. The fallback describes
+   the *reported* bird/cat order, then names what is still unresolved
+   (exact dictionary senses, referent identities, event occurrence, and
+   actual real-world chronology). It does **not** suggest the temporal
+   connective is unknown, or assert the events happened.
+2. **Actually unresolved lexical term.** A specific clarification requires
+   `Comprehension.Summary.unresolved`, not merely `:uncertain`. The
+   unresolved list is carried into admitted session WM and rechecked against
+   the current SI, sentence fingerprint, and surface token.
+3. **Weak lexical senses without missing vocabulary.** A generic report
+   identifies at most three surface terms with uncertain sense selection.
+   No clarification about the meaning of familiar words is demanded.
+   Stronger `I understand ...` wording additionally requires a
+   current-turn dictionary-verified `:lexical_constructions` witness.
+
+If none applies, the existing topic-attention continuation or guarded
+unavailable response remains. The LLM is not invoked; no word senses,
+synapses, database rows, or beliefs are modified.
+
+The diagnostics still do not establish that the complete chat response
+will work until a user pulls, compiles, runs tests, and exercises LiveView.
