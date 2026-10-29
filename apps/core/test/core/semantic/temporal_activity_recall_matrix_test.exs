@@ -165,6 +165,27 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
           assert meta.same_actor_identity_verified? == false
         end
 
+        for question <- [
+          "What was the #{actor} doing first?",
+          "What did the #{actor} do first?"
+        ] do
+          assert_report(session, question, :first, previous)
+        end
+
+        for question <- [
+          "What was the #{actor} doing last?",
+          "What did the #{actor} do last?"
+        ] do
+          assert_report(session, question, :latest, latest)
+        end
+
+        assert {:ok, first_location, first_meta} =
+          TemporalActivityRecall.reply(session, "Where was the #{actor} first?")
+        assert first_location =~ "a #{actor} on a fence"
+        assert first_location =~ "first interpretable description"
+        assert first_meta.requested_temporal_role == :first
+        assert first_meta.requested_slot == :location
+
         # Anaphora is licensed only when the entire retained event record
         # has one actor KIND, and never claims real-world identity.
         for question <- [
@@ -398,6 +419,27 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
     assert :not_applicable ==
       TemporalActivityRecall.reply(session <> "-other",
         "Did I describe the bird doing something different?")
+  end
+
+  test "first report remains selectable among three descriptions when earlier is ambiguous" do
+    session = "first-multi-#{System.unique_integer([:positive])}"
+    on_exit(fn -> Ledger.clear(session) end)
+    record_proved!(session, "bird", "sitting", "on", "fence")
+    record_proved!(session, "bird", "sleeping", "under", "table")
+    record_proved!(session, "cat", "sitting", "beside", "tree")
+    record_proved!(session, "bird", "flying", "into", "tree")
+
+    assert_report(session, "What did the bird do first?", :first,
+      "a bird sitting on a fence")
+    assert_report(session, "What did the bird do last?", :latest,
+      "a bird flying into a tree")
+    assert_report(session, "What was the cat doing first?", :first,
+      "a cat sitting beside a tree")
+
+    assert {:ok, question, meta} =
+      TemporalActivityRecall.reply(session, "What was the bird doing?")
+    assert question =~ "several earlier descriptions"
+    assert meta.retrieval_found? == false
   end
 
   test "mixed actor kinds make it ambiguous instead of choosing latest mention" do
