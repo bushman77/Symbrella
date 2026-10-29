@@ -13,6 +13,7 @@ defmodule Core.Semantic.SentenceMeaning do
   alias Core.Pipeline.Trace
   alias Core.Semantic.DiscourseComposition
   alias Core.Semantic.EpisodicProjection
+  alias Core.Semantic.TemporalEventComposition
 
   @max_topic_tokens 16
 
@@ -77,6 +78,7 @@ defmodule Core.Semantic.SentenceMeaning do
 
     base =
       definition_request(si) ||
+        TemporalEventComposition.question(si) ||
         question || object_question(si, sentence, frames, constituents, tokens) ||
         participant_meaning(si, sentence) ||
         DiscourseComposition.build(si) ||
