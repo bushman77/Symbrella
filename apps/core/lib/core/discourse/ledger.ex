@@ -833,6 +833,30 @@ defmodule Core.Discourse.Ledger do
           _ -> core
         end
 
+      {{:ok, %{kind: :progressive_event_property,
+               status: :derived, quantifier_applied?: false,
+               factual_authority?: false,
+               event_semantics: %{
+                 aspect: :progressive, predicate: predicate,
+                 actor: %{kind: actor, referent: :unresolved},
+                 spatial: %{relation: relation, landmark_kind: landmark,
+                            reading: reading, arrival: :not_established},
+                 event_existence: :not_asserted
+               }} = proof}, _} ->
+        # Preserve the independently replayed typed event PROPERTY in report
+        # order. This is a speaker-attributed description, not an assertion
+        # that an event occurred or that repeated actor kinds share identity.
+        Map.merge(core, %{
+          kind: :reported_progressive_event, status: :provisional,
+          actor_kind: actor, action: predicate, relation: relation,
+          landmark: landmark, reading: reading, arrival: :not_established,
+          typed_proof_sha256: proof_hash(proof.result),
+          event_existence: :not_asserted, referent_verified?: false,
+          event_occurrence_verified?: false,
+          provenance: :revalidated_event_composition,
+          verification: :conversation_context_only
+        })
+
       {_, {:ok, %{kind: :anaphoric_spatial_report,
                   factual_authority?: false,
                   compositional_evidence: %{
