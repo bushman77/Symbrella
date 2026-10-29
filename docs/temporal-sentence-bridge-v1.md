@@ -53,9 +53,15 @@ lexical witnesses and the original sentence before being trusted.
   is admitted through attested POS and fixed construction meaning.
 - Unsupported connectives, missing POS/morphology, altered roles,
   questions, multiword gaps, extra clauses and ambiguous pronouns fail closed.
-- No temporal claim is yet persisted to the Discourse Ledger, and this
-  bridge does not yet generate a native response. Those remain separate,
-  evidence-gated next increments.
+- Proof-qualified, speaker-attributed temporal claims are now recorded
+  in the existing session-scoped Discourse Ledger. Each record stores only
+  both closed event descriptors, a normal-form proof fingerprint and
+  uncertainty flags. It does not store the original sentence or event
+  occurrence as fact. Ledger sequence numbers continue to represent report
+  order, independently of event-time claims.
+- Native response generation and cross-turn retrieval of those temporal
+  claims are not yet implemented; they remain separate, evidence-gated
+  next increments.
 - This first version uses RoleWitness on LIFG results. It does not assert
   that ATL has independently validated a complete temporal constituent.
 
@@ -76,5 +82,6 @@ meaning.compositional_evidence, and meaning.temporal_claim.
 ## Next step
 
 Add a general structural-temporal signature and ATL constituent proof,
-then bounded discourse persistence and native question/response realization.
-Do not infer event-time order from report order.
+then evidence-gated temporal-claim recall and native response realization.
+Keep speaker-claimed event order separate from ledger report order; do not
+infer real-world event occurrence from either.
