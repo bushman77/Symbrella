@@ -426,7 +426,7 @@ defmodule Core.Response.AttentionFallbackTest do
         %{action: :answer}, si)
 
     assert reply ==
-      ~s|I can identify the words "bird", "sitting", and "before", but the specific senses of "bird", "sitting", and "before" are still uncertain, and I haven't established the full relationship you're describing.|
+      ~s|I can identify "bird", "sitting", and "before" as words in your sentence, but I haven't resolved their exact senses or the full relationship you're describing.|
     assert meta.status == :attention_lexical_gap_report
     assert meta.known_level == :surface_terms_only
     assert meta.uncertain_lexical_parts == ["bird", "sitting", "before"]
