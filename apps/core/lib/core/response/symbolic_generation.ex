@@ -24,23 +24,31 @@ defmodule Core.Response.SymbolicGeneration do
       when is_binary(user_text) and is_map(si) and
              intent in @social_intents and action in [:answer, :offer_options, :act_first] do
     case maybe_realize_temporal_report_order(user_text, si) do
-      {:ok, _, _} = temporal -> temporal
+      {:ok, _, _} = temporal ->
+        temporal
+
       :not_applicable ->
         case social_realization(user_text, si) do
-          {:ok, _, _} = realized -> realized
+          {:ok, _, _} = realized ->
+            realized
+
           :not_applicable ->
             case maybe_realize_compositional_nominal(user_text, intent, si) do
-          {:ok, _, _} = nominal -> nominal
-          :not_applicable ->
-            case maybe_realize_anaphoric_spatial(user_text, intent, si) do
-              {:ok, _, _} = anaphoric -> anaphoric
+              {:ok, _, _} = nominal ->
+                nominal
+
               :not_applicable ->
-                case maybe_realize_compositional_event(user_text, intent, si) do
-                  {:ok, _, _} = event -> event
-                  :not_applicable -> maybe_realize_report(user_text, intent, si)
+                case maybe_realize_anaphoric_spatial(user_text, intent, si) do
+                  {:ok, _, _} = anaphoric ->
+                    anaphoric
+
+                  :not_applicable ->
+                    case maybe_realize_compositional_event(user_text, intent, si) do
+                      {:ok, _, _} = event -> event
+                      :not_applicable -> maybe_realize_report(user_text, intent, si)
+                    end
                 end
             end
-        end
         end
     end
   end
@@ -142,8 +150,7 @@ defmodule Core.Response.SymbolicGeneration do
              factual_authority?: false
            }}} <- Core.Semantic.TemporalEventComposition.verified(si),
          %{head: noun, modifiers: [first, second]} <- nominal_words(surface),
-         {:ok, noun_word} <- Map.fetch(@nominal_nouns, String.to_existing_atom(noun)),
-         ^noun_word <- noun,
+         true <- noun in ["bird", "cat", "dog"],
          true <- first in ["small", "black", "white"] and
                    second in ["small", "black", "white"],
          ^surface <- Enum.join([first, second, noun], " "),
