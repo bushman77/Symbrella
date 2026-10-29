@@ -17,12 +17,12 @@ defmodule Core.Semantic.TemporalActivityRecall do
   alias Core.Semantic.Composition.Lexical
 
   # Bounded grammatical paraphrases. These select report roles, not facts.
-  @progressive_question ~r/\A\s*what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*\??\s*\z/iu
-  @contracted_question ~r/\A\s*what['’]s\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently))?\s*\??\s*\z/iu
-  @earlier_do_question ~r/\A\s*what\s+did\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+do\s+(?:earlier|before|previously)\s*\??\s*\z/iu
-  @where_question ~r/\A\s*where\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*\??\s*\z/iu
-  @where_contracted ~r/\A\s*where['’]s\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently))?\s*\??\s*\z/iu
-  @activity_report_question ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*\??\s*\z/iu
+  @progressive_question ~r/\A\s*what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @contracted_question ~r/\A\s*what['’]s\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
+  @earlier_do_question ~r/\A\s*what\s+did\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+do\s+(?:earlier|before|previously)\s*[?.]?\s*\z/iu
+  @where_question ~r/\A\s*where\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
+  @where_contracted ~r/\A\s*where['’]s\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently))?\s*[?.]?\s*\z/iu
+  @activity_report_question ~r/\A\s*(?:tell\s+me|can\s+you\s+tell\s+me)\s+what\s+(?<aux>is|was)\s+(?:the|a|an)\s+(?<actor>[\p{L}][\p{L}\p{M}'-]{0,39})\s+doing(?:\s+(?<time>right\s+now|at\s+the\s+moment|now|currently|earlier|before|previously))?\s*[?.]?\s*\z/iu
   @actions %{sit: "sitting", sleep: "sleeping", fly: "flying"}
   @relations %{on: "on", in: "in", under: "under", beside: "beside",
                above: "above", below: "below", into: "into"}
