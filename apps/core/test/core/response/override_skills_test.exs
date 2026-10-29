@@ -87,55 +87,40 @@ defmodule Core.Response.OverrideSkillsTest do
     refute text =~ "provide more context"
   end
 
-  test "short recognizable conflict topic offers likely interpretation" do
-    {decision, skill} =
+  test "bare conflict topics are not answered by hardcoded geopolitical replies" do
+    assert {@decision, nil} =
       OverrideSkills.apply(
         %{intent: :unknown, text: "the US Iran war"},
         @decision,
         %{guardrail?: false}
       )
-
-    text = OverrideSkills.deterministic_inline_text(skill)
-
-    assert decision.action == :offer_likely_interpretation
-    assert :recognizable_topic_fallback in decision.overrides
-    assert skill.id == :recognizable_topic_fallback
-    assert text =~ "US-Iran conflict"
-    assert text =~ "don't have live news access"
-    refute text =~ "Can you please clarify"
   end
-
-  test "enabled news retrieval bypasses the historical US-Iran inline reply" do
-    features = %{
-      intent: :ask,
-      text: "What are your thoughts on the US Iran war currently happening?",
-      web_retrieval_enabled?: true
-    }
-
+  test "enabled news retrieval is not bypassed by geopolitical overrides" do
     assert {@decision, nil} =
-             OverrideSkills.apply(features, @decision, %{guardrail?: false})
-  end
-
-  test "exact live Iran conflict question reaches evidence retrieval instead of a canned answer" do
-    features = %{
-      intent: :ask,
-      text: "What do you think about the conflict between Iran and the United States?",
-      web_retrieval_enabled?: true
-    }
-
-    assert {@decision, nil} =
-      OverrideSkills.apply(features, @decision, %{guardrail?: false})
-
-    {_decision, offline_skill} =
       OverrideSkills.apply(
-        %{features | web_retrieval_enabled?: false},
+        %{
+          intent: :ask,
+          text: "What are your thoughts on the US Iran war currently happening?",
+          web_retrieval_enabled?: true
+        },
         @decision,
         %{guardrail?: false}
       )
-
-    assert offline_skill.id == :recognizable_topic_fallback
   end
-
+  test "opinion questions bypass hardcoded topic replies regardless of retrieval configuration" do
+    for enabled? <- [true, false] do
+      assert {@decision, nil} =
+        OverrideSkills.apply(
+          %{
+            intent: :ask,
+            text: "What do you think about the conflict between Iran and the United States?",
+            web_retrieval_enabled?: enabled?
+          },
+          @decision,
+          %{guardrail?: false}
+        )
+    end
+  end
   test "enabled news retrieval bypasses the generic no-live-news inline reply" do
     features = %{
       intent: :ask,
@@ -147,23 +132,18 @@ defmodule Core.Response.OverrideSkillsTest do
              OverrideSkills.apply(features, @decision, %{guardrail?: false})
   end
 
-  test "disabling retrieval preserves the original offline capability response" do
-    {decision, skill} =
+  test "disabling retrieval still allows general question reasoning to handle geopolitical assessments" do
+    assert {@decision, nil} =
       OverrideSkills.apply(
         %{
           intent: :ask,
-          text: "What are your thoughts on the US Iran war currently happening?",
+          text: "What do you think of the U.S. -Iran war",
           web_retrieval_enabled?: false
         },
         @decision,
         %{guardrail?: false}
       )
-
-    assert decision.action == :offer_likely_interpretation
-    assert skill.id == :recognizable_topic_fallback
-    assert OverrideSkills.deterministic_inline_text(skill) =~ "don't have live news access"
   end
-
   test "alarm capability remains a deterministic inline skill" do
     {decision, skill} =
       OverrideSkills.apply(
