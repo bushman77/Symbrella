@@ -102,6 +102,11 @@ defmodule Core.Response.NewsLookupTest do
     assert response =~ "Recent headlines:"
     assert meta.response_source == :symbolic_news_discovery
     assert meta.response_reflection.status == :symbolic_news_discovery
+    assert meta.response_reflection.source_count == 1
+    assert meta.response_reflection.content_scope == :headlines_only
+    assert meta.response_reflection.article_contents_verified? == false
+    assert meta.response_reflection.external_facts_verified? == false
+    assert meta.response_reflection.llm_called? == false
     assert meta.curiosity_probe == nil
     assert_receive {:news_lookup_query, query}
     assert query =~ "iranian war"
