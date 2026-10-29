@@ -186,6 +186,26 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
         assert first_meta.requested_temporal_role == :first
         assert first_meta.requested_slot == :location
 
+        # Natural recap questions retrieve an evidence-qualified report,
+        # rather than merely restating the source transcript.
+        for question <- [
+          "What did I say about the #{actor}?",
+          "Remind me what I said about the #{actor}?",
+          "Can you remind me what I said about a #{actor}?"
+        ] do
+          assert {:ok, recap, meta} = TemporalActivityRecall.reply(session, question)
+          assert recap =~ "latest interpretable description"
+          assert recap =~ latest
+          assert meta.requested_slot == :recap
+          assert meta.requested_temporal_role == :latest
+          assert meta.event_occurrence_verified? == false
+        end
+
+        assert {:ok, pronoun_recap, pronoun_meta} =
+          TemporalActivityRecall.reply(session, "What did I say about it?")
+        assert pronoun_recap =~ latest
+        assert pronoun_meta.same_actor_identity_verified? == false
+
         # Anaphora is licensed only when the entire retained event record
         # has one actor KIND, and never claims real-world identity.
         for question <- [
