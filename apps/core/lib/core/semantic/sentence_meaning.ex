@@ -16,6 +16,7 @@ defmodule Core.Semantic.SentenceMeaning do
   alias Core.Semantic.TemporalEventComposition
   alias Core.Semantic.TemporalClaimReconciliation
   alias Core.Semantic.TemporalClarificationResolution
+  alias Core.Semantic.TemporalMemoryRetrieval
   alias Core.Semantic.TemporalSentence
 
   @max_topic_tokens 16
@@ -81,6 +82,7 @@ defmodule Core.Semantic.SentenceMeaning do
 
     base =
       definition_request(si) ||
+        TemporalMemoryRetrieval.question(si) ||
         TemporalClarificationResolution.build(si) ||
         TemporalClaimReconciliation.question(si) ||
         TemporalEventComposition.question(si) ||
@@ -105,7 +107,8 @@ defmodule Core.Semantic.SentenceMeaning do
   # Do not let a partial single-clause compositional candidate overwrite it.
   defp attach_compositional_evidence(_si, %{kind: kind} = meaning)
        when kind in [:explicit_temporal_report, :temporal_clarification_resolution,
-                     :temporal_claim_conflict_question],
+                     :temporal_claim_conflict_question,
+                     :temporal_preference_recall_question],
        do: meaning
 
   # build/1 and attach/1 must agree exactly. Revalidate the current proof
