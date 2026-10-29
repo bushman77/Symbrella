@@ -93,9 +93,8 @@ defmodule Core.Semantic.ClarifiedEventTest do
 
   test "rejects a broken request-resolution link", %{sid: sid} do
     {request, resolution} = records()
-    record_pair(sid, request, Map.put(resolution, :request_seq, 999_999))
-    # The owner assigns the sequence to each entry, but not request_seq.
-    # Break the link explicitly after the first record.
-    assert :not_applicable == ClarifiedEvent.build(sid, "What is the cat doing?")
+    {:ok, _} = Owner.append(sid, request)
+    {:ok, _} = Owner.append(sid, Map.put(resolution, :request_seq, 999_999))
+    assert :not_applicable == ClarifiedEvent.build(sid, "What is the bird doing?")
   end
 end
