@@ -60,6 +60,69 @@ defmodule Brain.LIFG.RoleCompetitionTest do
     }
   end
 
+  test "LIFG observes an unresolved progressive gap without inventing a candidate or POS boost" do
+    signature = %{
+      id: :progressive_lexical_gap_candidate,
+      source: :core_syntax, span: {0, 6},
+      roles: %{
+        subject_determiner: 0, subject_head: 1, auxiliary: 2,
+        predicate: 3, preposition: 4, location_determiner: 5,
+        location_head: 6
+      },
+      evidence: [:contiguous_surface, :attested_nominal_subject,
+        :unresolved_progressive_predicate, :attested_preposition,
+        :attested_nominal_location]
+    }
+
+    si = %{
+      tokens: token_words(~w(The fox is flarping on the fence)),
+      active_cells: [
+        cell("the", "determiner"),
+        cell("fox", "noun"),
+        cell("is", "verb"),
+        cell("on", "preposition"),
+        cell("fence", "noun")
+      ],
+      sentence_signatures: [signature]
+    }
+
+    observed = RoleCompetition.resolve(si)
+    assert observed.roles == %{}
+    assert %{status: :unresolved, role: :predicate,
+             token_index: 3, lexical_pos_verified?: false,
+             exact_dictionary_sense_verified?: false,
+             factual_authority?: false} = observed.unresolved_roles[3]
+    refute Map.has_key?(observed.unresolved_roles[3], :pos)
+    refute Map.has_key?(observed.unresolved_roles[3], :sense_id)
+
+    logits = %{"flarping|phrase|fallback" => 0.41,
+      "fox|noun|1" => 0.53}
+    context = GrammarEvidence.prepare(Map.put(si, :role_competition, observed))
+    assert GrammarEvidence.apply_role_competition(logits, context, 3) == logits
+    assert GrammarEvidence.apply(logits, context, 3, 0.0) == logits
+    assert si.active_cells == [
+      cell("the", "determiner"), cell("fox", "noun"),
+      cell("is", "verb"), cell("on", "preposition"),
+      cell("fence", "noun")
+    ]
+
+    for {label, changed} <- [
+      {:no_signature, %{si | sentence_signatures: []}},
+      {:missing_subject, %{si | active_cells:
+        Enum.reject(si.active_cells, &(&1.norm == "fox"))}},
+      {:missing_preposition, %{si | active_cells:
+        Enum.reject(si.active_cells, &(&1.norm == "on"))}},
+      {:invented_predicate_cell, %{si | active_cells:
+        [cell("flarping", "verb") | si.active_cells]}},
+      {:wrong_surface, %{si | tokens: token_words(~w(The fox is maybe on the fence))}},
+      {:wrong_signature, %{si | sentence_signatures:
+        [%{signature | evidence: [:contiguous_surface]}]}}
+    ] do
+      assert RoleCompetition.resolve(changed).unresolved_roles == %{},
+        "unexpected gap observation: #{label}"
+    end
+  end
+
   test "full determiner-adjective-noun interpretation outranks shorter incompatible phrase hypotheses" do
     si = light_input()
     result = RoleCompetition.resolve(si)
