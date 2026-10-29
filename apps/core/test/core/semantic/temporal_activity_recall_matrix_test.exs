@@ -143,16 +143,25 @@ defmodule Core.Semantic.TemporalActivityRecallMatrixTest do
           end
         end
 
-        for question <- [
-          "Where was the #{actor}?",
-          "Where was the #{actor} before?",
-          "Where was the #{actor} earlier",
-          "Tell me what the #{actor} was doing previously"
+        for {question, requested_slot} <- [
+          {"Where was the #{actor}?", :location},
+          {"Where was the #{actor} before?", :location},
+          {"Where was the #{actor} earlier", :location},
+          {"Tell me what the #{actor} was doing previously", :activity}
         ] do
           assert {:ok, response, meta} = TemporalActivityRecall.reply(session, question)
-          assert response =~ "a #{actor} sitting on a fence"
           assert meta.requested_temporal_role == :earlier
-          assert meta.requested_slot in [:activity, :location]
+          assert meta.requested_slot == requested_slot
+
+          case requested_slot do
+            :location ->
+              assert response =~ "a #{actor} on a fence"
+              assert response =~ "does not establish actual event chronology"
+
+            :activity ->
+              assert response =~ "a #{actor} sitting on a fence"
+              assert response =~ "report order, not verified event chronology"
+          end
         end
       after
         Ledger.clear(session)
