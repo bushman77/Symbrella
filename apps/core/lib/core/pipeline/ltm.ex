@@ -13,12 +13,70 @@ defmodule Core.Pipeline.LTM do
   @spec run(map(), keyword()) :: map()
   def run(%{} = si, opts) when is_list(opts) do
     case Source.ltm(si, opts) do
-      {:ok, %{rows: rows, db_hits: db_hits}} ->
-        enrich(si, rows, db_hits)
+      {:ok, %{rows: rows, db_hits: %MapSet{} = db_hits}} when is_list(rows) ->
+        audit = retrieval_audit(rows, opts)
+
+        :telemetry.execute(
+          [:core, :ltm, :retrieval],
+          %{
+            candidate_rows: audit.candidate_rows,
+            token_positions: audit.token_positions,
+            max_senses_per_token: audit.max_senses_per_token,
+            multi_pos_positions: audit.multi_pos_positions
+          },
+          %{budget: audit.budget, pos_diverse?: audit.pos_diverse?}
+        )
+
+        si
+        |> enrich(rows, db_hits)
+        |> Map.update(:activation_summary, %{ltm_retrieval: audit}, fn summary ->
+          Map.put(summary, :ltm_retrieval, audit)
+        end)
+
+      _ ->
+        si
     end
   end
 
   def run(si, _opts), do: si
+
+  @doc """
+  Summarize lexical retrieval without asserting that a bounded query preserved
+  the correct sense. All terms and sense IDs are omitted from this audit.
+
+  `limit_per_norm: :all` remains the default; finite limits are explicit and
+  potentially lossy. `pos_diverse?: true` requests POS-balanced rows from Db.
+  """
+  @spec retrieval_audit([map()], keyword()) :: map()
+  def retrieval_audit(rows, opts \\ []) when is_list(rows) and is_list(opts) do
+    groups = Enum.group_by(rows, &Map.get(&1, :token_index))
+    per_token = Map.values(groups)
+
+    limit = Keyword.get(opts, :limit_per_norm, :all)
+
+    budget =
+      case limit do
+        n when is_integer(n) and n > 0 -> {:limited, n}
+        _ -> :all
+      end
+
+    %{
+      budget: budget,
+      pos_diverse?: Keyword.get(opts, :pos_diverse?, false) == true,
+      candidate_rows: length(rows),
+      token_positions: map_size(groups),
+      max_senses_per_token:
+        per_token |> Enum.map(&length/1) |> Enum.max(fn -> 0 end),
+      ambiguous_positions: Enum.count(per_token, &(length(&1) > 1)),
+      multi_pos_positions:
+        Enum.count(per_token, fn entries ->
+          entries |> Enum.map(&Map.get(&1, :pos)) |> Enum.uniq() |> length() > 1
+        end),
+      # Without a full-slate comparison, a limited query cannot claim to have
+      # retained the correct sense or every applicable part of speech.
+      sense_recall: :not_measured
+    }
+  end
 
   @doc """
   Merge already retrieved, bounded read-only LTM results into a SemanticInput.
