@@ -8,7 +8,8 @@
 alias Core.Semantic.Composition.{
   FinitePastLocative,
   FinitePastLocativeIntegration,
-  LemmaGroundedPredicate
+  LemmaGroundedPredicate,
+  RoleWitness
 }
 
 sentence = "The bird sat on the fence."
@@ -71,3 +72,48 @@ IO.inspect(%{
     Enum.count(&(Map.get(&1, :feature) == :seated_posture)),
   integration: result
 }, label: "Finite-past locative — real pipeline diagnostic", limit: :infinity)
+
+# Explicitly expose every abstention gate, without overriding a witness.
+roles = [
+  {:subject_determiner, 0, "determiner"},
+  {:subject_head, 1, "noun"},
+  {:preposition, 3, "preposition"},
+  {:location_determiner, 4, "determiner"},
+  {:location_head, 5, "noun"}
+]
+
+role_checks =
+  Enum.map(roles, fn {role, index, pos} ->
+    {role, case RoleWitness.resolve(si, role, index, [pos]) do
+      {:ok, witness} -> %{status: :admitted,
+        selection_basis: Map.get(witness, :selection_basis)}
+      :unsupported -> RoleWitness.audit(si, role, index, [pos])
+    end}
+  end)
+  |> Map.new()
+
+signature =
+  Enum.find(signatures, &(&1.id == :finite_past_locative_candidate and
+                           &1.span == {0, 5}))
+
+direct_composition =
+  if signature do
+    case FinitePastLocative.compose(%{
+      signature: signature, grounding: grounded, predicate_surface: "sat",
+      actor: "bird", preposition: "on", landmark: "fence"
+    }) do
+      {:ok, proof} ->
+        %{status: :derived, verified?: FinitePastLocative.verify(proof) == :ok}
+      :unsupported -> %{status: :unsupported}
+    end
+  else
+    %{status: :missing_signature}
+  end
+
+IO.inspect(%{
+  role_checks: role_checks,
+  saved_signature_matches_detection?:
+    signature in List.wrap(Map.get(si, :sentence_signatures)),
+  direct_composition: direct_composition,
+  integration: result
+}, label: "Finite-past locative — remaining admission gates", limit: :infinity)
