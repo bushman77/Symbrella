@@ -79,6 +79,7 @@ defmodule Core.Pipeline.LexicalBridge do
             status: if(candidates == [], do: :unresolved, else: :candidate_bridges),
             candidate_count: length(examined),
             evidence_quality_counts: Enum.frequencies_by(examined, & &1.evidence_quality),
+            category_evidence_counts: Enum.frequencies_by(examined, & &1.category_evidence.status),
             candidates: Enum.take(examined, @max_chains),
             truncated?: length(examined) > @max_chains,
             verified_intended_sense?: false,
@@ -148,6 +149,7 @@ defmodule Core.Pipeline.LexicalBridge do
 
     candidate
     |> Map.put(:evidence_quality, quality([from, to], :direct))
+    |> Map.put(:category_evidence, category_evidence(first, second))
     |> Map.put(:evidence_audit, %{
       source_region: from,
       target_region: to,
@@ -182,6 +184,10 @@ defmodule Core.Pipeline.LexicalBridge do
     candidate
     |> Map.put(:evidence_quality,
       quality([source_location, first_location, second_location, target_location], :multi_hop))
+    |> Map.put(:category_evidence, category_evidence(
+      sense(slates, source, candidate.source_sense_id),
+      sense(slates, target, candidate.target_sense_id)
+    ))
     |> Map.put(:evidence_audit, %{
       source_lemma_region: source_location,
       first_intermediate_region: first_location,
@@ -191,6 +197,50 @@ defmodule Core.Pipeline.LexicalBridge do
       semantic_relevance: :not_measured
     })
   end
+
+  # Category annotations are sparse. Only shared cat:en:* values can
+  # provide a positive domain witness; missing or disjoint annotations are
+  # always inconclusive, never negative compatibility evidence.
+  # Etymology, POS and usage tags are intentionally excluded.
+  defp category_evidence(source, target) do
+    source_categories = dictionary_categories(source)
+    target_categories = dictionary_categories(target)
+
+    shared =
+      MapSet.intersection(
+        MapSet.new(source_categories), MapSet.new(target_categories)
+      )
+      |> MapSet.to_list()
+      |> Enum.sort()
+
+    status =
+      cond do
+        shared != [] -> :shared_category
+        source_categories == [] and target_categories == [] -> :no_category_metadata
+        source_categories == [] or target_categories == [] -> :one_sided_category
+        true -> :disjoint_category_labels_unverified
+      end
+
+    %{
+      status: status,
+      source_categories: source_categories,
+      target_categories: target_categories,
+      shared_categories: shared,
+      semantic_compatibility_proven?: false,
+      semantic_incompatibility_proven?: false
+    }
+  end
+
+  defp dictionary_categories(%{semantic_atoms: atoms}) when is_list(atoms) do
+    atoms
+    |> Enum.filter(&(is_binary(&1) and String.starts_with?(&1, "cat:en:")))
+    |> Enum.map(&String.replace_prefix(&1, "cat:en:", ""))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp dictionary_categories(_), do: []
 
   defp quality(regions, kind) do
     cond do
