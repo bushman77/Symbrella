@@ -151,15 +151,15 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
     assert :not_applicable = Integration.derive(unscored, lookup: &lookup/1)
   end
 
-  test "optional attachment stays off and preserves existing derivations" do
+  test "default-on attachment preserves existing derivations and explicit false opts out" do
     original = si()
     existing = %{kind: :progressive_event_property, marker: :preserve}
     input = %{original | compositional_derivation: existing}
 
-    assert Integration.attach(input) == input
     assert Integration.attach(input, finite_past_locative?: false) == input
 
-    enabled = Integration.attach(input,
+    enabled = Integration.attach(input, lookup: &lookup/1)
+    assert enabled == Integration.attach(input,
       finite_past_locative?: true, lookup: &lookup/1)
 
     assert enabled.compositional_derivation == existing
