@@ -13,7 +13,8 @@ defmodule Core.Semantic.Composition.SenseDenotations do
   # Rules are narrowly evidenced gloss fragments. They are intentionally
   # incomplete: extending coverage requires separately reviewed examples,
   # negative contrasts, and held-out evaluation.
-  @rules [
+  defp rules do
+    [
     %{family: :spatial_location, subtype: :upper_surface,
       pattern: ~r/\bPositioned at the upper surface of\b/ui,
       requires: [:supporting_surface]},
@@ -89,7 +90,8 @@ defmodule Core.Semantic.Composition.SenseDenotations do
     %{family: :mathematical, subtype: :function_domain,
       pattern: ~r/\b(?:domain and codomain|domain and V as codomain)\b/ui,
       requires: [:mathematical_function]}
-  ]
+    ]
+  end
 
   @spec propose(map()) :: map()
   def propose(%{} = cell) do
@@ -98,7 +100,7 @@ defmodule Core.Semantic.Composition.SenseDenotations do
 
     hypotheses =
       if is_binary(definition) do
-        @rules
+        rules()
         |> Enum.flat_map(fn rule ->
           case Regex.run(rule.pattern, definition) do
             [matched | _] ->
