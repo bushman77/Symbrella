@@ -83,6 +83,35 @@ defmodule Core.PipelineInputTest do
     assert Enum.all?(si.tokens, &(source_slice(si.original_text, &1) == &1.phrase))
   end
 
+  test "optional grammatical projection exposes possessive stem without changing source tokens" do
+    text = "10 of my checker's 13 links were lines that refute the claim"
+    canonical = Input.prepare(text, max_wordgram_n: 1)
+    grammatical = Input.grammatical_projection(canonical)
+
+    assert Enum.any?(canonical.tokens, &(&1.phrase == "checker's"))
+    refute Enum.any?(canonical.tokens, &(&1.phrase == "checker"))
+    assert Enum.any?(grammatical.tokens, &(&1.phrase == "checker"))
+    assert Enum.any?(grammatical.tokens, &(&1.phrase == "'s"))
+    assert Enum.map(grammatical.tokens, & &1.index) ==
+             Enum.to_list(0..(length(grammatical.tokens) - 1))
+    assert Enum.all?(grammatical.tokens,
+             &(source_slice(text, &1) == &1.phrase))
+
+    assert grammatical.original_text == text
+    assert canonical.tokenization.valid? == true
+    assert Enum.map(canonical.tokens, & &1.phrase) ==
+             Enum.map(Input.prepare(text, max_wordgram_n: 1).tokens, & &1.phrase)
+  end
+
+  test "non-possessive contractions do not get broken by grammatical projection" do
+    text = "It's true that he can't read it."
+    canonical = Input.prepare(text, max_wordgram_n: 1)
+    grammatical = Input.grammatical_projection(canonical)
+
+    assert Enum.map(grammatical.tokens, & &1.phrase) ==
+             Enum.map(canonical.tokens, & &1.phrase)
+  end
+
   test "fuzzy interpretation cannot rewrite canonical source tokens" do
     si = Core.resolve_input("teh  bird.", mode: :test, fuzzy: true)
 
