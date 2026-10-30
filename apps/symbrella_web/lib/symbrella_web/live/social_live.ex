@@ -389,8 +389,9 @@ defmodule SymbrellaWeb.SocialLive do
                     <h3 class="break-words text-lg font-semibold">{@cognitive_report.understanding.headline}</h3>
                     <p class="text-sm leading-6 text-zinc-300">{@cognitive_report.understanding.explanation}</p>
                     <p class="text-xs text-zinc-400">
-                      Thread-wide overview only. Original-post and reply meanings
-                      remain source-scoped in their individual sections below.
+                      The overview covers only the selected original post or
+                      selected reply. External meaning remains unverified, and
+                      unrelated participants are not analyzed by this action.
                     </p>
                     <div :for={{finding, i} <- Enum.with_index(@cognitive_report.understanding.findings)}
                       id={"social-finding-#{i}"}
