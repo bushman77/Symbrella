@@ -50,6 +50,28 @@ defmodule SymbrellaWeb.SocialConversationTest do
     refute inspect(report.relations) =~ "should_not_appear"
   end
 
+  test "original topic candidates exclude distinct reply-only terms" do
+    topic = %{id: "post-1", title: "First question", author: "same_author"}
+    comments = [%{id: "r-1", author: "same_author", parent_id: "post-1"}]
+
+    segments = [
+      %{label: "Original post · sentence 1", author: "same_author",
+        result: %{comprehension: %{recognized_topics: ["freedom"]}}},
+      %{label: "Reply 1 · sentence 1", author: "same_author",
+        result: %{comprehension: %{recognized_topics: ["workshop"]}}}
+    ]
+
+    report = SocialConversation.build(
+      topic, comments, segments,
+      %{interpretations: [], lexical_links: []}
+    )
+
+    assert report.subject.lexical_topic_candidates == ["freedom"]
+    assert Enum.count(report.participants) == 2
+    assert Enum.count(report.relations, &(&1.kind == :explicit_reply_parent)) == 1
+    refute Enum.any?(report.relations, &(&1.kind == :same_source_sentence_order))
+  end
+
   test "reply-free posts retain sentence ordering without inventing causality" do
     topic = %{id: "post-1", title: "Dated records", author: "agent_a"}
     segments = [
