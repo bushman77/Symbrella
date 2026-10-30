@@ -240,7 +240,7 @@ defmodule Core do
     # Pure typed semantic composition with replayable non-factual proof records.
     |> Core.Semantic.Composition.attach()
     |> StateDump.capture(:semantic_composition)
-    # Off by default: independent finite-past evidence and proof, never a
+    # On by default (explicit false opt-out): independent finite-past proof, never a
     # replacement for the existing compositional derivation.
     |> Core.Semantic.Composition.FinitePastLocativeIntegration.attach(opts)
     |> StateDump.capture(:finite_past_locative_composition)
