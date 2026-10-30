@@ -105,6 +105,21 @@ defmodule Core.Social.BrainObservationTest do
              )
   end
 
+  test "attested but unsupported Brain.Cell POS does not create a neuron" do
+    si = %{
+      candidate_si()
+      | active_cells: [%{id: "would|auxiliary|0", pos: "auxiliary", token_index: 0}],
+        lifg_choices: [%{id: "would|auxiliary|0", token_index: 0}]
+    }
+
+    assert %{status: :no_attested_targets, stimuli_issued: 0} =
+             BrainObservation.observe(si,
+               enabled?: true,
+               brain_available?: true,
+               activator: fn _, _ -> flunk("invalid Brain.Cell POS") end
+             )
+  end
+
   test "caps repeated external lexical stimulation to four neurons per sentence" do
     entries =
       for i <- 1..12 do
