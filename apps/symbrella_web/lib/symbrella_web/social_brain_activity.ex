@@ -63,7 +63,13 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       [:core, :social, :cognitive_shadow],
       Map.take(activity, [:segments, :lifg_choices, :atl_winners, :syntax_frames,
         :dictionary_rows, :pos_covered_tokens, :processed_tokens,
-        :supported_interpretations, :neuron_stimuli_issued]),
+        :supported_interpretations, :neuron_stimuli_issued])
+      |> Map.merge(%{
+        original_post_sentences: activity.source_breakdown.original_post.sentences,
+        original_post_stimuli: activity.source_breakdown.original_post.neuron_stimuli,
+        reply_sentences: activity.source_breakdown.replies.sentences,
+        reply_stimuli: activity.source_breakdown.replies.neuron_stimuli
+      }),
       %{
         source: :colony_external, mode: :read_only_shadow,
         analysis_scope: :thread_aggregate,
@@ -122,10 +128,51 @@ defmodule SymbrellaWeb.SocialBrainActivity do
     segments = Map.get(report, :segments, [])
     discourse = Map.get(report, :discourse) || %{}
     conversation = Map.get(report, :conversation) || %{}
+    sections = Map.get(report, :sections) || %{}
+
+    post_segments =
+      case get_in(sections, [:original_post, :segments]) do
+        items when is_list(items) -> items
+        _ -> Enum.filter(segments, &source_post?/1)
+      end
+
+    reply_sources =
+      case Map.get(sections, :replies) do
+        items when is_list(items) ->
+          items
+
+        _ ->
+          segments
+          |> Enum.filter(&(not source_post?(&1)))
+          |> Enum.group_by(fn segment ->
+            Map.get(segment, :source_index) || Map.get(segment, :source_label) ||
+              Map.get(segment, :label, "unknown")
+          end)
+          |> Enum.map(fn {key, source_segments} ->
+            %{index: key, segments: source_segments}
+          end)
+      end
+
+    reply_segments = Enum.flat_map(reply_sources, &Map.get(&1, :segments, []))
+
+    scopes = %{
+      original_post: source_metrics(post_segments),
+      replies: source_metrics(reply_segments)
+    }
+
+    reply_breakdown =
+      Enum.map(reply_sources, fn reply ->
+        %{
+          reply_index: Map.get(reply, :index),
+          metrics: source_metrics(Map.get(reply, :segments, []))
+        }
+      end)
 
     %{
       source: :colony_external,
       mode: :read_only_shadow,
+      source_breakdown: scopes,
+      reply_breakdown: reply_breakdown,
       neuron_stimuli_issued: count(segments, [:result, :brain_observation, :stimuli_issued]),
       neuron_observation_statuses:
         segments
@@ -146,6 +193,30 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       relations: length(Map.get(conversation, :relations, []))
     }
   end
+
+  # Keep post and reply metrics apart; a total never implies that a reply
+  # was asserted by the original author. No usernames or raw text are retained.
+  defp source_metrics(segments) do
+    %{
+      sentences: length(segments),
+      lifg_choices: count(segments, [:result, :lifg, :chosen_count]),
+      atl_winners: count(segments, [:result, :atl, :winner_count]),
+      neuron_stimuli: count(segments, [:result, :brain_observation, :stimuli_issued]),
+      interpreted_sentences: Enum.count(segments, fn segment ->
+        get_in(segment, [:result, :sentence_meaning, :status]) in
+          [:structurally_interpreted, :interpreted, :understood, :resolved]
+      end)
+    }
+  end
+
+  defp source_post?(%{source_type: :original_post}), do: true
+  defp source_post?(%{source_type: :reply}), do: false
+  defp source_post?(%{source_label: "Original post"}), do: true
+
+  defp source_post?(%{label: label}) when is_binary(label),
+    do: String.starts_with?(label, "Original post")
+
+  defp source_post?(_), do: false
 
   defp count(segments, keys) do
     Enum.reduce(segments, 0, fn segment, acc ->
