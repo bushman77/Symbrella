@@ -174,6 +174,35 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
     end
   end
 
+  test "individual post inspects more than twelve sentences without mixing replies" do
+    topic = %{
+      id: "post-more-than-12",
+      title: "One post?",
+      body: Enum.map_join(1..14, " ", fn i -> "Part #{i} continues." end),
+      author: "speaker"
+    }
+    comments = [%{author: "other", body: "Reply must not be inspected."}]
+    caller = self()
+
+    probe = fn text, _opts ->
+      send(caller, {:examined, text})
+      {:ok, %{stage: :social_semantic_shadow}}
+    end
+
+    assert {:ok, report} =
+      SocialCognitiveReport.analyze(%{topic: topic, comments: comments},
+        target: :original_post, probe: probe)
+
+    assert report.analyzed_segments == 15
+    assert report.omitted_sentences == 0
+    assert report.sections.replies == []
+    assert length(report.sections.original_post.segments) == 15
+    refute Enum.any?(report.segments, &(&1.source_type == :reply))
+
+    for _ <- 1..15, do: assert_receive({:examined, _})
+    refute_receive {:examined, "Reply must not be inspected."}
+  end
+
   test "operator can opt into transient Brain stimulation, never by default" do
     topic = %{
       id: "00000000-0000-4000-8000-000000000001",
