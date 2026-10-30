@@ -247,11 +247,9 @@ defmodule Brain.Utils.Tokens do
         ""
 
       true ->
-        try do
-          String.slice(s, st, en - st)
-        rescue
-          _ -> ""
-        end
+        # Phase 1 spans are UTF-8 byte offsets, not grapheme indices.
+        # String.slice/3 corrupts offsets after multibyte characters.
+        binary_part(s, st, en - st)
     end
   end
 
