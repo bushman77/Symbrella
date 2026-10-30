@@ -240,6 +240,10 @@ defmodule Core do
     # Pure typed semantic composition with replayable non-factual proof records.
     |> Core.Semantic.Composition.attach()
     |> StateDump.capture(:semantic_composition)
+    # Off by default: independent finite-past evidence and proof, never a
+    # replacement for the existing compositional derivation.
+    |> Core.Semantic.Composition.FinitePastLocativeIntegration.attach(opts)
+    |> StateDump.capture(:finite_past_locative_composition)
     # Read-only episodic projection provides independently revalidated
     # participant roles before SentenceMeaning composes the proposition.
     # No database write or response is performed by either of these stages.
