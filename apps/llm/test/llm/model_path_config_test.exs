@@ -60,7 +60,7 @@ defmodule Llm.ModelPathConfigTest do
     """)
 
     code = """
-    cfg = Config.Reader.read!(#{inspect(Path.join(config_dir, "llm.exs"))})
+    cfg = Config.Reader.read!(#{inspect(Path.join(config_dir, "llm.exs"))}, env: :test)
     options = cfg |> Keyword.fetch!(:llm) |> Keyword.fetch!(Llm)
     runner = cfg |> Keyword.fetch!(:llm) |> Keyword.fetch!(:runner)
     IO.puts(Enum.join([
@@ -84,7 +84,7 @@ defmodule Llm.ModelPathConfigTest do
     # Separate process keeps HOME and LLAMA_MODEL_PATH isolated from umbrella
     # application state and from concurrent test cases.
     code = """
-    config = Config.Reader.read!(#{inspect(@config_file)})
+    config = Config.Reader.read!(#{inspect(@config_file)}, env: :test)
     llm_config = config |> Keyword.fetch!(:llm) |> Keyword.fetch!(Llm)
     case Keyword.get(llm_config, :model_path) do
       nil -> IO.puts("NONE")
