@@ -26,7 +26,7 @@ defmodule Core.MWE.Lexicon do
     if Keyword.get(opts, :mwe_lexicon, :on) in [:off, false] do
       si
     else
-      windows = windows(tokens, Keyword.get(opts, :mwe_max_n, @max_n))
+      windows = windows(tokens, Keyword.get(opts, :mwe_max_n, @max_n), si)
       terms = windows |> Enum.map(& &1.phrase) |> Enum.uniq() |> Enum.take(@max_terms)
 
       if length(Enum.uniq_by(windows, & &1.phrase)) > @max_terms do
@@ -112,7 +112,7 @@ defmodule Core.MWE.Lexicon do
     end)
   end
 
-  defp windows(tokens, maximum) do
+  defp windows(tokens, maximum, si) do
     max_n = if is_integer(maximum), do: min(maximum, @max_n), else: @max_n
 
     words =
@@ -123,6 +123,7 @@ defmodule Core.MWE.Lexicon do
         %{
           index: field(tok, :index) || index,
           phrase: field(tok, :phrase),
+          span: field(tok, :span),
           word: norm(field(tok, :phrase))
         }
       end)
@@ -136,7 +137,7 @@ defmodule Core.MWE.Lexicon do
           n <- @min_n..min(max_n, count - start),
           segment = Enum.slice(words, start, n),
           Enum.all?(segment, &(&1.word != "")),
-          Boundaries.valid_window?(segment) do
+          Boundaries.valid_window?(segment, si) do
         %{
           phrase: Enum.map_join(segment, " ", & &1.word),
           span: {hd(segment).index, List.last(segment).index},
