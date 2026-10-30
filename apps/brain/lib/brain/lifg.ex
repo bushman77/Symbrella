@@ -645,6 +645,7 @@ defmodule Brain.LIFG do
           :grammar_weight,
           :sense_focus?,
           :usage_register?,
+          :spatial_pp_senses?,
           :semantic_control?,
           :semantic_control_max_delta,
           :semantic_control_min_fit,
