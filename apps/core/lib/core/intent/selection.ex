@@ -156,7 +156,8 @@ defmodule Core.Intent.Selection do
 
   ## Options
 
-  Currently unused; reserved for future tuning.
+  * `:fuzzy` — whether spelling hypotheses are allowed (default true).
+    Precomputed Phase 1 evidence is reused without reinterpreting the text.
 
   ## Examples
 
@@ -197,22 +198,29 @@ defmodule Core.Intent.Selection do
 
   """
   @spec select(si(), Keyword.t()) :: si()
-  def select(si, _opts \\ [])
+  def select(si, opts \\ [])
 
-  def select(%{sentence: _} = si, _opts) do
+  def select(%{sentence: _} = si, opts) when is_list(opts) do
     kw0 = extract_keyword(si)
-    fuzzy_opts = [protected_words: @self_names, obsolete_synonym?: false]
-    kw_fuzzy = interpret_keyword(kw0, fuzzy_opts)
-    kw = normalize_text(kw_fuzzy.text)
+    text0 = text_from_si(si, kw0)
 
-    text0 = text_from_si(si, kw)
-    text_fuzzy = Core.Text.Fuzzy.interpret(text0, fuzzy_opts)
+    # Core's Phase 1 has already produced the correction hypothesis.
+    # Standalone callers get one full-text interpretation; fuzzy: false
+    # bypasses spelling repair entirely. Never reinterpret a separate keyword.
+    text_fuzzy = intent_fuzzy(si, text0, opts)
     text = normalize_text(text_fuzzy.text)
+    kw =
+      if normalize_text(kw0) == normalize_text(text0) do
+        text
+      else
+        normalize_text(kw0)
+      end
+
     primary = primary_utterance(text)
     kw = primary_keyword(kw, primary)
 
     {intent, conf, evidence0} = infer_intent(kw, text, primary, Map.get(si, :tokens, []))
-    fuzzy_evidence = fuzzy_evidence([kw_fuzzy, text_fuzzy])
+    fuzzy_evidence = fuzzy_evidence([text_fuzzy])
     opener_evidence = opener_evidence(primary)
     evidence = evidence0 ++ fuzzy_evidence ++ opener_evidence
 
@@ -238,23 +246,24 @@ defmodule Core.Intent.Selection do
 
   def select(si, _opts), do: si
 
-  defp interpret_keyword(kw, opts) when is_binary(kw) do
-    if String.contains?(kw, ".") do
-      %{
-        original: kw,
-        normalized: kw,
-        text: kw,
-        corrections: [],
-        aliases: [],
-        confidence: 0.0,
-        evidence: []
-      }
+  defp intent_fuzzy(_si, text, opts) when is_list(opts) do
+    if Keyword.get(opts, :fuzzy, true) == false do
+      %{original: text, normalized: text, text: text,
+        corrections: [], aliases: [], confidence: 0.0, evidence: []}
     else
-      Core.Text.Fuzzy.interpret(kw, opts)
+      intent_fuzzy_from_source(_si, text)
     end
   end
 
-  defp interpret_keyword(kw, opts), do: Core.Text.Fuzzy.interpret(kw, opts)
+  defp intent_fuzzy_from_source(%{fuzzy_text: %{text: text} = hypothesis}, _original)
+       when is_binary(text),
+       do: hypothesis
+
+  defp intent_fuzzy_from_source(_si, original) do
+    Core.Text.Fuzzy.interpret(original,
+      protected_words: @self_names, obsolete_synonym?: false
+    )
+  end
 
   defp primary_keyword(kw, %{opener_intent: :greet, text: primary_text})
        when is_binary(primary_text) and primary_text != "" do
