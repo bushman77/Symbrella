@@ -489,7 +489,18 @@ defmodule Core.Social.ObservationBridgeTest do
     assert shadow.syntax.audit.ltm_status == :ready
     assert shadow.syntax.audit.signature_count > 0
 
-    complement = Enum.find(shadow.lifg.choices, &(&1.token_index == 16))
+    # Canonical lexical indices exclude punctuation. Locate the intended
+    # surface through the same grammatical projection, never a magic offset.
+    lines_index =
+      title
+      |> Core.Pipeline.Input.prepare(max_wordgram_n: 1)
+      |> Core.Pipeline.Input.grammatical_projection()
+      |> Map.fetch!(:tokens)
+      |> Enum.find(&(&1.phrase == "lines"))
+      |> Map.fetch!(:index)
+
+    complement = Enum.find(shadow.lifg.choices, &(&1.token_index == lines_index))
+    assert complement
     assert complement.chosen_id == "lines|noun|1"
 
     assert shadow.reported_proposition.status ==
