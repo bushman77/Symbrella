@@ -15,10 +15,10 @@ defmodule Core.Semantic.Composition.SenseAlignment do
   # Deliberately bounded high-precision cues for a pilot; never infer a sense
   # from its numeric ID or from the surface word alone. Explicit prefixes
   # avoid treating incidental words like "position" as semantic evidence.
-  @position ~r/\AIndicating position or location\.\s*/iu
-  @contact ~r/\ADenoting physical contact or interaction\b/iu
-  @topic ~r/\ADealing with the subject of\b/iu
-  @opposition ~r/\bAgainst;\s*in opposition to\./iu
+  defp position_pattern, do: ~r/\AIndicating position or location\.\s*/iu
+  defp contact_pattern, do: ~r/\ADenoting physical contact or interaction\b/iu
+  defp topic_pattern, do: ~r/\ADealing with the subject of\b/iu
+  defp opposition_pattern, do: ~r/\bAgainst;\s*in opposition to\./iu
 
   @spec audit(map(), map()) :: map()
   def audit(%{} = proof, %{} = candidate) do
@@ -85,10 +85,10 @@ defmodule Core.Semantic.Composition.SenseAlignment do
     text = String.trim(definition)
 
     cond do
-      Regex.match?(@opposition, text) -> :opposition
-      Regex.match?(@topic, text) -> :discourse_topic
-      Regex.match?(@contact, text) -> :physical_contact
-      Regex.match?(@position, text) -> :spatial_location
+      Regex.match?(opposition_pattern(), text) -> :opposition
+      Regex.match?(topic_pattern(), text) -> :discourse_topic
+      Regex.match?(contact_pattern(), text) -> :physical_contact
+      Regex.match?(position_pattern(), text) -> :spatial_location
       true -> nil
     end
   end
