@@ -134,25 +134,25 @@ defmodule Core.PipelineInputTest do
   end
 
   test "Phase 2 reuses the exact Phase 1 fuzzy evidence instead of recalculating it" do
-    original = "helo bird"
+    original = "exlpain the bird"
     si = Core.resolve_input(original, mode: :test, fuzzy: true)
 
     assert si.original_text == original
-    assert hd(si.tokens).phrase == "helo"
+    assert hd(si.tokens).phrase == "exlpain"
     assert si.fuzzy_text.original == original
-    assert si.fuzzy_text.text =~ "hello"
+    assert si.fuzzy_text.text =~ "explain"
     assert is_list(si.fuzzy_text.evidence)
-    assert si.keyword in ["helo", "hello"]
+    assert si.keyword in ["exlpain", "explain"]
     assert is_list(si.intent_evidence)
   end
 
   test "fuzzy false prevents intent selection from rerunning spelling correction" do
-    si = Core.resolve_input("helo", mode: :test, fuzzy: false)
+    si = Core.resolve_input("exlpain", mode: :test, fuzzy: false)
 
-    assert si.sentence == "helo"
-    assert hd(si.tokens).phrase == "helo"
+    assert si.sentence == "exlpain"
+    assert hd(si.tokens).phrase == "exlpain"
     assert si.fuzzy_text == nil
-    assert si.keyword == "helo"
+    assert si.keyword == "exlpain"
   end
 
   test "reference arbitration retains independent conflicting antecedents" do
