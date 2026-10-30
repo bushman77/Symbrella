@@ -11,6 +11,28 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
   alias Core.Semantic.Composition.{FinitePastLocative, LemmaGroundedPredicate, RoleWitness}
   alias Core.Syntax.Signatures
 
+  @doc """
+  Optional observation-only production attachment. Never replaces the
+  existing compositional derivation or alters selected lexical senses.
+  """
+  @spec attach(map(), keyword()) :: map()
+  def attach(si, opts \\ [])
+  def attach(%{} = si, opts) when is_list(opts) do
+    if Keyword.get(opts, :finite_past_locative?, false) == true do
+      proof =
+        case derive(si, opts) do
+          {:ok, derivation} -> derivation
+          :not_applicable -> nil
+        end
+
+      Map.put(si, :finite_past_locative_derivation, proof)
+    else
+      si
+    end
+  end
+
+  def attach(other, _opts), do: other
+
   @spec derive(map(), keyword()) :: {:ok, map()} | :not_applicable
   def derive(si, opts \\ [])
   def derive(%{} = si, opts) when is_list(opts) do
