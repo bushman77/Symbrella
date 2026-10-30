@@ -137,7 +137,9 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
     end)
 
     case {valid_forms, matching_features} do
-      {[form], [feature]} -> {:ok, "sit", form, feature}
+      {[form], [_ | _] = candidates} ->
+        feature = Enum.min_by(candidates, & &1.source_lemma_sense_id)
+        {:ok, "sit", form, feature}
       _ -> :unsupported
     end
   end
