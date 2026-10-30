@@ -326,14 +326,9 @@ defmodule Core.Intent.Selection do
   defp maybe_put_fuzzy_text(si, %{corrections: [], aliases: []}), do: si
 
   defp maybe_put_fuzzy_text(si, fuzzy) do
-    Map.put(si, :fuzzy_text, %{
-      original: fuzzy.original,
-      normalized: fuzzy.normalized,
-      text: fuzzy.text,
-      confidence: fuzzy.confidence,
-      corrections: fuzzy.corrections,
-      aliases: fuzzy.aliases
-    })
+    # Reuse the complete Phase 1 hypothesis, including its evidence/provenance,
+    # rather than silently reconstructing a smaller competing representation.
+    Map.put(si, :fuzzy_text, fuzzy)
   end
 
   defp fuzzy_evidence(fuzzy_results) do
