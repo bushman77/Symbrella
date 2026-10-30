@@ -55,7 +55,7 @@ defmodule Brain.LIFG.PrepositionSemanticsTest do
     }
   end
 
-  defp scores, do: %{@ordinary.id => 0.6, @topic.id => 0.6, @obsolete.id => 0.6}
+  defp scores, do: %{"on|preposition|1" => 0.6, "on|preposition|19" => 0.6, "on|preposition|46" => 0.6}
 
   test "attested physical PP supports only dictionary senses with spatial glosses" do
     original = scores()
@@ -68,13 +68,13 @@ defmodule Brain.LIFG.PrepositionSemanticsTest do
     assert report.reason == :supported_spatial_prepositional_compatibility
     assert report.predicate_index == 2
     assert report.object_index == 5
-    assert report.predicate_witness == @predicate.id
-    assert report.object_witness == @place.id
+    assert report.predicate_witness == "sat|verb|1"
+    assert report.object_witness == "bank|noun|11"
     assert [%{id: id, delta: 0.12}] = report.adjustments
-    assert id == @ordinary.id
-    assert_in_delta updated[@ordinary.id], 0.72, 0.0000001
-    assert updated[@topic.id] == original[@topic.id]
-    assert updated[@obsolete.id] == original[@obsolete.id]
+    assert id == "on|preposition|1"
+    assert_in_delta updated["on|preposition|1"], 0.72, 0.0000001
+    assert updated["on|preposition|19"] == original["on|preposition|19"]
+    assert updated["on|preposition|46"] == original["on|preposition|46"]
     assert Enum.sort(Map.keys(updated)) == Enum.sort(Map.keys(original))
   end
 
@@ -129,8 +129,8 @@ defmodule Brain.LIFG.PrepositionSemanticsTest do
     choice = Enum.find(choices, &(&1.token_index == 3))
     assert is_map(choice)
     assert choice.spatial_pp.applied?
-    assert choice.chosen_id == @ordinary.id
-    assert Map.has_key?(choice.scores, @topic.id)
-    assert Map.has_key?(choice.scores, @ordinary.id)
+    assert choice.chosen_id == "on|preposition|1"
+    assert Map.has_key?(choice.scores, "on|preposition|19")
+    assert Map.has_key?(choice.scores, "on|preposition|1")
   end
 end
