@@ -204,6 +204,7 @@ defmodule SymbrellaWeb.SocialLiveTest do
       assert render(view) =~ "Analyzed: Original post"
 
       activity = SymbrellaWeb.SocialBrainActivity.latest()
+      assert activity.analyzed_target == %{kind: :original_post, index: 0, label: "Original post"}
       assert activity.source_breakdown.original_post.sentences > 0
       assert activity.source_breakdown.replies.sentences == 0
 
@@ -214,6 +215,7 @@ defmodule SymbrellaWeb.SocialLiveTest do
       assert has_element?(view, "#social-analysis-reply-1")
       assert render(view) =~ "Analyzed: Reply 1"
       activity = SymbrellaWeb.SocialBrainActivity.latest()
+      assert activity.analyzed_target == %{kind: :reply, index: 1, label: "Reply 1"}
       assert activity.source_breakdown.original_post.sentences == 0
       assert activity.source_breakdown.replies.sentences == 1
       assert Enum.map(activity.reply_breakdown, & &1.reply_index) == [1]
@@ -226,6 +228,7 @@ defmodule SymbrellaWeb.SocialLiveTest do
       assert has_element?(view, "#social-analysis-reply-2")
       assert render(view) =~ "Analyzed: Reply 2"
       activity = SymbrellaWeb.SocialBrainActivity.latest()
+      assert activity.analyzed_target == %{kind: :reply, index: 2, label: "Reply 2"}
       assert Enum.map(activity.reply_breakdown, & &1.reply_index) == [2]
     after
       if is_nil(previous),
