@@ -328,9 +328,11 @@ defmodule Core.Discourse.Ledger do
           {:ok, map()} | {:ambiguous, [map()]} | :not_found
   def resolve(session, text) when is_binary(text) do
     if valid_session?(session) and byte_size(text) <= @max_query_bytes do
+      started_at = System.monotonic_time()
+      retained = entries(session)
+
       matches =
-        session
-        |> entries()
+        retained
         |> Enum.filter(&(&1.kind == :nominal_description))
         |> Enum.flat_map(fn entry ->
           case mention_specificity(text, entry) do
@@ -339,19 +341,42 @@ defmodule Core.Discourse.Ledger do
           end
         end)
 
-      case matches do
-        [] ->
-          :not_found
+      outcome =
+        case matches do
+          [] ->
+            :not_found
 
-        _ ->
-          specificity = matches |> Enum.map(&elem(&1, 0)) |> Enum.max()
-          best = for {^specificity, entry} <- matches, do: public_candidate(entry)
+          _ ->
+            specificity = matches |> Enum.map(&elem(&1, 0)) |> Enum.max()
+            best = for {^specificity, entry} <- matches, do: public_candidate(entry)
 
-          case best do
-            [candidate] -> {:ok, candidate}
-            _ -> {:ambiguous, Enum.take(best, @max_public_candidates)}
-          end
-      end
+            case best do
+              [candidate] -> {:ok, candidate}
+              _ -> {:ambiguous, Enum.take(best, @max_public_candidates)}
+            end
+        end
+
+      # No session identifier, source sentence, or private semantic record in
+      # telemetry: just scan cost and whether retrieval was ambiguous.
+      :telemetry.execute(
+        [:core, :discourse, :ledger, :resolve],
+        %{
+          duration_us:
+            System.monotonic_time()
+            |> Kernel.-(started_at)
+            |> System.convert_time_unit(:native, :microsecond),
+          retained_entries: length(retained),
+          matching_entries: length(matches)
+        },
+        %{outcome:
+            case outcome do
+              {:ok, _} -> :unique
+              {:ambiguous, _} -> :ambiguous
+              _ -> :not_found
+            end}
+      )
+
+      outcome
     else
       :not_found
     end
