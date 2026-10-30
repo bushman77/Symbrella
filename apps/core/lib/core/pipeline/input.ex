@@ -118,8 +118,7 @@ defmodule Core.Pipeline.Input do
       |> Enum.map(fn {token, index} -> %{token | index: index} end)
 
     tokenization =
-      si.tokenization
-      |> Kernel.||(%{})
+      (si.tokenization || %{})
       |> Map.put(:grammatical_projection, :possessive_suffix_candidates)
 
     %{si | tokens: projected, tokenization: tokenization}
