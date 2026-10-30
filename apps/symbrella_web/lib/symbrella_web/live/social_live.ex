@@ -636,6 +636,11 @@ defmodule SymbrellaWeb.SocialLive do
                     id={"social-analysis-segment-#{@index}"}
                     class="min-w-0 space-y-3 rounded-lg border border-white/10 bg-zinc-900/70 p-4">
                     <h3 class="break-words font-semibold">{@segment.label} · {@segment.author}</h3>
+                    <div :if={is_binary(Map.get(@segment, :excerpt))}
+                      class="rounded border border-white/10 bg-black/20 p-3">
+                      <h4 class="text-xs font-semibold text-zinc-400">Text actually inspected (up to 240 characters)</h4>
+                      <p class="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-200">{@segment.excerpt}</p>
+                    </div>
                     <%= if @segment.status == :analyzed do %>
                       <div class="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
                         <p>LIFG: <strong>{@segment.result.lifg.status}</strong> · {@segment.result.lifg.chosen_count} choices</p>
@@ -656,6 +661,52 @@ defmodule SymbrellaWeb.SocialLive do
                         <p>Dictionary POS coverage: {@segment.result.syntax.audit.pos_covered_tokens} / {@segment.result.token_count} tokens</p>
                         <p>Lexical ambiguity: {if @segment.result.acc_shadow.uncertain?, do: "flagged", else: "not flagged"}</p>
                       </div>
+                      <section :if={is_map(Map.get(@segment.result, :stage_diagnostic))}
+                        class="space-y-2 rounded border border-amber-400/20 p-3">
+                        <h4 class="text-sm font-semibold text-amber-200">Cognitive pipeline · read-only handoff</h4>
+                        <p class="text-xs text-zinc-400">
+                          Structural and compositional computations are evaluated, but
+                          live LIFG/ATL ingestion, working-memory admission and
+                          episodic persistence are intentionally excluded.
+                        </p>
+                        <dl class="grid gap-2 text-xs sm:grid-cols-2">
+                          <div>ATL resolved constituents:
+                            <strong>{@segment.result.stage_diagnostic.atl_resolved_constituents}</strong>
+                          </div>
+                          <div>Structural competition:
+                            <strong>{@segment.result.stage_diagnostic.structural_competition}</strong>
+                            · {@segment.result.stage_diagnostic.structural_candidates} candidates
+                          </div>
+                          <div>Preferred construction:
+                            <strong>{inspect(@segment.result.stage_diagnostic.structurally_preferred)}</strong>
+                          </div>
+                          <div>Typed composition:
+                            <strong>{@segment.result.stage_diagnostic.typed_composition}</strong>
+                          </div>
+                          <div>Sentence interpretation:
+                            <strong>{@segment.result.stage_diagnostic.sentence_interpretation}</strong>
+                          </div>
+                          <div>Provisional hypothesis:
+                            <strong>{@segment.result.stage_diagnostic.provisional_hypothesis}</strong>
+                          </div>
+                        </dl>
+                        <p class="text-xs text-zinc-500">
+                          Unverified external text · no chat-like working-memory or
+                          Hippocampus processing · no factual claim established.
+                        </p>
+                      </section>
+                      <details :if={is_list(get_in(@segment.result, [:lifg, :choices]))}
+                        class="rounded border border-white/10 p-3">
+                        <summary class="cursor-pointer text-sm font-semibold">
+                          LIFG selected senses · lexical hypotheses
+                        </summary>
+                        <div :for={choice <- Enum.take(@segment.result.lifg.choices, 12)}
+                          class="mt-2 break-all font-mono text-xs text-zinc-300">
+                          Token {choice.token_index}: {choice.chosen_id} ·
+                          score {Float.round(choice.score * 1.0, 3)} ·
+                          {if choice.weak?, do: "low-confidence", else: "selected"}
+                        </div>
+                      </details>
                       <div :if={get_in(@segment.result, [:sentence_meaning, :definition])} class="rounded border border-cyan-400/20 p-3">
                         <h4 class="mb-1 text-sm font-semibold">Structural interpretation (not verified fact)</h4>
                         <p class="break-words text-sm text-zinc-300">{@segment.result.sentence_meaning.definition}</p>
@@ -702,6 +753,10 @@ defmodule SymbrellaWeb.SocialLive do
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Recognized topics (unverified)</h4>
                         <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(@segment.result.comprehension.recognized_topics, limit: 8, printable_limit: 300)}</pre>
+                        <h4 class="mb-1 mt-2 text-sm font-semibold">Selected lexical candidates (not verified meanings)</h4>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(@segment.result.comprehension.selected_lexical_candidates, limit: 8, printable_limit: 300)}</pre>
+                        <h4 class="mb-1 mt-2 text-sm font-semibold">Comprehension blockers</h4>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-amber-200">{inspect(@segment.result.comprehension.reasons, limit: 8, printable_limit: 500)}</pre>
                       </div>
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Attributed proposition</h4>
