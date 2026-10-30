@@ -362,9 +362,8 @@ defmodule Core.Discourse.Ledger do
         [:core, :discourse, :ledger, :resolve],
         %{
           duration_us:
-            System.monotonic_time()
-            |> Kernel.-(started_at)
-            |> System.convert_time_unit(:native, :microsecond),
+            System.convert_time_unit(System.monotonic_time() - started_at,
+              :native, :microsecond),
           retained_entries: length(retained),
           matching_entries: length(matches)
         },
