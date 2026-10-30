@@ -1,7 +1,7 @@
 defmodule Core.Semantic.CompositionPastTenseExpressionTest do
   use ExUnit.Case, async: true
 
-  alias Core.Semantic.Composition.{Expression, Proof, Reducer}
+  alias Core.Semantic.Composition.{Expression, Lexical, Proof, Reducer}
 
   @event_property {:arrow, :event, :truth}
 
@@ -43,6 +43,28 @@ defmodule Core.Semantic.CompositionPastTenseExpressionTest do
       result: result,
       result_type: @event_property
     })
+  end
+
+  test "lexical past operator produces a formally verified property" do
+    assert {:ok, %{term: operator, type: {:arrow, :action_kind, @event_property}}} =
+             Lexical.past_event()
+
+    initial = {:apply, operator, {:action_kind, :sit}}
+    assert {:ok, result, steps} = Reducer.reduce(initial)
+    assert {:ok, @event_property} = Expression.type_of(result)
+    assert :ok = Proof.verify(%{
+      initial: initial,
+      steps: steps,
+      result: result,
+      result_type: @event_property
+    })
+
+    assert result ==
+             {:lambda, "e", :event,
+              {:and,
+               {:event_action, {:action_kind, :sit}, {:var, "e"}},
+               {:event_tense, :past, {:var, "e"}}}}
+    assert :unsupported = Lexical.action("sat")
   end
 
   test "substitution descends into past tense event terms" do
