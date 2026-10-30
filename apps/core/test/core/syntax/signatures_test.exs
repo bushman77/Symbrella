@@ -618,6 +618,14 @@ defmodule Core.Syntax.SignaturesTest do
     assert :attested_copular_state in frame.evidence
     assert :question_punctuation in frame.evidence
     assert si.active_cells == cells
+
+    # Detecting grammar must NOT silently promote external text into meaning.
+    attached = Signatures.attach(si)
+    assert %{
+      status: :modal_conditional_signature_detected,
+      semantic_composition: :not_yet_interpreted,
+      role_indices: %{condition_marker: 4, predicate: 3}
+    } = Core.Semantic.SentenceMeaning.question_diagnostic(attached)
   end
 
   test "COLONY-14 refuses unsupported modal-condition structure" do
