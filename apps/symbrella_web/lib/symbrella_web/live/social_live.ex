@@ -360,6 +360,10 @@ defmodule SymbrellaWeb.SocialLive do
                     <p class="text-xs font-semibold uppercase tracking-widest text-cyan-300">Symbrella's understanding · evidence constrained</p>
                     <h3 class="break-words text-lg font-semibold">{@cognitive_report.understanding.headline}</h3>
                     <p class="text-sm leading-6 text-zinc-300">{@cognitive_report.understanding.explanation}</p>
+                    <p class="text-xs text-zinc-400">
+                      Thread-wide overview only. Original-post and reply meanings
+                      remain source-scoped in their individual sections below.
+                    </p>
                     <div :for={{finding, i} <- Enum.with_index(@cognitive_report.understanding.findings)}
                       id={"social-finding-#{i}"}
                       class="rounded border border-white/10 p-3">
@@ -546,7 +550,9 @@ defmodule SymbrellaWeb.SocialLive do
                     <p class="text-xs text-zinc-400">
                       Author: {@cognitive_report.sections.original_post.author} ·
                       {length(@cognitive_report.sections.original_post.segments)} sentence samples ·
-                      external, unverified
+                      {@cognitive_report.sections.original_post.understanding.status} ·
+                      {length(@cognitive_report.sections.original_post.discourse.interpretations)}
+                      supported interpretations · external, unverified
                     </p>
                     <.analysis_segment :for={segment <- @cognitive_report.sections.original_post.segments}
                       segment={segment} index={segment.sample_index}/>
@@ -565,7 +571,8 @@ defmodule SymbrellaWeb.SocialLive do
                       <h4 class="font-semibold">{reply.label} · {reply.author}</h4>
                       <p class="text-xs text-zinc-400">
                         {length(reply.segments)} sentence samples · {reply.understanding.status} ·
-                        external, unverified
+                        {length(Map.get(Map.get(reply, :discourse, %{}), :interpretations, []))}
+                        supported interpretations · external, unverified
                       </p>
                       <.analysis_segment :for={segment <- reply.segments}
                         segment={segment} index={segment.sample_index}/>
