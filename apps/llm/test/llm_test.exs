@@ -34,6 +34,10 @@ defmodule LlmTest do
         port: 0
       )
 
+    # The GenServer belongs to on_exit cleanup, not the short-lived test process.
+    # Without unlinking, the test process can shut it down before cleanup runs.
+    Process.unlink(pid)
+
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid)
       File.rm_rf!(tmp_dir)
@@ -90,6 +94,10 @@ defmodule LlmTest do
         port: 0
       )
 
+    # The GenServer belongs to on_exit cleanup, not the short-lived test process.
+    # Without unlinking, the test process can shut it down before cleanup runs.
+    Process.unlink(pid)
+
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid)
       File.rm_rf!(tmp_dir)
@@ -136,6 +144,10 @@ defmodule LlmTest do
         timeout: 5_000,
         port: 0
       )
+
+    # The GenServer belongs to on_exit cleanup, not the short-lived test process.
+    # Without unlinking, the test process can shut it down before cleanup runs.
+    Process.unlink(pid)
 
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid)
