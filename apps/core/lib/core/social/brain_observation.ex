@@ -75,11 +75,9 @@ defmodule Core.Social.BrainObservation do
           })
         end)
 
-        :telemetry.execute(
-          [:core, :social, :neuron_observation],
-          %{stimuli_issued: length(plan)},
-          %{source: :colony_external, mode: :transient_neural_observation}
-        )
+        # One aggregate telemetry receipt is issued by SocialBrainActivity
+        # after the full thread completes. Avoid flooding the Brain blackboard
+        # with dozens of indistinguishable per-sentence events.
 
         result(if(plan == [], do: :no_attested_targets, else: :stimuli_issued), length(plan))
     end
