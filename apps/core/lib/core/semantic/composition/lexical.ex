@@ -66,6 +66,26 @@ defmodule Core.Semantic.Composition.Lexical do
 
   def action(_), do: :unsupported
 
+  @doc """
+  Closed canonical lemma symbol. This is not an inflected-surface lookup:
+  callers must independently prove the surface-to-lemma relationship.
+  """
+  @spec canonical_action(String.t()) :: {:ok, map()} | :unsupported
+  def canonical_action(lemma) when is_binary(lemma) do
+    symbols = Map.values(@actions)
+
+    case Enum.find(symbols, &(Atom.to_string(&1) == lemma)) do
+      nil -> :unsupported
+      symbol ->
+        term = {:action_kind, symbol}
+        if Expression.type_of(term) == {:ok, :action_kind},
+          do: {:ok, %{lemma: lemma, symbol: symbol, term: term, type: :action_kind}},
+          else: :unsupported
+    end
+  end
+
+  def canonical_action(_), do: :unsupported
+
   @doc "Closed lexical actor-kind meaning, without identifying an individual."
   @spec actor(String.t()) :: {:ok, map()} | :unsupported
   def actor(surface) when is_binary(surface) do
