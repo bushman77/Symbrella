@@ -209,6 +209,8 @@ defmodule Core do
     |> Core.Brain.Activation.overlay_candidate_slates()
     |> LifgAttach.run_and_attach(lifg_opts)
     |> StateDump.capture(:lifg)
+    |> Core.Pipeline.LexicalFocus.audit_lifg()
+    |> StateDump.capture(:lexical_focus_alignment)
     |> Core.MWE.SenseResolution.rerank_contiguous()
     |> StateDump.capture(:mwe_senses)
     |> Core.MWE.ObjectSense.refine()
