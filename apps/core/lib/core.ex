@@ -42,10 +42,8 @@ defmodule Core do
 
     si0 =
       phrase
-      |> Core.LIFG.Input.tokenize(max_wordgram_n: max_n, fuzzy: fuzzy?)
-      |> wrap_si(phrase)
+      |> Core.Pipeline.Input.prepare(max_wordgram_n: max_n)
       |> maybe_put_fuzzy(fuzzy)
-      |> TokenFilters.rebuild_word_ngrams(max_n)
       |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
       |> Map.put(:experience_origin, Keyword.get(opts, :experience_origin))
       |> Map.put(:session_id, Keyword.get(opts, :session_id))
