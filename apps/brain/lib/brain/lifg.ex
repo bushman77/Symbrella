@@ -644,6 +644,7 @@ defmodule Brain.LIFG do
           :stage1_stop_event,
           :grammar_weight,
           :sense_focus?,
+          :usage_register?,
           :semantic_control?,
           :semantic_control_max_delta,
           :semantic_control_min_fit,
