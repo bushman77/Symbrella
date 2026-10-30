@@ -95,6 +95,85 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
       ["What would you do if you were free?", "Freedom can mean choice."]
   end
 
+  test "the original-post button probes title/body but no replies" do
+    topic = %{id: "post-1", title: "What if?", body: "Only the post belongs here.",
+      author: "author"}
+    comments = [%{author: "reply_one", body: "Never include this reply."}]
+    caller = self()
+
+    probe = fn text, opts ->
+      send(caller, {:probed, text, opts[:brain_observation?]})
+      {:ok, %{stage: :social_semantic_shadow}}
+    end
+
+    assert {:ok, report} = SocialCognitiveReport.analyze(
+      %{topic: topic, comments: comments},
+      probe: probe, target: :original_post, brain_observation?: true
+    )
+
+    assert report.target.kind == :original_post
+    assert length(report.segments) == 2
+    assert report.sections.replies == []
+    assert report.sections.original_post.author == "author"
+    assert Map.has_key?(report, :conversation)
+    assert_receive {:probed, "What if?", true}
+    assert_receive {:probed, "Only the post belongs here.", true}
+    refute_receive {:probed, _, _}
+  end
+
+  test "each reply is probed independently, including replies beyond the thread cap" do
+    topic = %{id: "post-1", title: "Do not probe the post?", body: "Not this.",
+      author: "same_author"}
+    comments = for i <- 1..12, do: %{
+      author: if(i == 11, do: "same_author", else: "agent_#{i}"),
+      body: "Reply #{i} text."
+    }
+    caller = self()
+
+    probe = fn text, opts ->
+      send(caller, {:probed, text, opts[:brain_observation?]})
+      {:ok, %{stage: :social_semantic_shadow}}
+    end
+
+    assert {:ok, report} = SocialCognitiveReport.analyze(
+      %{topic: topic, comments: comments},
+      probe: probe, target: {:reply, 10}, brain_observation?: true
+    )
+
+    assert report.target == %{
+      kind: :reply, label: "Reply 11", index: 11, author: "same_author"
+    }
+    assert [%{source_type: :reply, source_index: 11, author: "same_author"}] =
+      report.segments
+    assert report.sections.original_post.segments == []
+    assert [%{index: 11, author: "same_author"}] = report.sections.replies
+    refute Map.has_key?(report, :conversation)
+    assert report.omitted_replies == 0
+    assert_receive {:probed, "Reply 11 text.", true}
+    refute_receive {:probed, _, _}
+
+    assert {:ok, other} = SocialCognitiveReport.analyze(
+      %{topic: topic, comments: comments},
+      probe: probe, target: {:reply, 0}
+    )
+    assert other.target.index == 1
+    assert_receive {:probed, "Reply 1 text.", false}
+    refute_receive {:probed, _, _}
+  end
+
+  test "invalid source targets reject analysis without invoking the probe" do
+    topic = %{id: "post-1", title: "Question?", body: "", author: "author"}
+    comments = [%{author: "agent", body: "Response."}]
+    probe = fn _, _ -> flunk("invalid selection was probed") end
+
+    for target <- [{:reply, -1}, {:reply, 1}, {:reply, 99}, :unknown, {:reply, "0"}] do
+      assert {:error, :invalid_social_analysis_target} =
+        SocialCognitiveReport.analyze(
+          %{topic: topic, comments: comments}, probe: probe, target: target
+        )
+    end
+  end
+
   test "operator can opt into transient Brain stimulation, never by default" do
     topic = %{
       id: "00000000-0000-4000-8000-000000000001",
