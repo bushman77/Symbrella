@@ -173,6 +173,7 @@ defmodule Core.Social.SemanticProbe do
          typed_construction: if(is_map(derivation),
            do: Map.get(derivation, :construction), else: nil),
          sentence_interpretation: meaning.status,
+         comprehension_received_meaning: get_in(summary, [:sentence_meaning, :status]) == meaning.status,
          provisional_hypothesis: if(is_map(provisional),
            do: :available, else: :not_available),
          external_source_isolation: :enforced,
