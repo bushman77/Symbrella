@@ -209,7 +209,20 @@ defmodule Core.Semantic.SentenceMeaning do
 
     case Enum.find(frames, &(Map.get(&1, :id) == :wh_aux_topic_question)) do
       nil ->
-        %{status: :no_question_signature}
+        # COLONY-14 syntactic milestone. This is NOT a semantic interpretation:
+        # no ATL role agreement or conditional composition has been established.
+        case Enum.find(frames, &(Map.get(&1, :id) == :wh_modal_conditional_question)) do
+          %{source: :core_syntax, roles: roles, span: span} when is_map(roles) ->
+            %{
+              status: :modal_conditional_signature_detected,
+              span: span,
+              role_indices: roles,
+              semantic_composition: :not_yet_interpreted
+            }
+
+          _ ->
+            %{status: :no_question_signature}
+        end
 
       %{span: {first, last}, roles: roles} when is_map(roles) ->
         atl = Enum.find(constituents, fn constituent ->
