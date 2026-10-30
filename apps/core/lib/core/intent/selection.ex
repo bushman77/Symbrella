@@ -255,11 +255,19 @@ defmodule Core.Intent.Selection do
     end
   end
 
-  defp intent_fuzzy_from_source(%{fuzzy_text: %{text: text} = hypothesis}, _original)
-       when is_binary(text),
-       do: hypothesis
+  defp intent_fuzzy_from_source(%{sentence: source, fuzzy_text: %{original: source_text, text: text} = hypothesis}, original)
+       when is_binary(source) and is_binary(source_text) and is_binary(text) do
+    if source == source_text do
+      hypothesis
+    else
+      interpret_source_for_intent(original)
+    end
+  end
 
-  defp intent_fuzzy_from_source(_si, original) do
+  defp intent_fuzzy_from_source(_si, original),
+    do: interpret_source_for_intent(original)
+
+  defp interpret_source_for_intent(original) do
     Core.Text.Fuzzy.interpret(original,
       protected_words: @self_names, obsolete_synonym?: false
     )
