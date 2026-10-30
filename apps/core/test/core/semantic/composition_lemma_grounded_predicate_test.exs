@@ -118,7 +118,7 @@ defmodule Core.Semantic.CompositionLemmaGroundedPredicateTest do
     assert Predicate.discover(without_score, 3).status == :no_attested_form_of_verb
 
     wrong_index =
-      update_in(input.active_cells, fn cells ->
+      Map.update!(input, :active_cells, fn cells ->
         Enum.map(cells, &Map.put(&1, :token_index, 7))
       end)
 
