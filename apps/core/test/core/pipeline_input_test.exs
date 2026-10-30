@@ -25,6 +25,9 @@ defmodule Core.PipelineInputTest do
     assert Enum.any?(si.punctuation_tokens, &(&1.phrase == ","))
     assert Enum.any?(si.punctuation_tokens, &(&1.phrase == "!"))
     assert Enum.any?(si.punctuation_tokens, &(&1.phrase == "👋"))
+    assert Enum.find(si.phrase_candidates, &(&1.phrase == "can't fly")).surface ==
+             "can't  fly"
+    refute Enum.any?(si.phrase_candidates, &String.contains?(&1.phrase, "Café can't"))
 
     # The exact UTF-8 offsets, not character indices, reach the next stage.
     kept = TokenFilters.keep_only_word_boundary_tokens(si)
@@ -42,6 +45,15 @@ defmodule Core.PipelineInputTest do
     assert Enum.any?(si.phrase_candidates, &(&1.phrase == "The cat sleeps"))
     refute Enum.any?(si.phrase_candidates, &String.contains?(&1.phrase, "flies The"))
     assert Enum.count(si.punctuation_tokens, &(&1.subpos == :sentence_final)) == 2
+  end
+
+  test "line breaks are source-aligned and block phrase candidates" do
+    si = Input.prepare("The bird.\nThe cat", max_wordgram_n: 3)
+
+    assert Enum.any?(si.punctuation_tokens, &(&1.subpos == :line_break))
+    assert Enum.any?(si.phrase_candidates, &(&1.phrase == "The bird"))
+    assert Enum.any?(si.phrase_candidates, &(&1.phrase == "The cat"))
+    refute Enum.any?(si.phrase_candidates, &String.contains?(&1.phrase, "bird The"))
   end
 
   test "preserves dotted initials and numbers without confusing final punctuation" do
