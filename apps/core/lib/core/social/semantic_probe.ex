@@ -39,7 +39,11 @@ defmodule Core.Social.SemanticProbe do
   defp analyze(excerpt, opts) do
     # Chat and Colony share the same source-aligned Phase 1 tokenization.
     # The read-only probe remains bounded and does not admit memory.
-    input = Core.Pipeline.Input.prepare(excerpt, max_wordgram_n: 1)
+    input =
+      excerpt
+      |> Core.Pipeline.Input.prepare(max_wordgram_n: 1)
+      |> Core.Pipeline.Input.grammatical_projection()
+
     all_tokens = input.tokens
     tokens = Enum.take(all_tokens, @max_tokens)
 
