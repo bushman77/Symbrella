@@ -308,8 +308,18 @@ defmodule SymbrellaWeb.SocialLive do
                     </div>
                     <div id="social-speaker-analysis" class="space-y-3">
                       <h4 class="font-semibold">2. What did each participant mean?</h4>
-                      <article :for={participant <- @cognitive_report.conversation.participants}
+                      <section :for={group <- [:original_post, :replies]}
+                        id={if(group == :original_post, do: "social-speaker-original", else: "social-speaker-replies")}
                         class="space-y-2 rounded border border-white/10 p-3">
+                        <h5 class="text-sm font-semibold text-cyan-200">
+                          {if(group == :original_post, do: "Original post", else: "Replies")}
+                        </h5>
+                        <article :for={participant <- Enum.filter(
+                          @cognitive_report.conversation.participants,
+                          fn participant ->
+                            (participant.source_label == "Original post") == (group == :original_post)
+                          end
+                        )} class="space-y-2 rounded border border-white/10 p-3">
                         <p class="break-words text-sm font-semibold text-cyan-200">
                           {participant.source_label} · {participant.speaker}
                         </p>
@@ -324,7 +334,8 @@ defmodule SymbrellaWeb.SocialLive do
                             {meaning.interpretation || "Structural meaning unavailable."}
                           </p>
                         </div>
-                      </article>
+                        </article>
+                      </section>
                     </div>
                     <div id="social-relation-analysis" class="space-y-3">
                       <h4 class="font-semibold">3. How do statements relate?</h4>
