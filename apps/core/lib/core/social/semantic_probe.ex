@@ -114,15 +114,37 @@ defmodule Core.Social.SemanticProbe do
     projection = project_choices(choices)
     slate = Brain.ATL.reduce(projection, tokens, Map.get(si, :sentence_signatures, []))
 
+    # Pure equivalents of the structural and composition stages in normal
+    # chat. They assess independently attested evidence without updating
+    # live LIFG/ATL region state or granting external text factual authority.
     semantic_si =
       si
       |> Map.put(:lifg_choices, projection)
       |> Map.put(:atl_slate, slate)
 
-    # SentenceMeaning's general participant gate intentionally refuses
-    # untrusted external events. The narrower external proposition interpreter
-    # can still report a structurally supported, *unverified* assertion.
+    structural = Brain.LIFG.StructuralCompetition.resolve(semantic_si)
+
+    semantic_si =
+      Map.put(semantic_si, :structural_competition, structural)
+
+    derivation = Core.Semantic.Composition.derive(semantic_si)
+
+    semantic_si =
+      Map.put(semantic_si, :compositional_derivation, derivation)
+
+    # SentenceMeaning's participant gate still refuses external assertions.
+    # A grammatical frame remains a hypothesis unless the independent
+    # interpretation checks succeed.
     meaning = Core.Semantic.SentenceMeaning.build(semantic_si)
+
+    semantic_si = Map.put(semantic_si, :sentence_meaning, meaning)
+
+    # The provisional read-only stage is downstream from sentence meaning
+    # in chat. Its output must stay an explicitly non-factual hypothesis.
+    provisional = Core.Semantic.ProvisionalInterpretation.detect(semantic_si)
+
+    semantic_si = Map.put(semantic_si, :provisional_interpretation, provisional)
+
     reported_proposition = Core.Social.ReportedProposition.interpret(semantic_si)
     summary = Core.Comprehension.Summary.build(semantic_si)
 
@@ -137,6 +159,28 @@ defmodule Core.Social.SemanticProbe do
     result = %{
        stage: :social_semantic_shadow,
        brain_observation: observation,
+       stage_diagnostic: %{
+         pipeline: :read_only_external_projection,
+         lexical_stage: lifg.status,
+         atl_stage: :read_only_reduced,
+         atl_resolved_constituents: Enum.count(Map.get(slate, :constituents, []),
+           &(Map.get(&1, :status) == :resolved)),
+         structural_competition: structural.status,
+         structural_candidates: length(Map.get(structural, :candidates, [])),
+         structurally_preferred: if(is_map(structural.preferred),
+           do: Map.get(structural.preferred, :construction), else: nil),
+         typed_composition: if(is_map(derivation), do: :derived, else: :not_derived),
+         typed_construction: if(is_map(derivation),
+           do: Map.get(derivation, :construction), else: nil),
+         sentence_interpretation: meaning.status,
+         provisional_hypothesis: if(is_map(provisional),
+           do: :available, else: :not_available),
+         external_source_isolation: :enforced,
+         runtime_lifg_ingest: :not_performed,
+         runtime_atl_ingest: :not_performed,
+         working_memory_admission: :not_performed,
+         episodic_persistence: :not_performed
+       },
        input_chars: String.length(excerpt),
        token_count: length(tokens),
        syntax: %{status: :observed, signatures: signatures, audit: grammar_audit},
@@ -170,6 +214,8 @@ defmodule Core.Social.SemanticProbe do
          topic_structure: bounded_topic_structure(meaning),
          embedded_candidates: Core.Semantic.EmbeddedClauseEvidence.candidates(semantic_si, meaning),
          unresolved_roles: meaning |> Map.get(:unresolved, []) |> List.wrap() |> Enum.take(8),
+         source_gate: if(meaning.status == :not_yet_interpreted,
+           do: :requires_supported_composition, else: :meaning_stage_returned),
          provenance: :external_unverified
        },
        reported_proposition: reported_proposition,
