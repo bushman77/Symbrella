@@ -213,7 +213,7 @@ defmodule Core.Intent.Selection do
       if normalize_text(kw0) == normalize_text(text0) do
         text
       else
-        normalize_text(kw0)
+        corrected_keyword(kw0, text_fuzzy)
       end
 
     primary = primary_utterance(text)
@@ -272,6 +272,30 @@ defmodule Core.Intent.Selection do
       protected_words: @self_names, obsolete_synonym?: false
     )
   end
+
+  # Project only Phase 1's independently recorded word corrections onto the
+  # intent cue. The original tokens and source text remain untouched, and no
+  # second fuzzy interpretation is performed.
+  defp corrected_keyword(keyword, %{corrections: corrections}) when is_list(corrections) do
+    replacements =
+      corrections
+      |> Enum.reduce(%{}, fn
+        %{original: original, replacement: replacement}, acc
+        when is_binary(original) and is_binary(replacement) ->
+          Map.put(acc, String.downcase(original), replacement)
+
+        _, acc ->
+          acc
+      end)
+
+    keyword
+    |> Regex.replace(~r/[\\p{L}\\p{N}']+/u, fn term ->
+      Map.get(replacements, String.downcase(term), term)
+    end)
+    |> normalize_text()
+  end
+
+  defp corrected_keyword(keyword, _), do: normalize_text(keyword)
 
   defp primary_keyword(kw, %{opener_intent: :greet, text: primary_text})
        when is_binary(primary_text) and primary_text != "" do
