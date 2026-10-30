@@ -238,13 +238,31 @@ defmodule Core.Semantic.RelationalEvidenceTest do
 
     assert Enum.any?(si.sentence_signatures, &(&1.id == :finite_past_svo_candidate))
 
+    grant = [
+      %{id: "grant|verb|1", norm: "grant", pos: "verb",
+        definition: "(ditransitive) To give (permission or wish).",
+        semantic_atoms: ["tag:ditransitive"]},
+      %{id: "grant|verb|2", norm: "grant", pos: "verb",
+        definition: "(ditransitive) To give (bestow upon or confer).",
+        semantic_atoms: ["tag:ditransitive"]},
+      %{id: "grant|verb|3", norm: "grant", pos: "verb",
+        definition: "(transitive) To agree with someone.",
+        semantic_atoms: ["tag:transitive"]},
+      %{id: "grant|verb|4", norm: "grant", pos: "verb",
+        definition: "(intransitive) To assent.",
+        semantic_atoms: ["tag:intransitive"]}
+    ]
+
     report = RelationalEvidence.audit(si,
-      lookup: lookup(%{"bank" => @bank, "loan" => @loan}))
+      lookup: lookup(%{"bank" => @bank, "loan" => @loan, "grant" => grant}))
 
     assert report.status == :candidate_relational_evidence
     assert Enum.any?(report.frames, fn frame ->
       frame.signature_id == :finite_past_svo_candidate and
-        frame.subject.word == "bank" and frame.object.word == "loan"
+        frame.subject.word == "bank" and frame.object.word == "loan" and
+        frame.predicate_lemma_evidence.status == :lemma_senses_attested and
+        frame.predicate_lemma_evidence.lemma == "grant" and
+        frame.predicate_lemma_evidence.lemma_sense_count == 4
     end)
     assert si.active_cells == rows
     refute report.modified_lifg?
