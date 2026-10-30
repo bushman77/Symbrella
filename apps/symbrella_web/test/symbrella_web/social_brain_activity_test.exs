@@ -60,6 +60,63 @@ defmodule SymbrellaWeb.SocialBrainActivityTest do
     refute_receive {:aggregate_telemetry, _, _, _}, 20
   end
 
+  test "original post and replies retain separate stimulation and interpretation totals" do
+    :ok = Bus.subscribe("brain:social")
+
+    post = %{source_type: :original_post, source_index: 0,
+      label: "Original post · sentence 1", status: :analyzed,
+      result: %{
+        lifg: %{chosen_count: 8}, atl: %{winner_count: 8},
+        brain_observation: %{status: :stimuli_issued, stimuli_issued: 4},
+        sentence_meaning: %{status: :not_yet_interpreted}
+      }}
+
+    reply1 = %{source_type: :reply, source_index: 1,
+      label: "Reply 1 · sentence 1", status: :analyzed,
+      result: %{
+        lifg: %{chosen_count: 10}, atl: %{winner_count: 10},
+        brain_observation: %{status: :stimuli_issued, stimuli_issued: 3},
+        sentence_meaning: %{status: :structurally_interpreted}
+      }}
+
+    reply2 = %{source_type: :reply, source_index: 2,
+      label: "Reply 2 · sentence 1", status: :analyzed,
+      result: %{
+        lifg: %{chosen_count: 6}, atl: %{winner_count: 6},
+        brain_observation: %{status: :stimuli_issued, stimuli_issued: 2},
+        sentence_meaning: %{status: :not_yet_interpreted}
+      }}
+
+    report = %{
+      segments: [post, reply1, reply2],
+      sections: %{
+        original_post: %{segments: [post]},
+        replies: [
+          %{index: 1, segments: [reply1]},
+          %{index: 2, segments: [reply2]}
+        ]
+      },
+      discourse: %{interpretations: []},
+      conversation: %{participants: [], relations: []}
+    }
+
+    assert :ok = SocialBrainActivity.record(report)
+    assert_receive {:social_cognition, activity}
+
+    assert activity.neuron_stimuli_issued == 9
+    assert activity.source_breakdown.original_post ==
+      %{sentences: 1, lifg_choices: 8, atl_winners: 8,
+        neuron_stimuli: 4, interpreted_sentences: 0}
+    assert activity.source_breakdown.replies ==
+      %{sentences: 2, lifg_choices: 16, atl_winners: 16,
+        neuron_stimuli: 5, interpreted_sentences: 1}
+
+    assert Enum.map(activity.reply_breakdown,
+      &{&1.reply_index, &1.metrics.neuron_stimuli}) == [{1, 3}, {2, 2}]
+    refute inspect(activity) =~ "Original post · sentence"
+    refute inspect(activity) =~ "Reply 1 · sentence"
+  end
+
   test "broadcasts only short-lived aggregate semantic stage activity" do
     :ok = Bus.subscribe("brain:social")
 
