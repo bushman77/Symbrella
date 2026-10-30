@@ -9,7 +9,11 @@ defmodule SymbrellaWeb.SocialBrainActivityTest do
 
     report = %{
       segments: [
-        %{status: :analyzed, result: %{lifg: %{chosen_count: 3}, atl: %{winner_count: 2}}},
+        %{status: :analyzed, result: %{
+          lifg: %{chosen_count: 3},
+          atl: %{winner_count: 2},
+          brain_observation: %{status: :stimuli_issued, stimuli_issued: 2}
+        }},
         %{status: :unavailable, reason: :probe_unavailable}
       ],
       discourse: %{interpretations: [%{source_label: "Original post · sentence 1"}]},
@@ -21,6 +25,7 @@ defmodule SymbrellaWeb.SocialBrainActivityTest do
     assert activity.segments == 2
     assert activity.lifg_choices == 3
     assert activity.atl_winners == 2
+    assert activity.neuron_stimuli_issued == 2
     assert activity.supported_interpretations == 1
     assert activity.participants == 1
     assert activity.relations == 1
