@@ -196,10 +196,15 @@ defmodule SymbrellaWeb.SocialLiveTest do
         |> Map.put(:analyzed_segments, 2)
         |> Map.put(:segments, [original, reply])
         |> Map.put(:sections, %{
-          original_post: %{author: topic.author, segments: [original]},
+          original_post: %{
+            author: topic.author, segments: [original],
+            understanding: %{status: :meaning_unresolved},
+            discourse: %{interpretations: []}
+          },
           replies: [%{
             index: 1, label: "Reply 1", author: first_reply.author,
-            segments: [reply], understanding: %{status: :meaning_unresolved}
+            segments: [reply], understanding: %{status: :meaning_unresolved},
+            discourse: %{interpretations: []}
           }]
         })}
     end
@@ -215,6 +220,8 @@ defmodule SymbrellaWeb.SocialLiveTest do
 
       assert has_element?(view, "#social-analysis-original-post")
       assert has_element?(view, "#social-analysis-replies")
+      assert has_element?(view, "#social-speaker-original")
+      assert has_element?(view, "#social-speaker-replies")
       assert has_element?(view, "#social-analysis-reply-1")
 
       assert has_element?(view, "#social-analysis-original-post #social-analysis-segment-0")
