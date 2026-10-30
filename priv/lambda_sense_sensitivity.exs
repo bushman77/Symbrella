@@ -120,7 +120,8 @@ inspect_variant = fn {mode, sense_id} ->
             relation: get_in(proof, [:event_semantics, :spatial, :relation]),
             witness_sense_id: if(is_map(witness), do: Map.get(witness, :sense_id), else: nil),
             witness_basis: if(is_map(witness), do: Map.get(witness, :selection_basis), else: nil),
-            lambda_term: proof.initial
+            lambda_term: proof.initial,
+            sense_alignment: Core.Semantic.Composition.SenseAlignment.audit(proof, sense)
           }
 
         :not_applicable ->
