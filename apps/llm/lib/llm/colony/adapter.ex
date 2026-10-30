@@ -20,6 +20,9 @@ defmodule Llm.Colony.Adapter do
     timeout_ms: 5_000
   ]
 
+  @doc "Local path for the long-lived Colony key (never its contents)."
+  def key_file, do: @key_file
+
   @doc "Validated, non-secret configuration."
   def config do
     case Application.get_env(:llm, :colony, []) do
