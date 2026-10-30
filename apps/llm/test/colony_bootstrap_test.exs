@@ -16,7 +16,9 @@ defmodule Llm.Colony.BootstrapTest do
 
     on_exit(fn ->
       File.rm(path)
-      Application.put_env(:llm, :colony, old)
+      if is_nil(old),
+        do: Application.delete_env(:llm, :colony),
+        else: Application.put_env(:llm, :colony, old)
     end)
 
     {:ok, path: path}
