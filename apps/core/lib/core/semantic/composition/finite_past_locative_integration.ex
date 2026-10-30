@@ -18,7 +18,9 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
 
     with true <- is_function(lookup, 1),
          {:ok, words} <- words(si),
-         true <- words == ["the", "bird", "sat", "on", "the", "fence"],
+         sentence when is_binary(sentence) <- Map.get(si, :sentence),
+         true <- String.trim_trailing(String.downcase(String.trim(sentence)), ".") ==
+                   Enum.join(words, " "),
          detected <- Signatures.detect(si),
          [signature] <- Enum.filter(detected, &(&1.id == :finite_past_locative_candidate and
                                                   &1.span == {0, 5})),
@@ -32,10 +34,10 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
          {:ok, proof} <- FinitePastLocative.compose(%{
            signature: signature,
            grounding: grounded,
-           predicate_surface: "sat",
-           actor: "bird",
-           preposition: "on",
-           landmark: "fence"
+           predicate_surface: Enum.at(words, 2),
+           actor: Enum.at(words, 1),
+           preposition: Enum.at(words, 3),
+           landmark: Enum.at(words, 5)
          }),
          :ok <- FinitePastLocative.verify(proof) do
       {:ok, proof}
