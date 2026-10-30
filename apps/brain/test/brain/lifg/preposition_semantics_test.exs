@@ -110,7 +110,8 @@ defmodule Brain.LIFG.PrepositionSemanticsTest do
   test "disabled option remains score preserving" do
     original = scores()
     assert {^original, %{applied?: false, reason: :disabled}} =
-             PrepositionSemantics.adjust(original, [@ordinary, @topic], input(), 3)
+             PrepositionSemantics.adjust(original, [@ordinary, @topic], input(), 3,
+               enabled?: false)
   end
 
   test "Stage1 opt-in scores spatial sense while retaining topic alternative" do
