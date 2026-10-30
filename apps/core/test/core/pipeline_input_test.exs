@@ -172,6 +172,23 @@ defmodule Core.PipelineInputTest do
     assert audit.factual_authority? == false
   end
 
+  test "reference attachment carries its arbitration audit in SemanticInput" do
+    existing = %{
+      source: :wm_comprehension,
+      antecedents: ["Kamloops BC", "Maple Ridge BC"],
+      verification: :conversation_context_only
+    }
+
+    si = %Core.SemanticInput{sentence: "What are the populations of each?",
+      discourse_reference: existing}
+
+    out = Core.Discourse.References.attach(si)
+
+    assert out.discourse_reference == existing
+    assert out.reference_resolution.status == :unique
+    assert :ok = Core.SemanticInput.validate_contract(out)
+  end
+
   test "reference arbitration corroborates the same referent and retains source provenance" do
     one = %{source: :wm_nominal_focus, antecedent: "The Black Bird"}
     two = %{source: :discourse_ledger, antecedent: "the black bird"}
