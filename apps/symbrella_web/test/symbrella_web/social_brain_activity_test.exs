@@ -82,6 +82,7 @@ defmodule SymbrellaWeb.SocialBrainActivityTest do
     assert activity.lifg_choices == 3
     assert activity.atl_winners == 2
     assert activity.neuron_stimuli_issued == 2
+    assert activity.neuron_observation_statuses == %{stimuli_issued: 1}
     assert activity.supported_interpretations == 1
     assert activity.participants == 1
     assert activity.relations == 1
