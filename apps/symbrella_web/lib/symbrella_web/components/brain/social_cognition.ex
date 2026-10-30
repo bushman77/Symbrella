@@ -1,10 +1,10 @@
 defmodule SymbrellaWeb.Components.Brain.SocialCognition do
   @moduledoc """
-  Read-only Colony shadow results in the Brain dashboard.
+  Source-attributed Colony cognition results in the Brain dashboard.
 
-  Extracted from the already bounded Brain.Blackboard event window. These
-  counts report pure LIFG/ATL analysis, NOT active BrainCells, neural pulses,
-  live GenServer state changes, fact verification, or working-memory writes.
+  Extracted from the bounded Brain.Blackboard event window. A thread-level
+  result includes lexical analysis and requested transient neuron stimulation.
+  It is not proof of neuron firing, learning, or working-memory admission.
   """
 
   use SymbrellaWeb, :html
@@ -30,6 +30,8 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
             analysis_scope: Map.get(meta, :analysis_scope, :unspecified),
             sentence_status: Map.get(meta, :sentence_status),
             provenance: Map.get(meta, :provenance),
+            segments: bounded_count(measurements, :segments),
+            neuron_stimuli_issued: bounded_count(measurements, :neuron_stimuli_issued),
             lifg_choices: bounded_count(measurements, :lifg_choices),
             atl_winners: bounded_count(measurements, :atl_winners),
             syntax_frames: bounded_count(measurements, :syntax_frames),
@@ -67,35 +69,38 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h3 class="text-sm font-semibold">Colony cognition · read-only</h3>
         <span class="rounded bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-          Shadow analysis, not neuron activation
+          External language · isolated memory · transient neuron requests
         </span>
       </div>
       <%= if @social do %>
         <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
           <div><dt class="text-xs text-zinc-500">Lexical analysis scope</dt><dd class="font-mono break-all">{@social.analysis_scope}</dd></div>
+          <div :if={@social.analysis_scope == :thread_aggregate}><dt class="text-xs text-zinc-500">Sentences inspected</dt><dd class="font-mono">{@social.segments}</dd></div>
+          <div :if={@social.analysis_scope == :thread_aggregate}><dt class="text-xs text-zinc-500">Neuron stimuli requested</dt><dd class="font-mono">{@social.neuron_stimuli_issued}</dd></div>
           <div><dt class="text-xs text-zinc-500">LIFG selections</dt><dd class="font-mono">{@social.lifg_choices}</dd></div>
           <div><dt class="text-xs text-zinc-500">ATL winners</dt><dd class="font-mono">{@social.atl_winners}</dd></div>
           <div><dt class="text-xs text-zinc-500">Grammar frames</dt><dd class="font-mono">{@social.syntax_frames}</dd></div>
           <div><dt class="text-xs text-zinc-500">Dictionary rows</dt><dd class="font-mono">{@social.dictionary_rows}</dd></div>
           <div><dt class="text-xs text-zinc-500">Tokens with POS</dt><dd class="font-mono">{@social.pos_covered_tokens} / {@social.processed_tokens}</dd></div>
-          <div><dt class="text-xs text-zinc-500">Grammar audit</dt><dd class="font-mono break-all">{@social.grammar_outcome}</dd></div>
-          <div><dt class="text-xs text-zinc-500">Dictionary lookup</dt><dd class="font-mono break-all">{@social.ltm_status}</dd></div>
+          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">Grammar audit</dt><dd class="font-mono break-all">{@social.grammar_outcome}</dd></div>
+          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">Dictionary lookup</dt><dd class="font-mono break-all">{@social.ltm_status}</dd></div>
           <div :if={@social.ltm_reason}><dt class="text-xs text-zinc-500">Lookup error</dt><dd class="font-mono break-all">{@social.ltm_reason}</dd></div>
           <div><dt class="text-xs text-zinc-500">Sentence meaning</dt><dd class="font-mono break-all">{@social.sentence_status}</dd></div>
-          <div><dt class="text-xs text-zinc-500">External proposition</dt><dd class="font-mono break-all">{@social.proposition_status}</dd></div>
+          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">External proposition</dt><dd class="font-mono break-all">{@social.proposition_status}</dd></div>
           <div :if={@social.proposition_reason}><dt class="text-xs text-zinc-500">Proposition abstention</dt><dd class="font-mono break-all">{@social.proposition_reason}</dd></div>
           <div><dt class="text-xs text-zinc-500">Disputed grammatical roles</dt><dd class="font-mono">{@social.disputed_roles}</dd></div>
-          <div><dt class="text-xs text-zinc-500">Reported relation</dt><dd class="font-mono break-all">{@social.relation}</dd></div>
+          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">Reported relation</dt><dd class="font-mono break-all">{@social.relation}</dd></div>
           <div><dt class="text-xs text-zinc-500">Evidence status</dt><dd class="font-mono break-all">{@social.provenance}</dd></div>
         </dl>
         <p class="mt-3 text-xs text-zinc-500">
-          These are temporary lexical and structural computations on an untrusted external report.
-          No firing neurons, working-memory admission, or verified claim is implied.
+          Colony text is untrusted external input. Neuron-stimulus counts represent
+          activation requests, not verified firing reports. No durable memory,
+          working-memory admission, synaptic learning, or factual authority is implied.
         </p>
       <% else %>
         <p class="mt-3 text-sm text-zinc-500">
-          No Colony cognitive shadow event in the recent blackboard window.
-          Run a read-only SemanticProbe or draft and refresh the Brain dashboard.
+          No recent Colony analysis in the blackboard window.
+          Select Analyze cognition under /social, then return to Brain.
         </p>
       <% end %>
     </section>
