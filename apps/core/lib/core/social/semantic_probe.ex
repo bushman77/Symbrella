@@ -140,7 +140,7 @@ defmodule Core.Social.SemanticProbe do
        },
        question_composition: Core.Semantic.SentenceMeaning.question_diagnostic(semantic_si),
        question_evidence: %{
-         signature_count: Enum.count(signatures, &(Map.get(&1, :id) in [:wh_aux_topic_question, :wh_aux_object_question])),
+         signature_count: Enum.count(signatures, &(Map.get(&1, :id) in [:wh_aux_topic_question, :wh_aux_object_question, :wh_modal_conditional_question])),
          resolved_constituents: slate
            |> Map.get(:constituents, [])
            |> List.wrap()
