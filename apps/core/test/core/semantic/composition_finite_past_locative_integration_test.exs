@@ -119,6 +119,37 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
     assert original.lifg_choices |> Enum.at(2) |> Map.fetch!(:id) == "sat|noun|1"
   end
 
+  test "tied attested noun senses license a noun-kind role without choosing a sense" do
+    original = si()
+    cells = original.active_cells ++ [
+      %{id: "bird|noun|2", norm: "bird", pos: "noun",
+        token_index: 1, semantic_atoms: []}
+    ]
+    choices = Enum.map(original.lifg_choices, fn choice ->
+      if choice.token_index == 1 do
+        %{choice | id: "bird|noun|999",
+          candidate_probs: %{"bird|noun|1" => 0.5, "bird|noun|2" => 0.5}}
+      else
+        choice
+      end
+    end)
+    changed = %{original | active_cells: cells, lifg_choices: choices}
+    assert :unsupported = RoleWitness.resolve(changed, :subject_head, 1, ["noun"])
+    assert {:ok, witness} = RoleWitness.resolve_noun_kind(changed, :subject_head, 1)
+    assert witness.sense_id == nil
+    assert witness.selection_basis == :construction_noun_pos_only
+    assert length(witness.attested_sense_ids) == 2
+    assert {:ok, proof} = Integration.derive(changed, lookup: &lookup/1)
+    assert proof.premises.selected_lifg_id == "sat|noun|1"
+
+    unscored = put_in(changed, [:lifg_choices],
+      Enum.map(changed.lifg_choices, fn choice ->
+        if choice.token_index == 1, do: %{choice | candidate_probs: %{}}, else: choice
+      end))
+    assert :unsupported = RoleWitness.resolve_noun_kind(unscored, :subject_head, 1)
+    assert :not_applicable = Integration.derive(unscored, lookup: &lookup/1)
+  end
+
   test "rejects missing signatures and scored morphological evidence" do
     original = si()
     assert :not_applicable = Integration.derive(
