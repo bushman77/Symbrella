@@ -75,7 +75,9 @@ defmodule SymbrellaWeb.SocialBrainActivity do
         analysis_scope: :thread_aggregate,
         sentence_status: if(activity.supported_interpretations > 0,
           do: :partially_interpreted, else: :not_yet_interpreted),
-        provenance: :external_unverified
+        provenance: :external_unverified,
+        selected_source: activity.analyzed_target.kind,
+        selected_reply_index: Map.get(activity.analyzed_target, :index)
       }
     )
 
@@ -130,6 +132,21 @@ defmodule SymbrellaWeb.SocialBrainActivity do
     conversation = Map.get(report, :conversation) || %{}
     sections = Map.get(report, :sections) || %{}
 
+    # Only a non-identifying reference to the clicked piece is retained.
+    # The actual author and external text stay out of the Brain activity bus.
+    target =
+      case Map.get(report, :target) do
+        %{kind: kind, label: label, index: index}
+        when kind in [:original_post, :reply] and is_binary(label) and is_integer(index) ->
+          %{kind: kind, label: label, index: index}
+
+        %{kind: :thread} ->
+          %{kind: :thread, label: "Entire conversation"}
+
+        _ ->
+          %{kind: :legacy, label: "Prior cognitive analysis"}
+      end
+
     post_segments =
       case get_in(sections, [:original_post, :segments]) do
         items when is_list(items) -> items
@@ -171,6 +188,7 @@ defmodule SymbrellaWeb.SocialBrainActivity do
     %{
       source: :colony_external,
       mode: :read_only_shadow,
+      analyzed_target: target,
       source_breakdown: scopes,
       reply_breakdown: reply_breakdown,
       neuron_stimuli_issued: count(segments, [:result, :brain_observation, :stimuli_issued]),
