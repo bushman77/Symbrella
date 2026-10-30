@@ -84,6 +84,7 @@ defmodule Core.Syntax.Signatures do
     (definition_imperatives(si, nodes) ++
        definition_request_structures(si, nodes) ++
        wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
+       wh_modal_conditional_questions(si, nodes) ++
        progressive_locatives(nodes) ++ progressive_lexical_gaps(nodes) ++
        anaphoric_progressive_locatives(nodes) ++
        finite_present_svo(nodes) ++
@@ -489,6 +490,63 @@ defmodule Core.Syntax.Signatures do
             [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
              :attested_nominal_subject, :lexical_verb_available,
              :question_punctuation, :contiguous_surface]
+          )]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  # COLONY-14: bounded hypothetical WH question with a copular if-clause:
+  # "What would you do if you were free?"
+  #
+  # This is strictly grammatical evidence. It neither asserts the condition
+  # nor composes an intention or a chosen action. Every role retains its
+  # observed base-token index and key predicate/state POS must be attested.
+  # The exact eight-word window prevents unrelated trailing text from
+  # inheriting the stronger signature.
+  defp wh_modal_conditional_questions(si, nodes) do
+    sentence = Map.get(si, :sentence)
+
+    case nodes do
+      [wh, modal, subject, verb, marker, if_subject, copula, complement] = window ->
+        if is_binary(sentence) and String.ends_with?(String.trim(sentence), "?") and
+             wh.index == 0 and wh.word == "what" and pos?(wh, "pronoun") and
+             modal.word == "would" and
+             (pos?(modal, "auxiliary") or pos?(modal, "modal") or pos?(modal, "verb")) and
+             MapSet.member?(@question_subjects, subject.word) and pos?(subject, "pronoun") and
+             pos?(verb, "verb") and marker.word == "if" and
+             MapSet.member?(@question_subjects, if_subject.word) and
+             pos?(if_subject, "pronoun") and
+             copula.word in ~w(was were) and
+             (pos?(copula, "auxiliary") or pos?(copula, "verb")) and
+             pos?(complement, "adjective") and valid_surface?(window) do
+          [signature(
+            :wh_modal_conditional_question,
+            {wh.index, complement.index},
+            %{
+              wh: wh.index, modal: modal.index, subject: subject.index,
+              predicate: verb.index, condition_marker: marker.index,
+              condition_subject: if_subject.index, condition_copula: copula.index,
+              condition_complement: complement.index
+            },
+            %{
+              wh: [:pos_pronoun],
+              modal: [:pos_modal_or_auxiliary_or_verb],
+              subject: [:pos_pronoun], predicate: [:pos_verb],
+              condition_marker: [:explicit_if_surface],
+              condition_subject: [:pos_pronoun],
+              condition_copula: [:attested_copular_form],
+              condition_complement: [:pos_adjective]
+            },
+            [
+              :wh_fronted, :modal_auxiliary_inversion, :attested_lexical_predicate,
+              :explicit_if_condition, :attested_copular_state,
+              :question_punctuation, :contiguous_surface
+            ]
           )]
         else
           []
