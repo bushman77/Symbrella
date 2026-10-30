@@ -133,6 +133,55 @@ defmodule Core.PipelineInputTest do
     end
   end
 
+  test "Phase 2 reuses the exact Phase 1 fuzzy evidence instead of recalculating it" do
+    original = "helo bird"
+    si = Core.resolve_input(original, mode: :test, fuzzy: true)
+
+    assert si.original_text == original
+    assert hd(si.tokens).phrase == "helo"
+    assert si.fuzzy_text.original == original
+    assert si.fuzzy_text.text =~ "hello"
+    assert is_list(si.fuzzy_text.evidence)
+    assert si.keyword in ["helo", "hello"]
+    assert is_list(si.intent_evidence)
+  end
+
+  test "fuzzy false prevents intent selection from rerunning spelling correction" do
+    si = Core.resolve_input("helo", mode: :test, fuzzy: false)
+
+    assert si.sentence == "helo"
+    assert hd(si.tokens).phrase == "helo"
+    assert si.fuzzy_text == nil
+    assert si.keyword == "helo"
+  end
+
+  test "reference arbitration retains independent conflicting antecedents" do
+    one = %{
+      source: :wm_comprehension, antecedents: ["Kamloops BC", "Maple Ridge BC"],
+      verification: :conversation_context_only
+    }
+
+    other = %{
+      source: :recent_user_turn, antecedent: "Vancouver BC",
+      verification: :conversation_context_only
+    }
+
+    assert {:ambiguous, audit} = Core.Discourse.References.arbitrate([one, other])
+    assert audit.status == :ambiguous
+    assert length(audit.candidates) == 2
+    assert audit.factual_authority? == false
+  end
+
+  test "reference arbitration corroborates the same referent and retains source provenance" do
+    one = %{source: :wm_nominal_focus, antecedent: "The Black Bird"}
+    two = %{source: :discourse_ledger, antecedent: "the black bird"}
+
+    assert {:unique, ^one, audit} = Core.Discourse.References.arbitrate([one, two])
+    assert audit.status == :corroborated
+    assert Enum.map(audit.candidates, & &1.source) ==
+             [:wm_nominal_focus, :discourse_ledger]
+  end
+
   test "fuzzy interpretation cannot rewrite canonical source tokens" do
     si = Core.resolve_input("teh  bird.", mode: :test, fuzzy: true)
 
