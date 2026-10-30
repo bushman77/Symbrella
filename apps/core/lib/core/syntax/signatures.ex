@@ -85,7 +85,8 @@ defmodule Core.Syntax.Signatures do
        definition_request_structures(si, nodes) ++
        wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
        wh_modal_conditional_questions(si, nodes) ++
-       progressive_locatives(nodes) ++ progressive_lexical_gaps(nodes) ++
+       progressive_locatives(nodes) ++ finite_past_locatives(nodes) ++
+       progressive_lexical_gaps(nodes) ++
        anaphoric_progressive_locatives(nodes) ++
        finite_present_svo(nodes) ++
        finite_past_svo(nodes) ++
@@ -869,6 +870,39 @@ defmodule Core.Syntax.Signatures do
   # present participle must be present in the lexical alternatives; the chosen
   # sense remains untouched, even when LIFG prefers an adjective reading.
   # Additional semantic validation is performed by ParticipantSpatial.
+  # Complete finite-past locative grammatical hypothesis, without assigning
+  # any word sense or asserting that an event occurred.
+  defp finite_past_locatives(nodes) do
+    nodes
+    |> Enum.chunk_every(6, 1, :discard)
+    |> Enum.flat_map(fn [sd, subject, predicate, prep, ld, location] = segment ->
+      contiguous? = Enum.map(segment, & &1.index) ==
+        Enum.to_list(sd.index..(sd.index + 5))
+
+      if contiguous? and pos?(sd, "determiner") and pos?(subject, "noun") and
+           pos?(predicate, "verb") and form?(predicate, :simple_past) and
+           pos?(prep, "preposition") and
+           prep.word in ~w(on in under beside above below) and
+           pos?(ld, "determiner") and pos?(location, "noun") and
+           valid_surface?(segment) do
+        [signature(
+          :finite_past_locative_candidate,
+          {sd.index, location.index},
+          %{subject_determiner: sd.index, subject_head: subject.index,
+            predicate: predicate.index, preposition: prep.index,
+            location_determiner: ld.index, location_head: location.index},
+          %{subject_head: [:pos_noun], predicate: [:simple_past],
+            preposition: [:pos_preposition], location_head: [:pos_noun]},
+          [:contiguous_surface, :attested_nominal_subject,
+           :attested_simple_past_verb, :attested_preposition,
+           :attested_nominal_location]
+        )]
+      else
+        []
+      end
+    end)
+  end
+
   defp progressive_locatives(nodes) do
     nodes
     |> Enum.chunk_every(7, 1, :discard)
