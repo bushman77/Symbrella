@@ -81,6 +81,169 @@ defmodule Core.Pipeline.LTM do
   end
 
   @doc """
+  Opt-in, read-only comparison of full and bounded dictionary candidate sets.
+
+  This never changes the live candidate slate or invokes LIFG. The result
+  measures candidate ID and POS coverage, **not** semantic correctness.
+  Query errors remain explicit rather than masquerading as zero candidates.
+
+  Options:
+    * :limit_per_norm - bounded candidate count per normalized term (1..32)
+    * :pos_diverse? - request POS-balanced bounded lookup (default true)
+    * :max_tokens - cap requested lexical tokens (default 8, maximum 16)
+    * :lookup - optional two-argument injected checked lookup for tests
+
+  For a real database comparison, pass the canonical Phase 1 SI and ensure Db
+  is running. The default production path remains unlimited and unchanged.
+  """
+  @spec compare_retrieval(map(), keyword()) :: {:ok, map()} | {:error, atom()}
+  def compare_retrieval(si, opts \\ [])
+
+  def compare_retrieval(%{tokens: tokens} = si, opts)
+      when is_list(tokens) and is_list(opts) do
+    budget = Keyword.get(opts, :limit_per_norm, 8)
+    cap = Keyword.get(opts, :max_tokens, 8)
+    pos_diverse? = Keyword.get(opts, :pos_diverse?, true) == true
+
+    cond do
+      not is_integer(budget) or budget < 1 or budget > 32 ->
+        {:error, :invalid_budget}
+
+      not is_integer(cap) or cap < 1 or cap > 16 ->
+        {:error, :invalid_max_tokens}
+
+      tokens == [] ->
+        {:error, :no_tokens}
+
+      length(tokens) > cap ->
+        {:error, :too_many_tokens}
+
+      true ->
+        lookup = Keyword.get(opts, :lookup, &Source.checked_ltm/2)
+        db_opts = Keyword.drop(opts, [:lookup, :max_tokens])
+        full_opts = db_opts |> Keyword.put(:limit_per_norm, :all) |> Keyword.put(:pos_diverse?, false)
+        bounded_opts =
+          db_opts
+          |> Keyword.put(:limit_per_norm, budget)
+          |> Keyword.put(:pos_diverse?, pos_diverse?)
+
+        with {:ok, full, full_us} <- comparison_lookup(lookup, si, full_opts),
+             {:ok, bounded, bounded_us} <- comparison_lookup(lookup, si, bounded_opts) do
+          {:ok,
+           compare_slates(full.rows, bounded.rows)
+           |> Map.merge(%{
+             limit_per_norm: budget,
+             pos_diverse?: pos_diverse?,
+             full_lookup_us: full_us,
+             bounded_lookup_us: bounded_us,
+             interpretation: :lexical_candidate_overlap_only,
+             semantic_accuracy: :not_measured
+           })}
+        else
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  def compare_retrieval(_, _), do: {:error, :invalid_input}
+
+  @doc """
+  Compare two independently retrieved candidate lists by token index and
+  exact sense ID, while separately recording POS coverage. No SQL is required.
+
+  The full set is the baseline. Any extra IDs in the bounded set are reported,
+  not silently counted as retained.
+  """
+  @spec compare_slates([map()], [map()]) :: map()
+  def compare_slates(full, bounded) when is_list(full) and is_list(bounded) do
+    full_by_index = slate_by_token(full)
+    bounded_by_index = slate_by_token(bounded)
+
+    positions =
+      (Map.keys(full_by_index) ++ Map.keys(bounded_by_index))
+      |> Enum.uniq()
+      |> Enum.sort()
+      |> Enum.map(fn index ->
+        all = Map.get(full_by_index, index, %{})
+        selected = Map.get(bounded_by_index, index, %{})
+        full_ids = Map.keys(all) |> MapSet.new()
+        bounded_ids = Map.keys(selected) |> MapSet.new()
+        retained = MapSet.intersection(full_ids, bounded_ids)
+        lost = MapSet.difference(full_ids, bounded_ids)
+        unexpected = MapSet.difference(bounded_ids, full_ids)
+        full_pos = all |> Map.values() |> MapSet.new()
+        bounded_pos = selected |> Map.values() |> MapSet.new()
+
+        %{
+          token_index: index,
+          full_senses: MapSet.size(full_ids),
+          bounded_senses: MapSet.size(bounded_ids),
+          retained_senses: MapSet.size(retained),
+          lost_senses: MapSet.size(lost),
+          unexpected_senses: MapSet.size(unexpected),
+          full_pos_count: MapSet.size(full_pos),
+          bounded_pos_count: MapSet.size(bounded_pos),
+          lost_pos: MapSet.difference(full_pos, bounded_pos) |> MapSet.to_list() |> Enum.sort()
+        }
+      end)
+
+    full_count = Enum.sum(Enum.map(positions, & &1.full_senses))
+    retained_count = Enum.sum(Enum.map(positions, & &1.retained_senses))
+
+    %{
+      full_senses: full_count,
+      bounded_senses: Enum.sum(Enum.map(positions, & &1.bounded_senses)),
+      retained_senses: retained_count,
+      lost_senses: Enum.sum(Enum.map(positions, & &1.lost_senses)),
+      unexpected_senses: Enum.sum(Enum.map(positions, & &1.unexpected_senses)),
+      lost_pos_positions: Enum.count(positions, &(&1.lost_pos != [])),
+      sense_id_coverage:
+        if(full_count == 0, do: nil, else: retained_count / full_count),
+      positions: positions
+    }
+  end
+
+  defp slate_by_token(rows) do
+    rows
+    |> Enum.filter(fn row ->
+      is_map(row) and is_integer(Map.get(row, :token_index)) and
+        is_binary(Map.get(row, :id)) and Map.get(row, :id) != ""
+    end)
+    |> Enum.group_by(&Map.fetch!(&1, :token_index))
+    |> Map.new(fn {index, candidates} ->
+      {index, Map.new(candidates, fn row -> {row.id, Map.get(row, :pos)} end)}
+    end)
+  end
+
+  defp comparison_lookup(lookup, si, opts) when is_function(lookup, 2) do
+    start = System.monotonic_time()
+
+    result =
+      try do
+        lookup.(si, opts)
+      rescue
+        _ -> {:error, :comparison_lookup_failed}
+      catch
+        _, _ -> {:error, :comparison_lookup_failed}
+      end
+
+    duration = System.convert_time_unit(System.monotonic_time() - start, :native, :microsecond)
+
+    case result do
+      {:ok, %{rows: rows}} when is_list(rows) ->
+        {:ok, %{rows: rows}, duration}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, reason}
+
+      _ ->
+        {:error, :invalid_ltm_result}
+    end
+  end
+
+  defp comparison_lookup(_, _, _), do: {:error, :invalid_lookup}
+
+  @doc """
   Merge already retrieved, bounded read-only LTM results into a SemanticInput.
   Both production run/2 and the checked Colony path use this same mapping.
   """
