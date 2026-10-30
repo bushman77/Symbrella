@@ -136,50 +136,30 @@ defmodule Brain.ThalamusMathProps_Test do
   end
 
   test "ACC brake reduces score monotonically with alpha (no OFC)" do
-    # Disable mood influence so we test pure ACC brake behavior
-    zero_mood = %{expl: 0.0, inhib: 0.0, vigil: 0.0, plast: 0.0}
-
-    :ok =
-      Brain.Thalamus.set_params(
-        ofc_weight: 0.0,
-        acc_alpha: 0.0,
-        mood_cap: 0.0,
-        mood_weights: zero_mood
-      )
-
-    probe_id = "probe|acc|mono"
+    # Test the actual Thalamus calculation without depending on the singleton
+    # ACC telemetry stream, which can be updated by unrelated Brain activity.
+    # The integration/decision telemetry tests exercise the runtime route.
     base = 0.9
-
     alphas = [0.0, 0.25, 0.5, 0.75, 1.0]
 
     scores =
       for alpha <- alphas do
-        :ok = Brain.Thalamus.set_params(ofc_weight: 0.0, acc_alpha: alpha)
-        :telemetry.execute([:brain, :acc, :conflict], %{conflict: 1.0}, %{})
-        _ = Brain.Thalamus.get_params()
+        s = Brain.Thalamus.acc_braked_score(base, alpha, 1.0)
 
-        :telemetry.execute(
-          [:curiosity, :proposal],
-          %{score: base},
-          %{probe: %{id: probe_id, source: :math}}
-        )
-
-        meta = recv_for_probe!(probe_id)
-        s = meta[:probe][:score]
-
-        assert meta[:acc_conflict] == 1.0
-        # Brake never increases score, and stays within [0, base]
-        assert s <= base + 1.0e-6
-        assert s >= 0.0 - 1.0e-6
+        assert_in_delta s, base * (1.0 - alpha), 1.0e-9
+        assert s <= base + 1.0e-9
+        assert s >= 0.0 - 1.0e-9
 
         s
       end
 
-    # Monotonic non-increasing in alpha
-    Enum.reduce(scores, nil, fn s, prev ->
-      if prev != nil do
-        eps = 1.0e-4
-        assert s <= prev + eps
+    assert hd(scores) == base
+    assert List.last(scores) == 0.0
+    assert Brain.Thalamus.acc_braked_score(base, 0.5, 0.0) == base
+
+    Enum.reduce(scores, nil, fn s, previous ->
+      if previous != nil do
+        assert s <= previous + 1.0e-9
       end
 
       s
