@@ -47,9 +47,10 @@ defmodule Brain.Blackboard do
     [:core, :intent, :selected],
     [:core, :response, :prompt],
     [:core, :response, :complete],
-    # Read-only Colony cognitive analysis. Deliberately distinct from neuron
-    # activation / WM events, which this social shadow does not produce.
+    # Colony lexical shadow and separately opt-in *real* transient neuron
+    # stimulation. Both remain distinct from chat, WM and learned knowledge.
     [:core, :social, :cognitive_shadow],
+    [:core, :social, :neuron_observation],
 
     # Axon nervous-system readout: actual model forecasts and later masked
     # accuracy measurements, NEVER mood/WM control or verified evidence.
