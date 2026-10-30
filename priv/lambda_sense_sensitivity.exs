@@ -131,7 +131,7 @@ inspect_variant = fn {mode, sense_id} ->
       mode: mode,
       requested_id: sense_id,
       definition: Map.get(sense, :definition),
-      structural_status: get_in(adjusted, [:structural_competition, :status]),
+      structural_status: Map.get(Map.get(adjusted, :structural_competition) || %{}, :status),
       proof: verification
     }
   end
