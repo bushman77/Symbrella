@@ -39,8 +39,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 9 preserves fuzzy/intent evidence and Phase 2 reference arbitration.
-  @contract_v 9
+  # Version 10 adds reversible, observation-only lexical focus over full LTM.
+  @contract_v 10
 
   @list_fields MapSet.new([
                  :tokens,
@@ -76,6 +76,7 @@ defmodule Core.SemanticInput do
                 :sense_candidates,
                 :sentence_competition,
                 :role_competition,
+                :lexical_focus,
                 :structural_competition,
                 :compositional_derivation,
                 :semantic_request_frame,
@@ -223,6 +224,7 @@ defmodule Core.SemanticInput do
           sentence_signatures: [sentence_signature()] | nil,
           sentence_competition: map() | nil,
           role_competition: map() | nil,
+          lexical_focus: map() | nil,
           structural_competition: map() | nil,
           compositional_derivation: map() | nil,
           construction_candidates: [map()],
@@ -324,6 +326,7 @@ defmodule Core.SemanticInput do
             sentence_signatures: [],
             sentence_competition: nil,
             role_competition: nil,
+            lexical_focus: nil,
             structural_competition: nil,
             compositional_derivation: nil,
             construction_candidates: [],
