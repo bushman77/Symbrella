@@ -589,6 +589,65 @@ defmodule Core.Syntax.SignaturesTest do
     assert :ok = SemanticInput.validate_contract(out)
   end
 
+  test "COLONY-14: hypothetical WH-modal question yields bounded structural evidence" do
+    cells = [
+      %{norm: "what", pos: "pronoun"},
+      %{norm: "would", pos: "auxiliary"},
+      %{norm: "you", pos: "pronoun"},
+      %{norm: "do", pos: "verb"},
+      %{norm: "if", pos: "conjunction"},
+      %{norm: "were", pos: "verb"},
+      %{norm: "free", pos: "adjective"}
+    ]
+
+    si = input("What would you do if you were free?", cells)
+
+    assert [%{
+      id: :wh_modal_conditional_question,
+      span: {0, 7},
+      roles: %{
+        wh: 0, modal: 1, subject: 2, predicate: 3,
+        condition_marker: 4, condition_subject: 5,
+        condition_copula: 6, condition_complement: 7
+      },
+      source: :core_syntax
+    } = frame] =
+      Enum.filter(Signatures.detect(si), &(&1.id == :wh_modal_conditional_question))
+
+    assert :explicit_if_condition in frame.evidence
+    assert :attested_copular_state in frame.evidence
+    assert :question_punctuation in frame.evidence
+    assert si.active_cells == cells
+  end
+
+  test "COLONY-14 refuses unsupported modal-condition structure" do
+    cells = [
+      %{norm: "what", pos: "pronoun"},
+      %{norm: "would", pos: "auxiliary"},
+      %{norm: "you", pos: "pronoun"},
+      %{norm: "do", pos: "verb"},
+      %{norm: "if", pos: "conjunction"},
+      %{norm: "were", pos: "verb"},
+      %{norm: "free", pos: "adjective"}
+    ]
+
+    for sentence <- [
+      "What would you do if you were free.",
+      "What would you do because you were free?",
+      "What would you do if you were free tomorrow?",
+      "What would you do if you were free and rich?"
+    ] do
+      refute :wh_modal_conditional_question in ids(sentence, cells)
+    end
+
+    for missing <- ["what", "would", "do", "were", "free"] do
+      filtered = Enum.reject(cells, &(&1.norm == missing))
+
+      refute :wh_modal_conditional_question in
+        ids("What would you do if you were free?", filtered)
+    end
+  end
+
   test "WH-topic signature retains token roles around adverbs and negation" do
     examples = [
       {"What exactly do you actually know about Japan?",
