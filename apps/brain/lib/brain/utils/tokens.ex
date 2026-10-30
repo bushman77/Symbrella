@@ -248,8 +248,9 @@ defmodule Brain.Utils.Tokens do
 
       true ->
         # Phase 1 spans are UTF-8 byte offsets, not grapheme indices.
-        # String.slice/3 corrupts offsets after multibyte characters.
-        binary_part(s, st, en - st)
+        # Legacy malformed spans must also not pass invalid UTF-8 downstream.
+        slice = binary_part(s, st, en - st)
+        if String.valid?(slice), do: slice, else: ""
     end
   end
 
