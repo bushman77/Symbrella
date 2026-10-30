@@ -91,6 +91,19 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
       landmark: "fence"
     })
 
+    base_tokens =
+      original.tokens
+      |> Enum.filter(&(Map.get(&1, :n, 1) == 1 and
+                       Map.get(&1, :kind) not in [:punct, "punct"]))
+      |> Enum.sort_by(& &1.index)
+
+    assert Enum.map(base_tokens, & &1.index) == Enum.to_list(0..5)
+    assert Enum.map(base_tokens, &String.downcase(&1.phrase)) ==
+             ~w(the bird sat on the fence)
+    assert String.trim_trailing(String.downcase(String.trim(original.sentence)), ".") ==
+             Enum.map_join(base_tokens, " ", &String.downcase(&1.phrase))
+    assert signature in Signatures.detect(original)
+
     assert {:ok, proof} = Integration.derive(original, lookup: &lookup/1)
     assert proof.event_semantics.predicate == :sit
     assert proof.event_semantics.tense == :past
