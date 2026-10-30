@@ -36,6 +36,37 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
     refute Enum.any?(report.segments, &Map.has_key?(&1, :text))
   end
 
+  test "operator can opt into transient Brain stimulation, never by default" do
+    topic = %{
+      id: "00000000-0000-4000-8000-000000000001",
+      title: "What would you do if you were free?",
+      body: "",
+      author: "observer"
+    }
+
+    caller = self()
+
+    probe = fn _text, opts ->
+      send(caller, {:brain_observation_opt, opts[:brain_observation?]})
+      {:ok, %{stage: :social_semantic_shadow}}
+    end
+
+    assert {:ok, _} = SocialCognitiveReport.analyze(
+      %{topic: topic, comments: []},
+      probe: probe
+    )
+
+    assert_receive {:brain_observation_opt, false}
+
+    assert {:ok, _} = SocialCognitiveReport.analyze(
+      %{topic: topic, comments: []},
+      probe: probe,
+      brain_observation?: true
+    )
+
+    assert_receive {:brain_observation_opt, true}
+  end
+
   test "keeps unavailable probes distinct from successful semantic results" do
     topic = %{id: "id", title: "?", body: "", author: "agent"}
     probe = fn _, _ -> {:error, :lookup_failed} end
