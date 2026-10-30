@@ -58,6 +58,21 @@ defmodule Core.Semantic.CompositionSenseDenotationsTest do
     assert Enum.map(opponent.candidates, & &1.relation_family) == [:opposition]
   end
 
+  test "the denotation rules depend on definition text, never dictionary numeric IDs" do
+    definition = "Dealing with the subject of; about; concerning."
+    first = inspect_gloss("on|preposition|19", definition)
+    renumbered = inspect_gloss("on|preposition|999", definition)
+
+    assert first.candidates == renumbered.candidates
+    assert first.sense_id != renumbered.sense_id
+
+    different_definition =
+      inspect_gloss("on|preposition|19", "Indicating position or location. — Positioned at the upper surface of, touching from above.")
+
+    assert subtypes(different_definition) == [:upper_surface]
+    refute :subject_matter in subtypes(different_definition)
+  end
+
   test "unknown and incomplete glosses abstain without guessing from the sense ID" do
     unknown = inspect_gloss("on|preposition|28",
       "(ireland, especially) Indicating the person experiencing an emotion, cold, thirst, hunger, etc.")
