@@ -12,7 +12,8 @@ defmodule Core.Pipeline.LexicalBridge do
   Intermediate terms are never discovered or asserted automatically.
   """
 
-  alias Core.Pipeline.{Input, LTM.Source}
+  alias Core.Pipeline.Input
+  alias Core.Pipeline.LTM.Source
 
   @max_senses_per_term 192
   @max_chains 32
