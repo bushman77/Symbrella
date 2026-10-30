@@ -39,11 +39,12 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 7 adds read-only typed compositional derivation evidence.
-  @contract_v 7
+  # Version 8 adds canonical source-aligned Phase 1 tokenization metadata.
+  @contract_v 8
 
   @list_fields MapSet.new([
                  :tokens,
+                 :punctuation_tokens,
                  :phrase_candidates,
                  :active_cells,
                  :trace,
@@ -68,6 +69,7 @@ defmodule Core.SemanticInput do
 
   @map_fields MapSet.new([
                 :intent_bias,
+                :tokenization,
                 :sense_candidates,
                 :sentence_competition,
                 :role_competition,
@@ -178,6 +180,9 @@ defmodule Core.SemanticInput do
   @type t :: %__MODULE__{
           # Core invariants
           sentence: String.t() | nil,
+          original_text: String.t() | nil,
+          punctuation_tokens: [token()],
+          tokenization: map() | nil,
           source: atom() | nil,
           tokens: [token()],
           phrase_candidates: [map()],
@@ -279,6 +284,9 @@ defmodule Core.SemanticInput do
         }
 
   defstruct sentence: nil,
+            original_text: nil,
+            punctuation_tokens: [],
+            tokenization: nil,
             source: nil,
             tokens: [],
             phrase_candidates: [],
@@ -598,6 +606,9 @@ defmodule Core.SemanticInput do
   # ------------------------------------------------------------------
 
   defp field_problem(:sentence, value),
+    do: string_or_nil_problem(value)
+
+  defp field_problem(:original_text, value),
     do: string_or_nil_problem(value)
 
   defp field_problem(:keyword, value),
