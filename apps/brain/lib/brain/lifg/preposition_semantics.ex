@@ -169,23 +169,26 @@ defmodule Brain.LIFG.PrepositionSemantics do
             is_list(evidence) do
     object = Map.get(roles, :object)
 
-    first == index and
-      is_integer(object) and object > index and object <= last and
-      :preposition in evidence and is_binary(Map.get(tokens, index)) and
-      case evidence do
-        ev when :noun_phrase_complement in ev ->
+    shape? =
+      cond do
+        :noun_phrase_complement in evidence ->
           Map.get(roles, :head) == object and
             object == last and
             last >= index + 2 and
             Enum.all?(index..last, &is_binary(Map.get(tokens, &1)))
 
-        ev when :bare_nominal_complement in ev ->
+        :bare_nominal_complement in evidence ->
           object == index + 1 and last == object and
             is_binary(Map.get(tokens, object))
 
-        _ ->
+        true ->
           false
       end
+
+    first == index and
+      is_integer(object) and object > index and object <= last and
+      :preposition in evidence and is_binary(Map.get(tokens, index)) and
+      shape?
   end
 
   defp valid_pp?(_, _, _), do: false
