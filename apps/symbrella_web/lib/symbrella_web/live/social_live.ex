@@ -57,26 +57,46 @@ defmodule SymbrellaWeb.SocialLive do
   end
 
   @impl true
-  def handle_event("analyze_cognition", _params, socket) do
+  def handle_event("analyze_cognition", %{"piece" => "post"}, socket) do
+    analyze_piece(socket, :original_post)
+  end
+
+  def handle_event("analyze_cognition", %{"piece" => "reply", "index" => raw_index}, socket) do
+    case Integer.parse(raw_index) do
+      {index, ""} when index >= 0 ->
+        # Only a reply actually returned by Colony can be analyzed.
+        if index < length(socket.assigns.comments) do
+          analyze_piece(socket, {:reply, index})
+        else
+          {:noreply, socket}
+        end
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("analyze_cognition", _params, socket), do: {:noreply, socket}
+
+  defp analyze_piece(socket, target) do
     if socket.assigns.live_action == :show and socket.assigns.topic do
-      report_input = %{topic: socket.assigns.topic, comments: socket.assigns.comments}
+      input = %{topic: socket.assigns.topic, comments: socket.assigns.comments}
       analyzer = Application.get_env(:symbrella_web, :social_cognitive_analyzer, SocialCognitiveReport)
 
-      # Real neural observation is enabled only for this explicit operator
-      # action, never for background topic browsing or passive page rendering.
+      # Never silently fall back to analyze/1: that would inspect the entire
+      # thread and stimulate neurons for pieces the operator did not select.
       outcome =
         if Code.ensure_loaded?(analyzer) and function_exported?(analyzer, :analyze, 2) do
-          analyzer.analyze(report_input, brain_observation?: true)
+          analyzer.analyze(input, brain_observation?: true, target: target)
         else
-          analyzer.analyze(report_input)
+          {:error, :scoped_cognitive_analyzer_unavailable}
         end
 
       case outcome do
         {:ok, report} ->
-          # Share only transient aggregate stage activity with /brain, never the
-          # untrusted Colony text or a claim of neural/synaptic activation.
+          # Only the selected source is represented in the new /brain receipt.
           _ = SocialBrainActivity.record(report)
-          {:noreply, assign(socket, analysis_open?: true, cognitive_report: report)}
+          {:noreply, assign(socket, analysis_open?: true, cognitive_report: report, error: nil)}
 
         _ ->
           {:noreply, assign(socket, analysis_open?: true, cognitive_report: nil,
@@ -122,15 +142,6 @@ defmodule SymbrellaWeb.SocialLive do
               >
                 Back to topics
               </.link>
-              <button
-                :if={@live_action == :show and @topic}
-                id="social-analyze"
-                type="button"
-                phx-click="analyze_cognition"
-                class="rounded-md border border-cyan-400/50 px-3 py-2 font-semibold text-cyan-200 hover:bg-cyan-400/10"
-              >
-                Analyze cognition
-              </button>
               <button
                 id="social-refresh"
                 type="button"
@@ -215,6 +226,11 @@ defmodule SymbrellaWeb.SocialLive do
               </div>
               <h2 class="mt-3 break-words text-xl font-semibold text-white">{@topic.title}</h2>
               <p class="mt-4 whitespace-pre-wrap break-words text-sm leading-7 text-zinc-200">{@topic.body}</p>
+              <button id="social-analyze-post" type="button"
+                phx-click="analyze_cognition" phx-value-piece="post"
+                class="mt-4 rounded-md border border-emerald-400/50 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-400/10">
+                Analyze cognition · original post
+              </button>
             </article>
 
             <div :if={@topic} class="flex items-center justify-between gap-2">
@@ -245,6 +261,12 @@ defmodule SymbrellaWeb.SocialLive do
                 <p class="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-200">
                   {comment.body}
                 </p>
+                <button id={"social-analyze-reply-#{index}"} type="button"
+                  phx-click="analyze_cognition" phx-value-piece="reply"
+                  phx-value-index={index}
+                  class="mt-3 rounded-md border border-cyan-400/50 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/10">
+                  Analyze cognition · this reply
+                </button>
               </article>
             </div>
           </section>
@@ -278,8 +300,14 @@ defmodule SymbrellaWeb.SocialLive do
               <div id="social-report-content" tabindex="0" class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-5 pb-8 sm:px-6"
                 style="display: block; flex: 1 1 0%; min-height: 0; overflow-y: scroll; overflow-x: hidden; scrollbar-width: auto;">
                 <%= if @cognitive_report do %>
+                  <p :if={is_map(Map.get(@cognitive_report, :target))}
+                    id="social-analysis-target"
+                    class="break-words text-sm font-semibold text-cyan-200">
+                    Analyzed: {@cognitive_report.target.label}
+                    {if(Map.has_key?(@cognitive_report.target, :author), do: " · " <> to_string(@cognitive_report.target.author), else: "")}
+                  </p>
                   <p class="text-sm text-zinc-400">
-                    {@cognitive_report.analyzed_segments} sentence samples inspected · {@cognitive_report.omitted_replies} replies omitted · {Map.get(@cognitive_report, :omitted_sentences, 0)} sentence samples omitted.
+                    {@cognitive_report.analyzed_segments} sentence samples inspected · {Map.get(@cognitive_report, :omitted_sentences, 0)} sentence samples omitted from this selection.
                     Lexical selections are hypotheses, not verified facts.
                   </p>
                   <section :if={Map.has_key?(@cognitive_report, :conversation)}
@@ -543,7 +571,8 @@ defmodule SymbrellaWeb.SocialLive do
                   <%!-- Maintain explicit source provenance through the display.
                         Replies are analyzed separately, never as a continuation
                         of the original author's cognitive sample. --%>
-                  <section :if={Map.has_key?(@cognitive_report, :sections)}
+                  <section :if={Map.has_key?(@cognitive_report, :sections) and
+                    @cognitive_report.sections.original_post.segments != []}
                     id="social-analysis-original-post"
                     class="space-y-3 rounded-lg border border-emerald-400/25 p-3 sm:p-4">
                     <h3 class="text-lg font-semibold text-emerald-200">Original post · independent analysis</h3>
@@ -557,7 +586,8 @@ defmodule SymbrellaWeb.SocialLive do
                     <.analysis_segment :for={segment <- @cognitive_report.sections.original_post.segments}
                       segment={segment} index={segment.sample_index}/>
                   </section>
-                  <section :if={Map.has_key?(@cognitive_report, :sections)}
+                  <section :if={Map.has_key?(@cognitive_report, :sections) and
+                    @cognitive_report.sections.replies != []}
                     id="social-analysis-replies"
                     class="space-y-3 rounded-lg border border-cyan-400/25 p-3 sm:p-4">
                     <h3 class="text-lg font-semibold text-cyan-200">Replies · independent participant analyses</h3>
