@@ -196,10 +196,21 @@ summaries =
           %{status: :not_applicable}
       end
 
+    pp_report =
+      case pp do
+        %{span: {first, last}} = signature ->
+          signature
+          |> Map.take([:id, :source, :roles, :evidence])
+          |> Map.put(:span, [first, last])
+
+        _ ->
+          nil
+      end
+
     %{
       name: sample_name,
       sentence: sentence,
-      pp_signature: pp,
+      pp_signature: pp_report,
       predicate: predicate,
       object: object,
       preposition: preposition,
