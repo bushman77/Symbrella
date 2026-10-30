@@ -98,7 +98,8 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
         %{
           kind: :reply, index: source.source_index, label: source.label,
           author: source.author, segments: own,
-          understanding: SocialUnderstanding.build(own)
+          understanding: SocialUnderstanding.build(own),
+          discourse: SocialDiscourse.build(own)
         }
       end)
 
@@ -106,7 +107,8 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       original_post: %{
         kind: :original_post, label: "Original post",
         author: topic.author, segments: original_segments,
-        understanding: SocialUnderstanding.build(original_segments)
+        understanding: SocialUnderstanding.build(original_segments),
+        discourse: SocialDiscourse.build(original_segments)
       },
       replies: reply_sources
     }
