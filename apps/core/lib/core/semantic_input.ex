@@ -40,7 +40,7 @@ defmodule Core.SemanticInput do
   @type cell :: term()
 
   # Version 10 adds reversible, observation-only lexical focus over full LTM.
-  @contract_v 10
+  @contract_v 11
 
   @list_fields MapSet.new([
                  :tokens,
@@ -79,6 +79,7 @@ defmodule Core.SemanticInput do
                 :lexical_focus,
                 :structural_competition,
                 :compositional_derivation,
+                :finite_past_locative_derivation,
                 :semantic_request_frame,
                 :sentence_meaning,
                 :provisional_interpretation,
@@ -227,6 +228,7 @@ defmodule Core.SemanticInput do
           lexical_focus: map() | nil,
           structural_competition: map() | nil,
           compositional_derivation: map() | nil,
+          finite_past_locative_derivation: map() | nil,
           construction_candidates: [map()],
           semantic_request_frame: map() | nil,
           sentence_meaning: map() | nil,
@@ -329,6 +331,7 @@ defmodule Core.SemanticInput do
             lexical_focus: nil,
             structural_competition: nil,
             compositional_derivation: nil,
+            finite_past_locative_derivation: nil,
             construction_candidates: [],
             semantic_request_frame: nil,
             sentence_meaning: nil,
