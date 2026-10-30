@@ -282,7 +282,20 @@ defmodule Brain do
 
     sentence = Map.get(si, :sentence) || Map.get(si, "sentence")
     tokens0 = Map.get(si, :tokens) || Map.get(si, "tokens") || []
-    tokens1 = if is_list(tokens0), do: Tokens.normalize_tokens(tokens0, sentence), else: []
+
+    # Canonical Phase 1 tokens have already been validated against the source
+    # as byte-aligned, end-exclusive spans. STM must not rewrite their surface,
+    # index, kind or original offsets. Legacy token maps still normalize here.
+    canonical? =
+      match?(%{span_unit: :utf8_bytes, end_exclusive?: true, valid?: true},
+        Map.get(si, :tokenization))
+
+    tokens1 =
+      cond do
+        not is_list(tokens0) -> []
+        canonical? -> tokens0
+        true -> Tokens.normalize_tokens(tokens0, sentence)
+      end
 
     si2 =
       si
