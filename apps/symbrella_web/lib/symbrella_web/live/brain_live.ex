@@ -107,8 +107,9 @@ defmodule SymbrellaWeb.BrainLive do
           class="mx-4 my-5 rounded-xl border border-cyan-400/25 bg-zinc-950 p-4 text-zinc-100 sm:mx-6">
           <h2 class="text-lg font-semibold text-cyan-200">Social cognitive processing</h2>
           <p class="mt-1 text-sm text-zinc-400">
-            Colony lexical and sentence analysis · bounded live neuron stimulation when explicitly requested; no learning or memory writes.
-            This is not BrainCell firing, working-memory admission, or learning.
+            Colony analysis requests bounded, real Brain.Cell stimulation.
+            Stimulus counts do not prove activation reports were received; the live neuron chart
+            reflects only observations captured while this page was open. No memory or synaptic learning is performed.
           </p>
           <%= if @social_activity do %>
             <div id="brain-social-metrics" class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
