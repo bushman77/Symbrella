@@ -112,6 +112,27 @@ defmodule Core.PipelineInputTest do
              Enum.map(canonical.tokens, & &1.phrase)
   end
 
+  test "Brain's legacy span normalizer uses UTF-8 byte coordinates" do
+    sentence = "Café is here"
+    tokens = [%{index: 1, phrase: "is", span: {6, 8}}]
+
+    assert [%{index: 1, phrase: "is", span: {6, 8}}] =
+             Brain.Utils.Tokens.normalize_tokens(tokens, sentence)
+  end
+
+  test "Brain STM preserves canonical Phase 1 token identity" do
+    si = Input.prepare("Café is here.", max_wordgram_n: 2)
+    original_tokens = si.tokens
+
+    if is_pid(Process.whereis(Brain)) do
+      after_stm = Core.Brain.STM.run(Map.from_struct(si))
+      assert after_stm.tokens == original_tokens
+      assert after_stm.tokenization == si.tokenization
+      assert Enum.all?(after_stm.tokens,
+               &(source_slice(si.original_text, &1) == &1.phrase))
+    end
+  end
+
   test "fuzzy interpretation cannot rewrite canonical source tokens" do
     si = Core.resolve_input("teh  bird.", mode: :test, fuzzy: true)
 
