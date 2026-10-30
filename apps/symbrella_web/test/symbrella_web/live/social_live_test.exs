@@ -178,6 +178,40 @@ defmodule SymbrellaWeb.SocialLiveTest do
     end
   end
 
+  defmodule FakeOptInCognitiveAnalyzer do
+    # Deliberately expose ONLY analyze/2. The LiveView must ensure the
+    # module is loaded before checking exported arities.
+    def analyze(input, opts) do
+      send(Application.fetch_env!(:symbrella_web, :social_test_observer),
+        {:social_brain_optin, Keyword.get(opts, :brain_observation?)})
+      SymbrellaWeb.SocialLiveTest.FakeCognitiveAnalyzer.analyze(input)
+    end
+  end
+
+  test "explicit Analyze cognition opts into live Brain observation", %{conn: conn} do
+    prior_analyzer = Application.get_env(:symbrella_web, :social_cognitive_analyzer)
+    prior_observer = Application.get_env(:symbrella_web, :social_test_observer)
+
+    Application.put_env(:symbrella_web, :social_cognitive_analyzer, FakeOptInCognitiveAnalyzer)
+    Application.put_env(:symbrella_web, :social_test_observer, self())
+
+    try do
+      {:ok, view, _} = live(conn, ~p"/social/#{FakeClient.id(1)}")
+      refute_receive {:social_brain_optin, _}, 30
+
+      view |> element("#social-analyze") |> render_click()
+      assert_receive {:social_brain_optin, true}
+    after
+      if is_nil(prior_analyzer),
+        do: Application.delete_env(:symbrella_web, :social_cognitive_analyzer),
+        else: Application.put_env(:symbrella_web, :social_cognitive_analyzer, prior_analyzer)
+
+      if is_nil(prior_observer),
+        do: Application.delete_env(:symbrella_web, :social_test_observer),
+        else: Application.put_env(:symbrella_web, :social_test_observer, prior_observer)
+    end
+  end
+
   test "on-demand cognitive modal displays read-only stage results and can close", %{conn: conn} do
     previous = Application.get_env(:symbrella_web, :social_cognitive_analyzer)
     Application.put_env(:symbrella_web, :social_cognitive_analyzer, FakeCognitiveAnalyzer)
