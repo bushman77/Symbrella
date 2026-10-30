@@ -2,6 +2,7 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
   use ExUnit.Case, async: true
 
   alias Core.Semantic.Composition.FinitePastLocativeIntegration, as: Integration
+  alias Core.Semantic.Composition.{FinitePastLocative, LemmaGroundedPredicate, RoleWitness}
   alias Core.SemanticInput
   alias Core.Syntax.Signatures
   alias Core.TokenFilters
@@ -61,6 +62,35 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
     original = si()
     assert Enum.any?(original.sentence_signatures,
       &(&1.id == :finite_past_locative_candidate))
+    for {role, index, pos} <- [
+          {:subject_determiner, 0, "determiner"},
+          {:subject_head, 1, "noun"},
+          {:preposition, 3, "preposition"},
+          {:location_determiner, 4, "determiner"},
+          {:location_head, 5, "noun"}
+        ] do
+      assert {:ok, _} = RoleWitness.resolve(original, role, index, [pos]),
+        "missing current-turn role witness: #{inspect(role)}"
+    end
+
+    assert %{status: :forms_attested, requested_lemmas: ["sit"]} = discovery =
+             LemmaGroundedPredicate.discover(original, 2)
+
+    assert %{status: :predicate_feature_candidates} = grounded =
+             LemmaGroundedPredicate.ground(discovery, lookup("sit"))
+
+    signature = Enum.find(original.sentence_signatures,
+      &(&1.id == :finite_past_locative_candidate))
+
+    assert {:ok, _} = FinitePastLocative.compose(%{
+      signature: signature,
+      grounding: grounded,
+      predicate_surface: "sat",
+      actor: "bird",
+      preposition: "on",
+      landmark: "fence"
+    })
+
     assert {:ok, proof} = Integration.derive(original, lookup: &lookup/1)
     assert proof.event_semantics.predicate == :sit
     assert proof.event_semantics.tense == :past
