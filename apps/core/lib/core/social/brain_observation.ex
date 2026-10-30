@@ -57,7 +57,8 @@ defmodule Core.Social.BrainObservation do
             %{id: id, delta: delta} ->
               is_binary(id) and MapSet.member?(attested, id) and
                 is_number(delta) and delta > 0 and delta <= 1.0 and
-                not String.ends_with?(id, "|fallback")
+                not String.ends_with?(id, "|fallback") and
+                Brain.Cell.valid_id?(id)
 
             _ ->
               false
