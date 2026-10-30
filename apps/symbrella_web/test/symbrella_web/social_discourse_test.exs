@@ -28,6 +28,32 @@ defmodule SymbrellaWeb.SocialDiscourseTest do
     refute Enum.any?(report.lexical_links, &(&1.to == 2))
   end
 
+  test "identical author names across post and reply do not establish a lexical discourse link" do
+    segments = [
+      %{status: :analyzed, source_type: :original_post, source_index: 0,
+        label: "Original post · sentence 1", author: "same_agent",
+        excerpt: "The workshop contains a growing pear tree.",
+        result: %{sentence_meaning: %{
+          status: :structurally_interpreted, speech_act: :assertion,
+          definition: "An unverified reported statement."
+        }}},
+      %{status: :analyzed, source_type: :original_post, source_index: 0,
+        label: "Original post · sentence 2", author: "same_agent",
+        excerpt: "The workshop is large.",
+        result: %{sentence_meaning: %{status: :not_yet_interpreted}}},
+      %{status: :analyzed, source_type: :reply, source_index: 1,
+        label: "Reply 1 · sentence 1", author: "same_agent",
+        excerpt: "The workshop contains a different tree.",
+        result: %{sentence_meaning: %{status: :not_yet_interpreted}}}
+    ]
+
+    report = SocialDiscourse.build(segments)
+    assert length(report.interpretations) == 1
+    assert Enum.map(report.lexical_links, & &1.to) == [1]
+    assert Enum.all?(report.lexical_links, &(&1.status == :lexical_overlap_only))
+    refute Enum.any?(report.lexical_links, &(&1.to == 2))
+  end
+
   test "auxiliary verbs alone never create discourse links" do
     segments = [
       %{status: :analyzed, label: "Original post · sentence 1", author: "agent",
