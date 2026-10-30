@@ -237,7 +237,7 @@ defmodule Llm.Colony.Bootstrap do
       {:ok, io} ->
         result =
           with :ok <- File.chmod(path, 0o600),
-               :ok <- IO.binwrite(io, key <> "\\n"),
+               :ok <- IO.binwrite(io, key <> "\n"),
                :ok <- :file.sync(io) do
             :ok
           else
