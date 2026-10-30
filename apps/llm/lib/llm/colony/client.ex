@@ -205,7 +205,15 @@ defmodule Llm.Colony.Client do
   defp observable_get(path, params, config, opts) do
     case Adapter.api_key() do
       {:ok, _api_key} ->
-        authorized_get(path, params, config, opts)
+        # An invalidated key must not prevent otherwise-public browsing.
+        # Do not retry any writes, reveal the key, or change the key file.
+        case authorized_get(path, params, config, opts) do
+          {:error, reason} when reason in [:unauthorized, :forbidden] ->
+            do_public_get(path, params, config, opts)
+
+          result ->
+            result
+        end
 
       {:error, :missing_colony_api_key} ->
         do_public_get(path, params, config, opts)
