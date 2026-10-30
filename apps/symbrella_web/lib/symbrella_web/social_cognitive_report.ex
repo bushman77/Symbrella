@@ -10,7 +10,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   alias SymbrellaWeb.{SocialUnderstanding, SocialDiscourse, SocialConversation}
 
   @max_replies 8
-  @max_sentences_per_source 12
+  @max_sentences_per_source 24
   @max_total_sentences 48
   @max_sentence_chars 600
   @max_source_chars 12_000
