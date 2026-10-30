@@ -28,6 +28,8 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
             post_id: Map.get(meta, :post_id),
             relation: Map.get(meta, :reported_relation),
             analysis_scope: Map.get(meta, :analysis_scope, :unspecified),
+            selected_source: Map.get(meta, :selected_source),
+            selected_reply_index: Map.get(meta, :selected_reply_index),
             sentence_status: Map.get(meta, :sentence_status),
             provenance: Map.get(meta, :provenance),
             segments: bounded_count(measurements, :segments),
@@ -75,21 +77,23 @@ defmodule SymbrellaWeb.Components.Brain.SocialCognition do
       <%= if @social do %>
         <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
           <div><dt class="text-xs text-zinc-500">Lexical analysis scope</dt><dd class="font-mono break-all">{@social.analysis_scope}</dd></div>
-          <div :if={@social.analysis_scope == :thread_aggregate}><dt class="text-xs text-zinc-500">Sentences inspected</dt><dd class="font-mono">{@social.segments}</dd></div>
-          <div :if={@social.analysis_scope == :thread_aggregate}><dt class="text-xs text-zinc-500">Neuron stimuli requested</dt><dd class="font-mono">{@social.neuron_stimuli_issued}</dd></div>
+          <div :if={@social.selected_source == :original_post}><dt class="text-xs text-zinc-500">Selected piece</dt><dd>Original post</dd></div>
+          <div :if={@social.selected_source == :reply}><dt class="text-xs text-zinc-500">Selected piece</dt><dd>Reply {@social.selected_reply_index}</dd></div>
+          <div :if={@social.analysis_scope in [:thread_aggregate, :original_post, :reply]}><dt class="text-xs text-zinc-500">Sentences inspected</dt><dd class="font-mono">{@social.segments}</dd></div>
+          <div :if={@social.analysis_scope in [:thread_aggregate, :original_post, :reply]}><dt class="text-xs text-zinc-500">Neuron stimuli requested</dt><dd class="font-mono">{@social.neuron_stimuli_issued}</dd></div>
           <div><dt class="text-xs text-zinc-500">LIFG selections</dt><dd class="font-mono">{@social.lifg_choices}</dd></div>
           <div><dt class="text-xs text-zinc-500">ATL winners</dt><dd class="font-mono">{@social.atl_winners}</dd></div>
           <div><dt class="text-xs text-zinc-500">Grammar frames</dt><dd class="font-mono">{@social.syntax_frames}</dd></div>
           <div><dt class="text-xs text-zinc-500">Dictionary rows</dt><dd class="font-mono">{@social.dictionary_rows}</dd></div>
           <div><dt class="text-xs text-zinc-500">Tokens with POS</dt><dd class="font-mono">{@social.pos_covered_tokens} / {@social.processed_tokens}</dd></div>
-          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">Grammar audit</dt><dd class="font-mono break-all">{@social.grammar_outcome}</dd></div>
-          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">Dictionary lookup</dt><dd class="font-mono break-all">{@social.ltm_status}</dd></div>
+          <div :if={@social.analysis_scope not in [:thread_aggregate, :original_post, :reply]}><dt class="text-xs text-zinc-500">Grammar audit</dt><dd class="font-mono break-all">{@social.grammar_outcome}</dd></div>
+          <div :if={@social.analysis_scope not in [:thread_aggregate, :original_post, :reply]}><dt class="text-xs text-zinc-500">Dictionary lookup</dt><dd class="font-mono break-all">{@social.ltm_status}</dd></div>
           <div :if={@social.ltm_reason}><dt class="text-xs text-zinc-500">Lookup error</dt><dd class="font-mono break-all">{@social.ltm_reason}</dd></div>
           <div><dt class="text-xs text-zinc-500">Sentence meaning</dt><dd class="font-mono break-all">{@social.sentence_status}</dd></div>
-          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">External proposition</dt><dd class="font-mono break-all">{@social.proposition_status}</dd></div>
+          <div :if={@social.analysis_scope not in [:thread_aggregate, :original_post, :reply]}><dt class="text-xs text-zinc-500">External proposition</dt><dd class="font-mono break-all">{@social.proposition_status}</dd></div>
           <div :if={@social.proposition_reason}><dt class="text-xs text-zinc-500">Proposition abstention</dt><dd class="font-mono break-all">{@social.proposition_reason}</dd></div>
           <div><dt class="text-xs text-zinc-500">Disputed grammatical roles</dt><dd class="font-mono">{@social.disputed_roles}</dd></div>
-          <div :if={@social.analysis_scope != :thread_aggregate}><dt class="text-xs text-zinc-500">Reported relation</dt><dd class="font-mono break-all">{@social.relation}</dd></div>
+          <div :if={@social.analysis_scope not in [:thread_aggregate, :original_post, :reply]}><dt class="text-xs text-zinc-500">Reported relation</dt><dd class="font-mono break-all">{@social.relation}</dd></div>
           <div><dt class="text-xs text-zinc-500">Evidence status</dt><dd class="font-mono break-all">{@social.provenance}</dd></div>
         </dl>
         <p class="mt-3 text-xs text-zinc-500">
