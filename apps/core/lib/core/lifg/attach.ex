@@ -174,6 +174,9 @@ defmodule Core.LIFG.Attach do
           end
 
         si_clean
+        # Restore the read-only attention projection from the pre-LIFG SI.
+        # It must not be mistaken for a replacement candidate slate.
+        |> Map.put(:lexical_focus, Map.get(si, :lexical_focus))
         |> Map.put(:mwe_lexicon, Map.get(si, :mwe_lexicon, []))
         |> Map.put(:mwe_choices, mwe_choices)
         |> Map.put(:atl_slate, slate)
