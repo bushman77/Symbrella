@@ -2,6 +2,8 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   @moduledoc """
   Read-only, bounded sentence-by-sentence Colony cognition inspection.
   Does not call the stateful conversation pipeline or persist external text.
+  An operator-initiated invocation may request bounded transient Brain.Cell
+  activation for lexically attested senses, without memory or synaptic writes.
   """
 
   alias Core.Social.SemanticProbe
@@ -49,7 +51,10 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       Enum.map(selected, fn sample ->
         outcome =
           try do
-            probe.(sample.text, emit_telemetry?: false)
+            probe.(sample.text,
+              emit_telemetry?: false,
+              brain_observation?: Keyword.get(opts, :brain_observation?, false)
+            )
           rescue
             _ -> {:error, :probe_unavailable}
           catch
