@@ -75,18 +75,18 @@ defmodule Brain.LIFG.PrepositionSemantics do
         _ -> []
       end
 
+    # Syntax intentionally retains competing constructions. A bare PP
+    # ("on the" when "the" has a dictionary noun sense) may precede the
+    # complete PP ("on the bank") in the signature list. Prefer a fully
+    # witnessed composed noun phrase, not the first hypothesis.
     pp =
-      Enum.find(signatures, fn
-        %{id: :prepositional_phrase, source: :core_syntax,
-          roles: %{preposition: ^index, object: object},
-          span: {^index, last}, evidence: evidence}
-        when is_integer(object) and object > index and object <= last and
-             is_list(evidence) ->
-          :preposition in evidence and
-            (:noun_phrase_complement in evidence or
-               :bare_nominal_complement in evidence)
-        _ -> false
+      signatures
+      |> Enum.filter(&valid_pp?(&1, index, tokens))
+      |> Enum.sort_by(fn %{span: {first, last}, evidence: evidence} ->
+        {if(:noun_phrase_complement in evidence, do: 0, else: 1),
+         -(last - first), last}
       end)
+      |> List.first()
 
     cond do
       is_nil(pp) or not is_binary(target) ->
@@ -156,6 +156,39 @@ defmodule Brain.LIFG.PrepositionSemantics do
         end
     end
   end
+
+  # Validate the original token roles and a complete PP shape before
+  # comparing dictionary meanings. An attested noun-phrase complement must
+  # name its own head as the object. Bare complements remain possible when no
+  # complete phrase is available, but cannot shadow a stronger structure.
+  defp valid_pp?(
+         %{id: :prepositional_phrase, source: :core_syntax,
+           span: {first, last}, roles: roles, evidence: evidence},
+         index, tokens)
+       when is_integer(first) and is_integer(last) and is_map(roles) and
+            is_list(evidence) do
+    object = Map.get(roles, :object)
+
+    first == index and
+      is_integer(object) and object > index and object <= last and
+      :preposition in evidence and is_binary(Map.get(tokens, index)) and
+      case evidence do
+        ev when :noun_phrase_complement in ev ->
+          Map.get(roles, :head) == object and
+            object == last and
+            last >= index + 2 and
+            Enum.all?(index..last, &is_binary(Map.get(tokens, &1)))
+
+        ev when :bare_nominal_complement in ev ->
+          object == index + 1 and last == object and
+            is_binary(Map.get(tokens, object))
+
+        _ ->
+          false
+      end
+  end
+
+  defp valid_pp?(_, _, _), do: false
 
   # Diagnostic only: report why a location-complement witness was unavailable.
   # No synthetic senses, fallback guesses, or relaxed thresholds.
