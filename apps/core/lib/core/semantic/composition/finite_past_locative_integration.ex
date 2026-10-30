@@ -84,7 +84,9 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
     if sig.roles == %{subject_determiner: 0, subject_head: 1, predicate: 2,
                       preposition: 3, location_determiner: 4, location_head: 5} and
          Enum.all?(requirements, fn {role, index, pos} ->
-           match?({:ok, _}, RoleWitness.resolve(si, role, index, [pos]))
+           match?({:ok, _}, RoleWitness.resolve(si, role, index, [pos])) or
+             (role in [:subject_head, :location_head] and pos == "noun" and
+                match?({:ok, _}, RoleWitness.resolve_noun_kind(si, role, index)))
          end) do
       :ok
     else
