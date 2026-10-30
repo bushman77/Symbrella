@@ -62,6 +62,29 @@ defmodule Llm.Colony.PublicBrowseTest do
              Client.thread_context(@post_id, plug: plug)
   end
 
+  test "public browsing falls back to anonymous GET after rejected key" do
+    System.put_env("COLONY_API_KEY", "col_example_expired_or_revoked_key")
+
+    plug = fn conn ->
+      case {conn.method, conn.request_path} do
+        {"POST", "/auth/token"} ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(401, Jason.encode!(%{"detail" => "Unauthorized"}))
+
+        {"GET", "/posts"} ->
+          assert Plug.Conn.get_req_header(conn, "authorization") == []
+          json_response(conn, %{"posts" => [%{"id" => @post_id, "title" => "Still readable"}]})
+
+        other ->
+          flunk("unexpected network request: #{inspect(other)}")
+      end
+    end
+
+    assert {:ok, %{"posts" => [%{"title" => "Still readable"}]}} =
+             Client.posts(limit: 25, plug: plug)
+  end
+
   test "private account endpoint still requires credentials" do
     assert {:error, :missing_colony_api_key} = Client.me()
   end
