@@ -145,6 +145,51 @@ defmodule Core.MWE.LexiconTest do
     end
   end
 
+  test "canonical source punctuation cannot manufacture dictionary MWE matches" do
+    for sentence <- ["turn. off", "turn, off", "turn—off", "turn… off", "turn\noff"] do
+      si = Core.Pipeline.Input.prepare(sentence, max_wordgram_n: 3)
+      parent = self()
+
+      result =
+        si
+        |> Signatures.run(stage: :early)
+        |> Lexicon.attach(
+          mwe_lookup: fn terms ->
+            send(parent, {:canonical_mwe_terms, terms})
+            [verb_sense("turn off")]
+          end
+        )
+
+      assert_receive {:canonical_mwe_terms, terms}
+      refute "turn off" in terms
+      refute Enum.any?(List.wrap(result.mwe_matches), &(&1.phrase == "turn off"))
+      assert result.mwe_lexicon == []
+      assert result.tokens == si.tokens
+    end
+  end
+
+  test "canonical MWE retains attested phrase and original UTF-8 token spans" do
+    si = Core.Pipeline.Input.prepare("Café turn  off.", max_wordgram_n: 3)
+    parent = self()
+
+    result =
+      si
+      |> Signatures.run(stage: :early)
+      |> Lexicon.attach(
+        mwe_lookup: fn terms ->
+          send(parent, {:canonical_valid_terms, terms})
+          [verb_sense("turn off")]
+        end
+      )
+
+    assert_receive {:canonical_valid_terms, terms}
+    assert "turn off" in terms
+    assert Enum.any?(result.mwe_matches, &(&1.phrase == "turn off"))
+    assert [%{span: {1, 2}, phrase: "turn off"}] = result.mwe_lexicon
+    assert result.tokens == si.tokens
+    assert Enum.map(result.tokens, & &1.span) == Enum.map(si.tokens, & &1.span)
+  end
+
   test "a valid expression may end in punctuation" do
     si =
       input("please turn off.")
