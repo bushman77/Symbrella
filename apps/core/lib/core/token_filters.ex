@@ -342,6 +342,24 @@ defmodule Core.TokenFilters do
 
   """
   @spec keep_only_word_boundary_tokens(SemanticInput.t() | map()) :: SemanticInput.t() | map()
+  # Canonical Phase 1 spans use exact UTF-8 byte offsets into the original
+  # sentence. Never run the legacy whitespace/grapheme reconstruction here.
+  def keep_only_word_boundary_tokens(
+        %{sentence: sentence, tokens: tokens,
+          tokenization: %{span_unit: :utf8_bytes, end_exclusive?: true}} = si
+      ) when is_binary(sentence) and is_list(tokens) do
+    kept = Enum.filter(tokens, &canonical_token_valid?(sentence, &1))
+
+    si
+    |> Map.put(:tokens, kept)
+    |> put_trace_any(:token_boundary, %{
+      kept: length(kept),
+      removed: length(tokens) - length(kept),
+      fallback?: false,
+      span_unit: :utf8_bytes
+    })
+  end
+
   def keep_only_word_boundary_tokens(%SemanticInput{sentence: s, tokens: toks} = si)
       when is_binary(s) and is_list(toks) do
     {s_norm, final, kept_count} = boundary_filter(s, toks)
@@ -377,6 +395,17 @@ defmodule Core.TokenFilters do
   end
 
   def keep_only_word_boundary_tokens(other), do: other
+
+  defp canonical_token_valid?(sentence, token) do
+    with {start, stop} when is_integer(start) and is_integer(stop) and
+                                start >= 0 and stop > start and stop <= byte_size(sentence) <-
+           tok_span(token),
+         phrase when is_binary(phrase) <- tok_phrase(token) do
+      binary_part(sentence, start, stop - start) == phrase
+    else
+      _ -> false
+    end
+  end
 
   defp boundary_filter(s, toks) do
     s_norm = normalize_sentence(s)
