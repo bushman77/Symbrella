@@ -11,7 +11,7 @@ defmodule Core.MWE.Boundaries do
   """
 
   @spec valid_window?(list(), map() | nil) :: boolean()
-  def valid_window?(tokens, context \\ nil)
+  def valid_window?(tokens, context \ nil)
 
   def valid_window?([_, _ | _] = tokens, context) do
     tokens
@@ -21,8 +21,8 @@ defmodule Core.MWE.Boundaries do
       r = phrase(right)
 
       l != "" and r != "" and
-        not String.match?(l, ~r/[\\p{P}\\p{S}]$/u) and
-        not String.match?(r, ~r/^[\\p{P}\\p{S}]/u) and
+        not String.match?(l, ~r/[\p{P}\p{S}]$/u) and
+        not String.match?(r, ~r/^[\p{P}\p{S}]/u) and
         contiguous?(left, right) and
         source_gap_clear?(left, right, context)
     end)
@@ -47,7 +47,7 @@ defmodule Core.MWE.Boundaries do
          true <- binary_part(sentence, start_right, end_right - start_right) == phrase(right) do
       gap = binary_part(sentence, end_left, start_right - end_left)
       # Horizontal whitespace only: newlines break phrase continuity.
-      String.match?(gap, ~r/\\A\\h+\\z/u)
+      String.match?(gap, ~r/\A\h+\z/u)
     else
       _ -> false
     end
