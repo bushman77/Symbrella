@@ -259,6 +259,92 @@ defmodule Brain.ATL.ConstituentsTest do
     assert Map.has_key?(slate.by_id, "turn off|verb|2")
   end
 
+  test "COLONY-14 resolves modal conditional roles only from the actual selected senses" do
+    words = ~w(what would you do if you were free)
+    winners = [
+      winner("what", "pronoun", 0),
+      winner("would", "auxiliary", 1),
+      winner("you", "pronoun", 2),
+      winner("do", "verb", 3),
+      winner("if", "conjunction", 4),
+      winner("you", "pronoun", 5),
+      winner("were", "verb", 6),
+      winner("free", "adjective", 7)
+    ]
+
+    roles = %{
+      wh: 0, modal: 1, subject: 2, predicate: 3,
+      condition_marker: 4, condition_subject: 5,
+      condition_copula: 6, condition_complement: 7
+    }
+
+    required_features = %{
+      wh: [:pos_pronoun],
+      modal: [:pos_modal_or_auxiliary_or_verb],
+      subject: [:pos_pronoun], predicate: [:pos_verb],
+      condition_marker: [:explicit_if_surface],
+      condition_subject: [:pos_pronoun],
+      condition_copula: [:attested_copular_form],
+      condition_complement: [:pos_adjective]
+    }
+
+    signature = %{
+      id: :wh_modal_conditional_question, span: {0, 7},
+      roles: roles, required_features: required_features
+    }
+
+    slate = ATL.reduce(winners, tokens(words), [signature])
+
+    assert [%{
+      id: :wh_modal_conditional_question,
+      status: :resolved, unresolved_roles: [],
+      roles: resolved
+    }] = slate.constituents
+
+    assert resolved.modal.sense_id == "would|auxiliary|1"
+    assert resolved.condition_marker.sense_id == "if|conjunction|1"
+    assert resolved.condition_copula.sense_id == "were|verb|1"
+    assert slate.winners == ATL.reduce(winners, tokens(words)).winners
+  end
+
+  test "COLONY-14 does not override incompatible modal or copular lexical choices" do
+    words = ~w(what would you do if you were free)
+    winners = [
+      winner("what", "pronoun", 0),
+      winner("would", "noun", 1),
+      winner("you", "pronoun", 2),
+      winner("do", "verb", 3),
+      winner("if", "noun", 4),
+      winner("you", "pronoun", 5),
+      winner("were", "noun", 6),
+      winner("free", "noun", 7)
+    ]
+
+    signature = %{
+      id: :wh_modal_conditional_question, span: {0, 7},
+      roles: %{
+        wh: 0, modal: 1, subject: 2, predicate: 3,
+        condition_marker: 4, condition_subject: 5,
+        condition_copula: 6, condition_complement: 7
+      },
+      required_features: %{
+        wh: [:pos_pronoun], modal: [:pos_modal_or_auxiliary_or_verb],
+        subject: [:pos_pronoun], predicate: [:pos_verb],
+        condition_marker: [:explicit_if_surface],
+        condition_subject: [:pos_pronoun],
+        condition_copula: [:attested_copular_form],
+        condition_complement: [:pos_adjective]
+      }
+    }
+
+    slate = ATL.reduce(winners, tokens(words), [signature])
+    assert [%{status: :partially_resolved, unresolved_roles: missing}] =
+      slate.constituents
+    assert Enum.sort(missing) ==
+      [:condition_complement, :condition_copula, :condition_marker, :modal]
+    assert slate.winners == ATL.reduce(winners, tokens(words)).winners
+  end
+
   test "fallback candidates and invalid spans cannot become resolved constituents" do
     choices = [%{id: "garden|noun|fallback", token_index: 1}]
     signatures = [
