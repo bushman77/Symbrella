@@ -68,6 +68,8 @@ defmodule Core.Pipeline.LexicalBridge do
                   slates[target], left, right)
             end
 
+          examined = Enum.map(candidates, &annotate_evidence(&1, slates, source, target))
+
           {:ok, %{
             mode: :observation_only,
             source: source,
@@ -75,9 +77,10 @@ defmodule Core.Pipeline.LexicalBridge do
             via: Enum.slice(terms, 1, length(terms) - 2),
             senses_by_term: Map.new(slates, fn {term, rows} -> {term, length(rows)} end),
             status: if(candidates == [], do: :unresolved, else: :candidate_bridges),
-            candidate_count: length(candidates),
-            candidates: Enum.take(candidates, @max_chains),
-            truncated?: length(candidates) > @max_chains,
+            candidate_count: length(examined),
+            evidence_quality_counts: Enum.frequencies_by(examined, & &1.evidence_quality),
+            candidates: Enum.take(examined, @max_chains),
+            truncated?: length(examined) > @max_chains,
             verified_intended_sense?: false,
             changes_lifg?: false
           }}
@@ -131,6 +134,104 @@ defmodule Core.Pipeline.LexicalBridge do
       {c.source_sense_id, c.target_sense_id, Enum.map(c.via, & &1.sense_id),
        c.witnesses.intermediate_definitions_share}
     end)
+  end
+
+  # Quality here denotes the *location* of the lexical witness, not the
+  # correctness or semantic strength of a relationship. Body-overlap can be
+  # accidental ("natural", "size"), and qualifier-overlap ("slang") cannot
+  # establish any semantic compatibility. Full candidate lists are retained.
+  defp annotate_evidence(%{kind: :shared_definition_term} = candidate, slates, source, target) do
+    first = sense(slates, source, candidate.source_sense_id)
+    second = sense(slates, target, candidate.target_sense_id)
+    from = witness_location(first, candidate.witness)
+    to = witness_location(second, candidate.witness)
+
+    candidate
+    |> Map.put(:evidence_quality, quality([from, to], :direct))
+    |> Map.put(:evidence_audit, %{
+      source_region: from,
+      target_region: to,
+      source_senses_with_witness: term_sense_frequency(slates[source], candidate.witness),
+      target_senses_with_witness: term_sense_frequency(slates[target], candidate.witness),
+      comparison_scope: :retrieved_senses_only,
+      semantic_relevance: :not_measured
+    })
+  end
+
+  defp annotate_evidence(%{kind: :two_intermediate_gloss_bridge} = candidate,
+       slates, source, target) do
+    [left, right] = candidate.via
+    witnesses = candidate.witnesses
+
+    source_location =
+      witness_location(sense(slates, source, candidate.source_sense_id),
+        witnesses.source_definition_mentions)
+
+    first_location =
+      witness_location(sense(slates, left.lemma, left.sense_id),
+        witnesses.intermediate_definitions_share)
+
+    second_location =
+      witness_location(sense(slates, right.lemma, right.sense_id),
+        witnesses.intermediate_definitions_share)
+
+    target_location =
+      witness_location(sense(slates, target, candidate.target_sense_id),
+        witnesses.target_definition_mentions)
+
+    candidate
+    |> Map.put(:evidence_quality,
+      quality([source_location, first_location, second_location, target_location], :multi_hop))
+    |> Map.put(:evidence_audit, %{
+      source_lemma_region: source_location,
+      first_intermediate_region: first_location,
+      second_intermediate_region: second_location,
+      target_lemma_region: target_location,
+      comparison_scope: :retrieved_senses_only,
+      semantic_relevance: :not_measured
+    })
+  end
+
+  defp quality(regions, kind) do
+    cond do
+      :leading_qualifier in regions -> :includes_leading_qualifier
+      :not_attested in regions -> :missing_witness
+      kind == :multi_hop -> :multi_hop_gloss_overlap_unverified
+      true -> :definition_body_overlap_unverified
+    end
+  end
+
+  defp sense(slates, lemma, id) do
+    slates
+    |> Map.fetch!(lemma)
+    |> Enum.find(&(&1.id == id))
+  end
+
+  defp term_sense_frequency(rows, word) do
+    Enum.count(rows, &MapSet.member?(definition_terms(&1), word))
+  end
+
+  defp witness_location(%{definition: definition}, word)
+       when is_binary(definition) and is_binary(word) do
+    {leading, body} =
+      case Regex.run(~r/\A\s*(?:\([^)]*\)\s*)+/u, definition) do
+        [prefix] -> {prefix, String.replace_prefix(definition, prefix, "")}
+        _ -> {"", definition}
+      end
+
+    cond do
+      MapSet.member?(words(body), word) -> :definition_body
+      MapSet.member?(words(leading), word) -> :leading_qualifier
+      true -> :not_attested
+    end
+  end
+
+  defp witness_location(_, _), do: :not_attested
+
+  defp words(text) when is_binary(text) do
+    Regex.scan(~r/[\p{L}\p{N}]+/u, text)
+    |> Enum.map(fn [term] -> String.downcase(term) end)
+    |> MapSet.new()
   end
 
   defp shared_terms(a, b) do
