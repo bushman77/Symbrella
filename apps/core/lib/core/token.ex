@@ -334,8 +334,8 @@ defmodule Core.Token do
   defp dotted_word_continuation?({text, _, _}, next) do
     word_grapheme?(next) and
       (String.length(text) == 1 or
-         String.match?(text, ~r/^(?:\\p{L}\\.)+\\p{L}$/u) or
-         (String.match?(text, ~r/^\\d+$/u) and String.match?(next, ~r/^\\d$/u)))
+         String.match?(text, ~r/^(?:\p{L}\.)+\p{L}$/u) or
+         (String.match?(text, ~r/^\d+$/u) and String.match?(next, ~r/^\d$/u)))
   end
 
   defp dotted_word_continuation?(_, _), do: false
