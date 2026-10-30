@@ -95,9 +95,20 @@ defmodule Brain.LIFG.PrepositionSemanticsTest do
       @predicate, %{@place | definition: "A financial institution."},
       @ordinary, @topic
     ])
-    assert {^original, %{applied?: false, reason: :missing_contextual_location_object_witness}} =
+    assert {^original, %{applied?: false, reason: :missing_contextual_location_object_witness,
+                          object_index: 5, matching_noun_candidates: 1,
+                          place_gloss_candidates: 0, best_place_context_fit: nil}} =
              PrepositionSemantics.adjust(original, [@ordinary, @topic, @obsolete],
                wrong_object, 3, enabled?: true)
+
+    unindexed = input() |> Map.put(:active_cells, [
+      @predicate, Map.delete(@place, :token_index), @ordinary, @topic
+    ])
+    assert {^original, %{reason: :missing_contextual_location_object_witness,
+                          object_index: 5, matching_noun_candidates: 0,
+                          place_gloss_candidates: 0}} =
+             PrepositionSemantics.adjust(original, [@ordinary, @topic, @obsolete],
+               unindexed, 3, enabled?: true)
 
     unsupported = input() |> Map.put(:sentence_signatures, [
       %{@pp | source: :unverified_text}
