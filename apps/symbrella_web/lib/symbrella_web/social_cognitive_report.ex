@@ -22,12 +22,14 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
     probe = Keyword.get(opts, :probe, &SemanticProbe.run/2)
 
     sources =
-      [%{label: "Original post", author: topic.author, text: join_text(topic.title, topic.body)}] ++
+      [%{label: "Original post", source_type: :original_post, source_index: 0,
+         author: topic.author, text: join_text(topic.title, topic.body)}] ++
         (comments
          |> Enum.take(@max_replies)
          |> Enum.with_index(1)
          |> Enum.map(fn {comment, index} ->
-           %{label: "Reply #{index}", author: comment.author, text: comment.body || ""}
+           %{label: "Reply #{index}", source_type: :reply, source_index: index,
+             author: comment.author, text: comment.body || ""}
          end))
 
     {samples, dropped_by_source} =
@@ -39,7 +41,9 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
           kept
           |> Enum.with_index(1)
           |> Enum.map(fn {sentence, index} ->
-            %{label: "#{source.label} · sentence #{index}", author: source.author, text: sentence}
+            %{label: "#{source.label} · sentence #{index}",
+              source_label: source.label, source_type: source.source_type,
+              source_index: source.source_index, author: source.author, text: sentence}
           end)
 
         {acc ++ next, dropped + max(length(sentences) - length(kept), 0)}
@@ -74,6 +78,39 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
         sample |> Map.put(:excerpt, String.slice(sample.text, 0, 240)) |> Map.delete(:text) |> Map.merge(metadata)
       end)
 
+    # Preserve the original source boundary throughout cognition. A reply
+    # never inherits the post's meaning merely because it follows the post.
+    analyses =
+      analyses
+      |> Enum.with_index()
+      |> Enum.map(fn {sample, index} -> Map.put(sample, :sample_index, index) end)
+
+    original_segments = Enum.filter(analyses, &(&1.source_type == :original_post))
+
+    reply_sources =
+      sources
+      |> Enum.filter(&(&1.source_type == :reply))
+      |> Enum.map(fn source ->
+        own = Enum.filter(analyses, fn segment ->
+          segment.source_type == :reply and segment.source_index == source.source_index
+        end)
+
+        %{
+          kind: :reply, index: source.source_index, label: source.label,
+          author: source.author, segments: own,
+          understanding: SocialUnderstanding.build(own)
+        }
+      end)
+
+    sections = %{
+      original_post: %{
+        kind: :original_post, label: "Original post",
+        author: topic.author, segments: original_segments,
+        understanding: SocialUnderstanding.build(original_segments)
+      },
+      replies: reply_sources
+    }
+
     discourse = SocialDiscourse.build(analyses)
 
     {:ok, %{
@@ -85,6 +122,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       omitted_replies: max(length(comments) - @max_replies, 0),
       omitted_sentences: dropped_by_source + length(samples) - length(selected),
       segments: analyses,
+      sections: sections,
       understanding: SocialUnderstanding.build(analyses),
       discourse: discourse,
       conversation: SocialConversation.build(topic, comments, analyses, discourse)
