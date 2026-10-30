@@ -210,4 +210,43 @@ defmodule Core.Semantic.RelationalEvidenceTest do
                                   reason: :ltm_query_failed}}] = report.frames
     refute report.modified_lifg?
   end
+
+  test "real Input and Signatures producer yields a finite-past SVO frame" do
+    alias Core.Pipeline.Input
+    alias Core.Syntax.Signatures
+
+    rows = [
+      %{id: "the|determiner|1", norm: "the", pos: "determiner",
+        token_index: 0, semantic_atoms: []},
+      %{id: "bank|noun|1", norm: "bank", pos: "noun",
+        token_index: 1, semantic_atoms: []},
+      %{id: "granted|verb|1", norm: "granted", pos: "verb",
+        token_index: 2, semantic_atoms: ["tag:form-of", "tag:past"]},
+      %{id: "a|determiner|1", norm: "a", pos: "determiner",
+        token_index: 3, semantic_atoms: []},
+      %{id: "loan|noun|2", norm: "loan", pos: "noun",
+        token_index: 4, semantic_atoms: []}
+    ]
+
+    si =
+      "The bank granted a loan."
+      |> Input.prepare()
+      |> Map.put(:active_cells, rows)
+      |> Signatures.attach()
+
+    assert Enum.any?(si.sentence_signatures, &(&1.id == :finite_past_svo_candidate))
+
+    report = RelationalEvidence.audit(si,
+      lookup: lookup(%{"bank" => @bank, "loan" => @loan}))
+
+    assert report.status == :candidate_relational_evidence
+    assert Enum.any?(report.frames, fn frame ->
+      frame.signature_id == :finite_past_svo_candidate and
+        frame.subject.word == "bank" and frame.object.word == "loan"
+    end)
+    assert si.active_cells == rows
+    refute report.modified_lifg?
+    refute report.semantic_relation_verified?
+  end
+
 end
