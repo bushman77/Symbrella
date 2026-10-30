@@ -16,6 +16,7 @@ defmodule Core.Semantic.RelationalEvidence do
   """
 
   alias Core.Pipeline.LexicalBridge
+  alias Core.Semantic.PredicateLemmaEvidence
 
   @max_tokens 64
   @max_cells 4096
@@ -97,7 +98,10 @@ defmodule Core.Semantic.RelationalEvidence do
             |> Enum.map(fn frame ->
               bridge_opts = Keyword.take(opts, [:lookup]) ++ [via: via]
               bridge = LexicalBridge.audit(frame.subject.word, frame.object.word, bridge_opts)
-              Map.put(frame, :dictionary_bridge, bridge_projection(bridge))
+              frame
+              |> Map.put(:dictionary_bridge, bridge_projection(bridge))
+              |> Map.put(:predicate_lemma_evidence,
+                PredicateLemmaEvidence.audit(frame.predicate, cells, opts))
             end)
 
           %{
@@ -121,7 +125,10 @@ defmodule Core.Semantic.RelationalEvidence do
   defp report_status([]), do: :unresolved
   defp report_status(reports) do
     cond do
-      Enum.any?(reports, &(&1.dictionary_bridge.status == :lookup_error)) ->
+      Enum.any?(reports, fn frame ->
+        frame.dictionary_bridge.status == :lookup_error or
+          frame.predicate_lemma_evidence.status == :lookup_error
+      end) ->
         :dictionary_lookup_error
       Enum.any?(reports, &(&1.dictionary_bridge.candidate_count > 0)) ->
         :candidate_relational_evidence
