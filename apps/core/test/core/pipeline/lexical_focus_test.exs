@@ -134,6 +134,41 @@ defmodule Core.Pipeline.LexicalFocusTest do
     refute hd(out.lexical_focus.positions[0].focus).grammatical_support?
   end
 
+  test "post-LIFG audit distinguishes focused, deferred, and out-of-LTM choices" do
+    rows = bank_rows()
+    si = %SemanticInput{
+      sentence: "bank", tokens: [%{index: 0, phrase: "bank", n: 1}],
+      active_cells: rows, sense_candidates: %{0 => [%{id: "bank|noun|45"}]}
+    }
+    focused = LexicalFocus.attach(si, lexical_focus_size: 8)
+
+    in_focus_id = hd(focused.lexical_focus.positions[0].focus).id
+    deferred_id =
+      rows
+      |> Enum.map(& &1.id)
+      |> Enum.find(fn id ->
+        not Enum.any?(focused.lexical_focus.positions[0].focus, &(&1.id == id))
+      end)
+
+    for {id, expected} <- [
+          {in_focus_id, :in_focus},
+          {deferred_id, :deferred},
+          {"bank|noun|fallback", :not_in_ltm}
+        ] do
+      before = Map.put(focused, :lifg_choices, [%{id: id, token_index: 0}])
+      after_audit = LexicalFocus.audit_lifg(before)
+
+      assert after_audit.lexical_focus.lifg_alignment.compared == 1
+      assert [%{token_index: 0, status: ^expected}] =
+               after_audit.lexical_focus.lifg_alignment.outcomes
+      assert after_audit.lifg_choices == before.lifg_choices
+      assert after_audit.active_cells == rows
+      assert after_audit.sense_candidates == before.sense_candidates
+      assert after_audit.lexical_focus.lifg_alignment.semantic_accuracy == :not_measured
+      refute after_audit.lexical_focus.lifg_alignment.changed_lifg_choice?
+    end
+  end
+
   test "large slates bypass ranking but preserve retrieval for reconsideration" do
     rows = for n <- 1..257 do
       %{id: "word|noun|#{n}", token_index: 0, pos: "noun"}
