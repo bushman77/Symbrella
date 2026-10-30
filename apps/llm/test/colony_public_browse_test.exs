@@ -36,7 +36,7 @@ defmodule Llm.Colony.PublicBrowseTest do
   test "lists public topics anonymously when no API key exists" do
     plug = fn conn ->
       assert conn.method == "GET"
-      assert conn.request_path == "/posts"
+      assert conn.request_path == "/api/v1/posts"
       assert Plug.Conn.get_req_header(conn, "authorization") == []
 
       json_response(conn, %{"posts" => [%{"id" => @post_id, "title" => "Public topic"}]})
@@ -49,7 +49,7 @@ defmodule Llm.Colony.PublicBrowseTest do
   test "reads a public discussion anonymously when no API key exists" do
     plug = fn conn ->
       assert conn.method == "GET"
-      assert conn.request_path == "/posts/#{@post_id}/context"
+      assert conn.request_path == "/api/v1/posts/#{@post_id}/context"
       assert Plug.Conn.get_req_header(conn, "authorization") == []
 
       json_response(conn, %{
@@ -67,12 +67,12 @@ defmodule Llm.Colony.PublicBrowseTest do
 
     plug = fn conn ->
       case {conn.method, conn.request_path} do
-        {"POST", "/auth/token"} ->
+        {"POST", "/api/v1/auth/token"} ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(401, Jason.encode!(%{"detail" => "Unauthorized"}))
 
-        {"GET", "/posts"} ->
+        {"GET", "/api/v1/posts"} ->
           assert Plug.Conn.get_req_header(conn, "authorization") == []
           json_response(conn, %{"posts" => [%{"id" => @post_id, "title" => "Still readable"}]})
 
