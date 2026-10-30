@@ -89,6 +89,66 @@ defmodule Core.Pipeline.LexicalFocus do
   def attach(other, _opts), do: other
 
   @doc """
+  Audit whether LIFG's eventual sense choices were in the working focus.
+
+  A miss only indicates the focus was incomplete; it is not evidence LIFG was
+  wrong. Fallback choices not retrieved from LTM are tracked separately.
+  No LIFG choices, scores, dictionary rows or activation values are rewritten.
+  """
+  @spec audit_lifg(map()) :: map()
+  def audit_lifg(%{lexical_focus: %{status: :ranked, positions: positions} = focus} = si)
+      when is_map(positions) do
+    choices =
+      si
+      |> Map.get(:lifg_choices, [])
+      |> list_or_empty()
+      |> Enum.filter(fn
+        %{token_index: index, id: id}
+        when is_integer(index) and index >= 0 and is_binary(id) -> true
+        _ -> false
+      end)
+
+    observed =
+      choices
+      |> Enum.flat_map(fn %{token_index: index, id: id} ->
+        case Map.get(positions, index) do
+          %{focus: ranked} when is_list(ranked) ->
+            status =
+              cond do
+                Enum.any?(ranked, &(&1.id == id)) -> :in_focus
+                Enum.any?(expand(si, index), &(&1.id == id)) -> :deferred
+                true -> :not_in_ltm
+              end
+
+            [%{token_index: index, status: status}]
+
+          _ ->
+            []
+        end
+      end)
+
+    audit = %{
+      compared: length(observed),
+      in_focus: Enum.count(observed, &(&1.status == :in_focus)),
+      deferred: Enum.count(observed, &(&1.status == :deferred)),
+      not_in_ltm: Enum.count(observed, &(&1.status == :not_in_ltm)),
+      outcomes: observed,
+      semantic_accuracy: :not_measured,
+      changed_lifg_choice?: false
+    }
+
+    si
+    |> Map.put(:lexical_focus, Map.put(focus, :lifg_alignment, audit))
+    |> Trace.append(:lexical_focus_alignment,
+      decision: :observed,
+      reason: :read_only_lifg_working_set_comparison,
+      meta: Map.drop(audit, [:outcomes])
+    )
+  end
+
+  def audit_lifg(si), do: si
+
+  @doc """
   Recover every dictionary candidate for a token from the full slate.
 
   Deferred candidates are never deleted. This operation deliberately ignores
