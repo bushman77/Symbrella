@@ -183,6 +183,11 @@ defmodule Core do
     |> StateDump.capture(:construction_schema)
     |> Core.Syntax.SentenceCompetition.attach()
     |> StateDump.capture(:sentence_competition)
+    # Build a reversible, observation-only attention focus from full LTM
+    # candidates after independent grammar evidence is available. LIFG still
+    # receives the complete dictionary slate, not a filtered working set.
+    |> Core.Pipeline.LexicalFocus.attach(opts)
+    |> StateDump.capture(:lexical_focus)
     |> Selection.refine_from_syntax()
     |> StateDump.capture(:syntax_intent)
     |> Core.MWE.Discovery.run(opts)
