@@ -2,8 +2,8 @@ defmodule SymbrellaWeb.SocialBrainActivity do
   @moduledoc """
   Short-lived, memory-only activity signal for the /brain dashboard.
 
-  Reports that real read-only lexical/semantic stages ran, not that neurons
-  fired or that Colony statements were learned. No external text, user names,
+  Reports read-only lexical/semantic stages and operator-initiated transient
+  neuron activation requests, without claiming that Colony statements were learned. No external text, user names,
   tokens, or cognitive reports are retained. The last aggregate expires in
   five minutes and is lost on restart.
   """
@@ -41,7 +41,8 @@ defmodule SymbrellaWeb.SocialBrainActivity do
     :telemetry.execute(
       [:symbrella_web, :social, :analysis],
       Map.take(activity, [:segments, :lifg_choices, :atl_winners,
-        :supported_interpretations, :participants, :relations]),
+        :supported_interpretations, :participants, :relations,
+        :neuron_stimuli_issued]),
       %{source: :colony_external, mode: :read_only_shadow}
     )
 
@@ -78,6 +79,7 @@ defmodule SymbrellaWeb.SocialBrainActivity do
     %{
       source: :colony_external,
       mode: :read_only_shadow,
+      neuron_stimuli_issued: count(segments, [:result, :brain_observation, :stimuli_issued]),
       segments: length(segments),
       lifg_choices: count(segments, [:result, :lifg, :chosen_count]),
       atl_winners: count(segments, [:result, :atl, :winner_count]),
