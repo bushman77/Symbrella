@@ -165,7 +165,8 @@ defmodule Core.Token do
         %{kind: :word} = word, {acc, segment} ->
           {[Map.put(word, :segment, segment) | acc], segment}
 
-        %{kind: :punct, subpos: :sentence_final}, {acc, segment} ->
+        %{kind: :punct, subpos: subpos}, {acc, segment}
+        when subpos in [:sentence_final, :line_break] ->
           {acc, segment + 1}
 
         _, state ->
@@ -294,11 +295,11 @@ defmodule Core.Token do
 
         case {cls, run} do
           {:space, nil} ->
-            {i + w, nil, acc}
+            {i + w, nil, maybe_mark_newline(acc, g, i, w)}
 
           {:space, {text, st, _en}} ->
             acc1 = [%{text: text, start: st, stop: i, kind: :word} | acc]
-            {i + w, nil, acc1}
+            {i + w, nil, maybe_mark_newline(acc1, g, i, w)}
 
           {:punct, nil} ->
             {_p, sub} = punct_pos(g)
@@ -306,7 +307,12 @@ defmodule Core.Token do
             {i + w, nil, acc1}
 
           {:punct, {text, st, _en}} ->
-            {_p, sub} = punct_pos(g)
+            {_p, original_sub} = punct_pos(g)
+            # A dotted abbreviation's final period may not end the sentence;
+            # keep the uncertainty instead of forcing a sentence boundary.
+            sub =
+              if g == "." and dotted_abbreviation?(text),
+                do: :ambiguous_abbreviation_period, else: original_sub
             acc1 = [%{text: text, start: st, stop: i, kind: :word} | acc]
             acc2 = [%{text: g, start: i, stop: i + w, kind: :punct, subpos: sub} | acc1]
             {i + w, nil, acc2}
@@ -327,6 +333,17 @@ defmodule Core.Token do
 
     Enum.reverse(acc)
   end
+
+  defp maybe_mark_newline(acc, g, offset, width) do
+    if String.contains?(g, "\n") do
+      [%{text: g, start: offset, stop: offset + width, kind: :punct, subpos: :line_break} | acc]
+    else
+      acc
+    end
+  end
+
+  defp dotted_abbreviation?(text),
+    do: String.match?(text, ~r/^(?:\p{L}\.)+\p{L}$/u)
 
   defp word_grapheme?(g) when is_binary(g), do: char_class(g) == :word
   defp word_grapheme?(_), do: false
