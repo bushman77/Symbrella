@@ -146,6 +146,20 @@ defmodule Core.PipelineInputTest do
     assert is_list(si.intent_evidence)
   end
 
+  test "Phase 2 projects source-backed medication correction onto keyword only" do
+    text = "Good morning, I forgot my quitiapine and now I can not sleep."
+    si = Core.resolve_input(text, mode: :test)
+
+    assert si.original_text == text
+    assert Enum.any?(si.tokens, &(&1.phrase == "quitiapine"))
+    assert si.keyword =~ "quetiapine"
+    assert si.fuzzy_text.text =~ "quetiapine"
+    assert Enum.any?(si.fuzzy_text.corrections, fn
+             %{original: "quitiapine", replacement: "quetiapine"} -> true
+             _ -> false
+           end)
+  end
+
   test "fuzzy false prevents intent selection from rerunning spelling correction" do
     si = Core.resolve_input("exlpain", mode: :test, fuzzy: false)
 
