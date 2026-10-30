@@ -45,6 +45,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.GrammarEvidence
   alias Brain.LIFG.SemanticControl
   alias Brain.LIFG.UsageRegister
+  alias Brain.LIFG.PrepositionSemantics
   alias Brain.LIFG.SenseFocus
 
   @default_weights %{
@@ -237,6 +238,7 @@ defmodule Brain.LIFG.Stage1 do
           buckets: buckets,
           grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
           sense_focus?: Keyword.get(opts, :sense_focus?, true),
+          spatial_pp_senses?: Keyword.get(opts, :spatial_pp_senses?, false),
           usage_register?: Keyword.get(opts, :usage_register?,
             Application.get_env(:brain, :lifg_usage_register?, true)),
           semantic_control_opts: [
@@ -921,6 +923,12 @@ defmodule Brain.LIFG.Stage1 do
           UsageRegister.adjust(cal_scores, cand_list, ctx.sent,
             enabled?: ctx.usage_register?)
 
+        # Experimental, opt-in semantic compatibility for attested locative
+        # PPs. Full-slate competition and all dictionary senses remain intact.
+        {cal_scores, spatial_pp} =
+          PrepositionSemantics.adjust(cal_scores, cand_list, ctx.si, tok_index,
+            enabled?: ctx.spatial_pp_senses?)
+
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
         probs = Numeric.softmax(logits)
 
@@ -1029,6 +1037,7 @@ defmodule Brain.LIFG.Stage1 do
           weak?: margin_weak? or low_confidence?,
           semantic_control: semantic_control,
           usage_register: usage_register,
+          spatial_pp: spatial_pp,
           sense_focus: focus,
           # Live production breakdown, bounded to strongest context-supported
           # candidates. This diagnostic does not change the actual score.
