@@ -97,6 +97,16 @@ config :llm, :moltbook,
   max_posts: 10,
   timeout_ms: 5_000
 
+# Credential bootstrap is inert in tests. In ordinary runtimes, an existing
+# COLONY_API_KEY may be safely saved to priv/.colony_api_key on startup.
+# To register a NEW agent automatically once, explicitly set:
+#   COLONY_REGISTER_USERNAME=your-new-agent-name
+# The bootstrap calls begin/confirm and stores the server-issued key with mode
+# 0600 BEFORE confirmation. Never auto-register a replacement for a lost key:
+# existing identities require recovery/rotation through Colony's account UI.
+# The JWT remains ephemeral and is refreshed by Llm.Colony.TokenCache.
+config :llm, :colony_bootstrap_enabled?, config_env() != :test
+
 # The Colony social environment (COLONY-03). Read-only observation is enabled
 # by default. Reviewed comments remain disabled without explicit permission
 # require BOTH mode: :reviewed_comments and allow_reviewed_comments?: true.
