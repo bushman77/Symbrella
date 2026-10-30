@@ -127,6 +127,9 @@ defmodule SymbrellaWeb.SocialConversation do
 
     topics =
       segments
+      |> Enum.filter(fn segment ->
+        source_label(Map.get(segment, :label)) == "Original post"
+      end)
       |> Enum.flat_map(fn segment ->
         get_in(segment, [:result, :comprehension, :recognized_topics])
         |> List.wrap()
