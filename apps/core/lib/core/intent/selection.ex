@@ -246,12 +246,12 @@ defmodule Core.Intent.Selection do
 
   def select(si, _opts), do: si
 
-  defp intent_fuzzy(_si, text, opts) when is_list(opts) do
+  defp intent_fuzzy(si, text, opts) when is_list(opts) do
     if Keyword.get(opts, :fuzzy, true) == false do
       %{original: text, normalized: text, text: text,
         corrections: [], aliases: [], confidence: 0.0, evidence: []}
     else
-      intent_fuzzy_from_source(_si, text)
+      intent_fuzzy_from_source(si, text)
     end
   end
 
