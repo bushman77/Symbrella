@@ -107,7 +107,7 @@ defmodule SymbrellaWeb.BrainLive do
           class="mx-4 my-5 rounded-xl border border-cyan-400/25 bg-zinc-950 p-4 text-zinc-100 sm:mx-6">
           <h2 class="text-lg font-semibold text-cyan-200">Social cognitive processing</h2>
           <p class="mt-1 text-sm text-zinc-400">
-            Transient Colony semantic shadow · read-only lexical and sentence analysis.
+            Colony lexical and sentence analysis · bounded live neuron stimulation when explicitly requested; no learning or memory writes.
             This is not BrainCell firing, working-memory admission, or learning.
           </p>
           <%= if @social_activity do %>
@@ -115,6 +115,7 @@ defmodule SymbrellaWeb.BrainLive do
               <p>Sentences inspected: <strong>{@social_activity.segments}</strong></p>
               <p>LIFG choices: <strong>{@social_activity.lifg_choices}</strong></p>
               <p>ATL winners: <strong>{@social_activity.atl_winners}</strong></p>
+              <p>Neuron stimuli issued: <strong>{Map.get(@social_activity, :neuron_stimuli_issued, 0)}</strong></p>
               <p>Supported meanings: <strong>{@social_activity.supported_interpretations}</strong></p>
               <p>Sources sampled: <strong>{@social_activity.participants}</strong></p>
               <p>Evidence links: <strong>{@social_activity.relations}</strong></p>
