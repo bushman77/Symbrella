@@ -14,7 +14,8 @@ defmodule Core.Semantic.Composition.RequirementEvidence do
   # A limited, reviewable set of noun-definition indications. Deliberately
   # conservative: e.g. a "fence" barrier does not automatically prove
   # "supporting_surface" without lexical/physical-world evidence.
-  @noun_rules %{
+  defp noun_rules do
+    %{
     geographic_landmark: ~r/\b(?:river|lake|watercourse|shore|coast|geographical|geographic)\b/iu,
     transport_landmark: ~r/\b(?:vehicle|car|bus|train|ship|boat|aircraft|ferry|motorcycle)\b/iu,
     supporting_surface: ~r/\b(?:surface|platform|floor|tabletop|supporting ledge)\b/iu,
@@ -22,15 +23,18 @@ defmodule Core.Semantic.Composition.RequirementEvidence do
     group_landmark: ~r/\b(?:committee|council|group of people|organization|organisation|team)\b/iu,
     date_landmark: ~r/\b(?:calendar date|day of the week|day of the month)\b/iu,
     time_landmark: ~r/\b(?:time of day|instant in time|moment in time)\b/iu
-  }
+    }
+  end
 
-  @form_of ~r/\b(?:present participle and gerund|simple past and past participle|past participle|present participle)\s+of\s+([\p{L}-]+)\b/iu
+  defp form_of_pattern, do: ~r/\b(?:present participle and gerund|simple past and past participle|past participle|present participle)\s+of\s+([\p{L}-]+)\b/iu
 
   @spec audit(map(), map()) :: map()
   def audit(%{} = context, %{} = hypothesis) do
     requirements = get(hypothesis, :required_context)
     noun = selected_dictionary_cell(get(context, :object))
     verb = candidate_verb_cell(get(context, :predicate))
+
+    rules = noun_rules()
 
     checks =
       if is_list(requirements) do
@@ -40,12 +44,12 @@ defmodule Core.Semantic.Composition.RequirementEvidence do
               r when is_atom(r) -> r
               r when is_binary(r) ->
                 # No String.to_atom: only translate known declared requirements.
-                Enum.find(Map.keys(@noun_rules),
+                Enum.find(Map.keys(rules),
                   &(Atom.to_string(&1) == r))
               _ -> nil
             end
 
-          pattern = if key, do: Map.get(@noun_rules, key), else: nil
+          pattern = if key, do: Map.get(rules, key), else: nil
           definition = if noun, do: get(noun, :definition), else: nil
 
           matched =
@@ -73,7 +77,7 @@ defmodule Core.Semantic.Composition.RequirementEvidence do
         cell ->
           case get(cell, :definition) do
             definition when is_binary(definition) ->
-              case Regex.run(@form_of, definition) do
+              case Regex.run(form_of_pattern(), definition) do
                 [_matched, lemma] ->
                   %{attested_form_of_lemma: String.downcase(lemma),
                     verb_sense_id: get(cell, :id),
