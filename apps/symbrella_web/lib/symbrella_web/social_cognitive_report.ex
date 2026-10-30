@@ -21,17 +21,11 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       when is_binary(id) and is_list(comments) do
     probe = Keyword.get(opts, :probe, &SemanticProbe.run/2)
 
-    sources =
-      [%{label: "Original post", source_type: :original_post, source_index: 0,
-         author: topic.author, text: join_text(topic.title, topic.body)}] ++
-        (comments
-         |> Enum.take(@max_replies)
-         |> Enum.with_index(1)
-         |> Enum.map(fn {comment, index} ->
-           %{label: "Reply #{index}", source_type: :reply, source_index: index,
-             author: comment.author, text: comment.body || ""}
-         end))
+    target = Keyword.get(opts, :target, :thread)
 
+    # A selected reply MUST NOT cause the original post or another reply to
+    # enter the semantic probe or stimulate Brain.Cell processes.
+    with {:ok, sources} <- select_sources(topic, comments, target) do
     {samples, dropped_by_source} =
       Enum.reduce(sources, {[], 0}, fn source, {acc, dropped} ->
         sentences = split_sentences(source.text)
@@ -121,17 +115,70 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       trust: :untrusted_external,
       mode: :read_only_shadow,
       analyzed_segments: length(analyses),
-      omitted_replies: max(length(comments) - @max_replies, 0),
+      target: target_info(target, sources),
+      omitted_replies: if(target == :thread, do: max(length(comments) - @max_replies, 0), else: 0),
       omitted_sentences: dropped_by_source + length(samples) - length(selected),
       segments: analyses,
       sections: sections,
       understanding: SocialUnderstanding.build(analyses),
-      discourse: discourse,
-      conversation: SocialConversation.build(topic, comments, analyses, discourse)
-    }}
+      discourse: discourse
+    }
+    |> maybe_add_conversation(topic, comments, target, analyses, discourse)
+    |> then(&{:ok, &1})
+  end
   end
 
   def analyze(_, _), do: {:error, :invalid_social_analysis_input}
+
+  defp select_sources(topic, comments, :thread) do
+    {:ok, [post_source(topic)] ++
+      (comments
+       |> Enum.take(@max_replies)
+       |> Enum.with_index(1)
+       |> Enum.map(fn {comment, index} -> reply_source(comment, index) end))}
+  end
+
+  defp select_sources(topic, _comments, :original_post), do: {:ok, [post_source(topic)]}
+
+  defp select_sources(_topic, comments, {:reply, index})
+       when is_integer(index) and index >= 0 do
+    case Enum.fetch(comments, index) do
+      {:ok, comment} -> {:ok, [reply_source(comment, index + 1)]}
+      :error -> {:error, :invalid_social_analysis_target}
+    end
+  end
+
+  defp select_sources(_, _, _), do: {:error, :invalid_social_analysis_target}
+
+  defp post_source(topic) do
+    %{label: "Original post", source_type: :original_post, source_index: 0,
+      author: topic.author, text: join_text(topic.title, topic.body)}
+  end
+
+  defp reply_source(comment, index) do
+    %{label: "Reply #{index}", source_type: :reply, source_index: index,
+      author: comment.author, text: comment.body || ""}
+  end
+
+  defp target_info(:thread, _), do: %{kind: :thread, label: "Entire conversation"}
+
+  defp target_info(_target, [source]) do
+    %{kind: source.source_type, label: source.label, index: source.source_index,
+      author: source.author}
+  end
+
+  # A single reply has no original-post semantic ledger or cross-speaker
+  # inference. An explicitly selected post can still present its own question.
+  defp maybe_add_conversation(report, _topic, _comments, {:reply, _}, _analyses, _discourse),
+    do: report
+
+  defp maybe_add_conversation(report, topic, comments, :thread, analyses, discourse),
+    do: Map.put(report, :conversation,
+      SocialConversation.build(topic, comments, analyses, discourse))
+
+  defp maybe_add_conversation(report, topic, _comments, :original_post, analyses, discourse),
+    do: Map.put(report, :conversation,
+      SocialConversation.build(topic, [], analyses, discourse))
 
   defp join_text(title, body) do
     [title, body] |> Enum.filter(&is_binary/1) |> Enum.reject(&(&1 == "")) |> Enum.join("\n")
