@@ -1,7 +1,8 @@
 defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
   @moduledoc """
-  Opt-in, read-only bridge from a current-turn SemanticInput to a conditional
-  finite-past locative property. No production pipeline attachment or mutation.
+  Default-on, read-only bridge from a current-turn SemanticInput to a conditional
+  finite-past locative property. Attached after regular composition, with an
+  explicit opt-out and a separate derivation field.
 
   Re-detects grammar and verifies token/role witnesses before consulting the
   canonical lemma dictionary. A proof authenticates a possible-event property,
@@ -12,13 +13,13 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
   alias Core.Syntax.Signatures
 
   @doc """
-  Optional observation-only production attachment. Never replaces the
+  Default-on observation-only production attachment (explicit false opts out). Never replaces the
   existing compositional derivation or alters selected lexical senses.
   """
   @spec attach(map(), keyword()) :: map()
   def attach(si, opts \\ [])
   def attach(%{} = si, opts) when is_list(opts) do
-    if Keyword.get(opts, :finite_past_locative?, false) == true do
+    if Keyword.get(opts, :finite_past_locative?, true) == true do
       proof =
         case derive(si, opts) do
           {:ok, derivation} -> derivation
