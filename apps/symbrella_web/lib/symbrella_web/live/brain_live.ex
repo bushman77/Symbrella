@@ -117,6 +117,10 @@ defmodule SymbrellaWeb.BrainLive do
               <p>LIFG choices: <strong>{@social_activity.lifg_choices}</strong></p>
               <p>ATL winners: <strong>{@social_activity.atl_winners}</strong></p>
               <p>Neuron stimuli issued: <strong>{Map.get(@social_activity, :neuron_stimuli_issued, 0)}</strong></p>
+              <p :if={is_integer(Map.get(@social_activity, :runtime_active_neurons_at_completion))}>
+                Runtime neurons active at completion (all sources):
+                <strong>{@social_activity.runtime_active_neurons_at_completion}</strong>
+              </p>
               <p>Supported meanings: <strong>{@social_activity.supported_interpretations}</strong></p>
               <p>Sources sampled: <strong>{@social_activity.participants}</strong></p>
               <p>Evidence links: <strong>{@social_activity.relations}</strong></p>
