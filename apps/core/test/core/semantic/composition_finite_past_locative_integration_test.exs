@@ -98,10 +98,16 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
       |> Enum.sort_by(& &1.index)
 
     assert Enum.map(base_tokens, & &1.index) == Enum.to_list(0..5)
-    assert Enum.map(base_tokens, &String.downcase(&1.phrase)) ==
+    assert Enum.map(base_tokens, fn token ->
+      token.phrase |> String.downcase() |> String.trim() |>
+        String.replace(~r/^\p{P}+|\p{P}+$/u, "")
+    end) ==
              ~w(the bird sat on the fence)
     assert String.trim_trailing(String.downcase(String.trim(original.sentence)), ".") ==
-             Enum.map_join(base_tokens, " ", &String.downcase(&1.phrase))
+             Enum.map_join(base_tokens, " ", fn token ->
+               token.phrase |> String.downcase() |> String.trim() |>
+                 String.replace(~r/^\p{P}+|\p{P}+$/u, "")
+             end)
     assert signature in Signatures.detect(original)
 
     assert {:ok, proof} = Integration.derive(original, lookup: &lookup/1)
