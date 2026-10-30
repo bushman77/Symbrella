@@ -178,6 +178,56 @@ defmodule SymbrellaWeb.SocialLiveTest do
     end
   end
 
+  defmodule FakeSourceAwareAnalyzer do
+    def analyze(%{topic: topic, comments: comments} = input) do
+      {:ok, base} = SymbrellaWeb.SocialLiveTest.FakeCognitiveAnalyzer.analyze(input)
+      original = base.segments |> hd() |> Map.merge(%{
+        sample_index: 0, source_type: :original_post, source_index: 0
+      })
+
+      first_reply = hd(comments)
+      reply = original |> Map.merge(%{
+        sample_index: 1, source_type: :reply, source_index: 1,
+        label: "Reply 1 · sentence 1", author: first_reply.author
+      })
+
+      {:ok,
+        base
+        |> Map.put(:analyzed_segments, 2)
+        |> Map.put(:segments, [original, reply])
+        |> Map.put(:sections, %{
+          original_post: %{author: topic.author, segments: [original]},
+          replies: [%{
+            index: 1, label: "Reply 1", author: first_reply.author,
+            segments: [reply], understanding: %{status: :meaning_unresolved}
+          }]
+        })}
+    end
+  end
+
+  test "cognitive modal separates original post from independent reply reports", %{conn: conn} do
+    previous = Application.get_env(:symbrella_web, :social_cognitive_analyzer)
+    Application.put_env(:symbrella_web, :social_cognitive_analyzer, FakeSourceAwareAnalyzer)
+
+    try do
+      {:ok, view, _} = live(conn, ~p"/social/#{FakeClient.id(1)}")
+      view |> element("#social-analyze") |> render_click()
+
+      assert has_element?(view, "#social-analysis-original-post")
+      assert has_element?(view, "#social-analysis-replies")
+      assert has_element?(view, "#social-analysis-reply-1")
+
+      assert has_element?(view, "#social-analysis-original-post #social-analysis-segment-0")
+      assert has_element?(view, "#social-analysis-reply-1 #social-analysis-segment-1")
+      refute has_element?(view, "#social-analysis-original-post #social-analysis-segment-1")
+      refute has_element?(view, "#social-analysis-replies #social-analysis-segment-0")
+    after
+      if is_nil(previous),
+        do: Application.delete_env(:symbrella_web, :social_cognitive_analyzer),
+        else: Application.put_env(:symbrella_web, :social_cognitive_analyzer, previous)
+    end
+  end
+
   defmodule FakeOptInCognitiveAnalyzer do
     # Deliberately expose ONLY analyze/2. The LiveView must ensure the
     # module is loaded before checking exported arities.
