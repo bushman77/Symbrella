@@ -213,10 +213,32 @@ defmodule Core.Semantic.SentenceMeaning do
         # no ATL role agreement or conditional composition has been established.
         case Enum.find(frames, &(Map.get(&1, :id) == :wh_modal_conditional_question)) do
           %{source: :core_syntax, roles: roles, span: span} when is_map(roles) ->
+            # A bounded structural diagnostic, not an interpreted conditional.
+            # No role is filled in by a sentence-level template: unresolved
+            # selected senses remain explicitly unresolved.
+            atl =
+              Enum.find(constituents, fn
+                %{id: :wh_modal_conditional_question, span: ^span} -> true
+                _ -> false
+              end)
+
+            unresolved =
+              case atl do
+                %{unresolved_roles: missing} when is_list(missing) -> missing
+                _ -> Map.keys(roles)
+              end
+
             %{
-              status: :modal_conditional_signature_detected,
+              status:
+                if(match?(%{status: :resolved}, atl),
+                  do: :modal_conditional_atl_resolved,
+                  else: if(is_map(atl),
+                    do: :modal_conditional_roles_unresolved,
+                    else: :modal_conditional_signature_detected)),
               span: span,
               role_indices: roles,
+              unresolved_roles: unresolved,
+              atl_role_agreement: match?(%{status: :resolved}, atl),
               semantic_composition: :not_yet_interpreted
             }
 
