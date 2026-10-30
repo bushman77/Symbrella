@@ -60,6 +60,45 @@ defmodule SymbrellaWeb.SocialBrainActivityTest do
     refute_receive {:aggregate_telemetry, _, _, _}, 20
   end
 
+  test "the selected post and reply expose source-specific blackboard scopes" do
+    parent = self()
+    handler_id = "social-scope-#{System.unique_integer([:positive])}"
+
+    :ok = :telemetry.attach_many(
+      handler_id,
+      [[:core, :social, :cognitive_shadow], [:core, :social, :neuron_observation]],
+      fn event, _measurements, metadata, _config ->
+        send(parent, {:scope_telemetry, event, metadata})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    for {target, expected_scope} <- [
+      {%{kind: :original_post, label: "Original post", index: 0}, :original_post},
+      {%{kind: :reply, label: "Reply 2", index: 2}, :reply}
+    ] do
+      report = %{
+        target: target, segments: [], discourse: %{interpretations: []},
+        conversation: %{participants: [], relations: []}
+      }
+
+      assert :ok = SocialBrainActivity.record(report)
+
+      assert_receive {:scope_telemetry, [:core, :social, :cognitive_shadow],
+        %{analysis_scope: ^expected_scope, selected_source: ^expected_scope,
+          selected_reply_index: selected_index}}
+
+      assert selected_index == target.index
+
+      assert_receive {:scope_telemetry, [:core, :social, :neuron_observation],
+        %{analysis_scope: ^expected_scope}}
+
+      refute_receive {:scope_telemetry, _, _}, 20
+    end
+  end
+
   test "original post and replies retain separate stimulation and interpretation totals" do
     :ok = Bus.subscribe("brain:social")
 
