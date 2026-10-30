@@ -7,6 +7,8 @@ defmodule Core.Social.SemanticProbe do
   Instead we reuse Core's tokenizer, read-only LTM lookup, syntax evidence and
   LIFG Stage1 scoring with learning and normal Stage1 telemetry disabled.
   A selected lexical candidate is NOT a verified meaning or a factual claim.
+  The operator-initiated social UI may opt in to bounded, transient neuron
+  excitation; this does not enable memory, learning or public posting.
   """
 
   @max_input_chars 600
@@ -124,8 +126,17 @@ defmodule Core.Social.SemanticProbe do
     reported_proposition = Core.Social.ReportedProposition.interpret(semantic_si)
     summary = Core.Comprehension.Summary.build(semantic_si)
 
+    # Only an explicit operator action opts into transient Brain.Cell activity.
+    # This uses the same evidence-gated lexical feedback planner as chat,
+    # without calling the stateful pipeline or persisting external statements.
+    observation =
+      Core.Social.BrainObservation.observe(semantic_si,
+        enabled?: Keyword.get(opts, :brain_observation?, false)
+      )
+
     result = %{
        stage: :social_semantic_shadow,
+       brain_observation: observation,
        input_chars: String.length(excerpt),
        token_count: length(tokens),
        syntax: %{status: :observed, signatures: signatures, audit: grammar_audit},
