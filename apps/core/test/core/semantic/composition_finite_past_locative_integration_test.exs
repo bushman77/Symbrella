@@ -151,6 +151,41 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
     assert :not_applicable = Integration.derive(unscored, lookup: &lookup/1)
   end
 
+  test "optional attachment stays off and preserves existing derivations" do
+    original = si()
+    existing = %{kind: :progressive_event_property, marker: :preserve}
+    input = %{original | compositional_derivation: existing}
+
+    assert Integration.attach(input) == input
+    assert Integration.attach(input, finite_past_locative?: false) == input
+
+    enabled = Integration.attach(input,
+      finite_past_locative?: true, lookup: &lookup/1)
+
+    assert enabled.compositional_derivation == existing
+    assert enabled.lifg_choices == input.lifg_choices
+    assert %{kind: :finite_past_locative_property} =
+             enabled.finite_past_locative_derivation
+    assert :ok =
+             Core.Semantic.Composition.FinitePastLocative.verify(
+               enabled.finite_past_locative_derivation
+             )
+  end
+
+  test "enabled attachment abstains without a proof and leaves primary semantics untouched" do
+    original = si()
+    existing = %{kind: :nominal_property, marker: :preserve}
+    input = %{original | compositional_derivation: existing,
+                         sentence_signatures: []}
+
+    result = Integration.attach(input,
+      finite_past_locative?: true, lookup: &lookup/1)
+
+    assert result.compositional_derivation == existing
+    assert result.finite_past_locative_derivation == nil
+    assert result.lifg_choices == input.lifg_choices
+  end
+
   test "rejects missing signatures and scored morphological evidence" do
     original = si()
     assert :not_applicable = Integration.derive(
