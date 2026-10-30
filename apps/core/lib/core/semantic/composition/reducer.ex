@@ -95,6 +95,10 @@ defmodule Core.Semantic.Composition.Reducer do
     step_event(event, &{:event_aspect, aspect, &1})
   end
 
+  def step({:event_tense, tense, event}) do
+    step_event(event, &{:event_tense, tense, &1})
+  end
+
   def step({:event_actor_kind, kind, event}) do
     case step(kind) do
       {:ok, next} -> {:ok, {:event_actor_kind, next, event}}
@@ -182,6 +186,10 @@ defmodule Core.Semantic.Composition.Reducer do
     {:event_aspect, aspect, substitute(event, variable, replacement)}
   end
 
+  def substitute({:event_tense, tense, event}, variable, replacement) do
+    {:event_tense, tense, substitute(event, variable, replacement)}
+  end
+
   def substitute({:event_actor_kind, kind, event}, variable, replacement) do
     {:event_actor_kind, substitute(kind, variable, replacement),
      substitute(event, variable, replacement)}
@@ -220,6 +228,8 @@ defmodule Core.Semantic.Composition.Reducer do
   defp free_variables({:event_action, action, event}),
     do: MapSet.union(free_variables(action), free_variables(event))
   defp free_variables({:event_aspect, _, event}), do: free_variables(event)
+
+  defp free_variables({:event_tense, _, event}), do: free_variables(event)
   defp free_variables({:event_actor_kind, kind, event}),
     do: MapSet.union(free_variables(kind), free_variables(event))
   defp free_variables({:event_actor_entity, entity, event}),
@@ -245,6 +255,8 @@ defmodule Core.Semantic.Composition.Reducer do
   defp all_variables({:event_action, action, event}),
     do: MapSet.union(all_variables(action), all_variables(event))
   defp all_variables({:event_aspect, _, event}), do: all_variables(event)
+
+  defp all_variables({:event_tense, _, event}), do: all_variables(event)
   defp all_variables({:event_actor_kind, kind, event}),
     do: MapSet.union(all_variables(kind), all_variables(event))
   defp all_variables({:event_actor_entity, entity, event}),
@@ -271,6 +283,8 @@ defmodule Core.Semantic.Composition.Reducer do
   defp size({:event_action, action, event}),
     do: 1 + (if is_atom(action), do: 0, else: size(action)) + size(event)
   defp size({:event_aspect, _, event}), do: 1 + size(event)
+
+  defp size({:event_tense, _, event}), do: 1 + size(event)
   defp size({:actor_kind, _}), do: 1
   defp size({:event_actor_kind, kind, event}),
     do: 1 + (if is_atom(kind), do: 0, else: size(kind)) + size(event)
