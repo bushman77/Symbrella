@@ -255,6 +255,34 @@ defmodule Core.Discourse.LedgerTest do
     assert Ledger.entries(sid) == []
   end
 
+  test "discourse recall measures bounded ETS scanning without exposing session content",
+       %{sid: sid} do
+    handler = "ledger-audit-#{System.unique_integer([:positive])}"
+
+    assert :ok =
+             :telemetry.attach(
+               handler,
+               [:core, :discourse, :ledger, :resolve],
+               fn _event, measurements, metadata, pid ->
+                 send(pid, {:ledger_recall_metric, measurements, metadata})
+               end,
+               self()
+             )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+    Ledger.record(nominal(sid, ~w(The small black bird)))
+
+    assert {:ok, _} = Ledger.resolve(sid, "Tell me about that black bird")
+    assert_receive {:ledger_recall_metric, measurements, metadata}
+
+    assert measurements.retained_entries == 1
+    assert measurements.matching_entries == 1
+    assert is_integer(measurements.duration_us) and measurements.duration_us >= 0
+    assert metadata == %{outcome: :unique}
+    refute Map.has_key?(metadata, :session_id)
+    refute Map.has_key?(metadata, :sentence)
+  end
+
   test "disabled gate does not mutate ledger or leak a stale retrieval", %{sid: sid} do
     original = nominal(sid, ~w(The small black bird))
     unchanged = Ledger.record(original, discourse_ledger?: false)
