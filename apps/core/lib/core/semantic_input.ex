@@ -39,7 +39,7 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 10 adds reversible, observation-only lexical focus over full LTM.
+  # Version 11 adds the separate, conditional finite-past locative derivation field.
   @contract_v 11
 
   @list_fields MapSet.new([
