@@ -865,4 +865,64 @@ defmodule Core.Syntax.SignaturesTest do
        |> Enum.map(& &1.id))
   end
 
+
+  test "dictionary gloss explicitly attesting simple past and past participle preserves both" do
+    cells = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "bank", pos: "noun"},
+      %{norm: "a", pos: "determiner"},
+      %{norm: "loan", pos: "noun"},
+      %{
+        id: "granted|verb|1",
+        norm: "granted",
+        pos: "verb",
+        definition: "(form-of, participle, past) simple past and past participle of grant",
+        semantic_atoms: ["tag:form-of", "tag:participle", "tag:past", "pos_raw:verb"]
+      }
+    ]
+
+    assert :finite_past_svo_candidate in
+             ids("The bank granted a loan.", cells)
+
+    assert :perfect_predicate in
+             ids("The bank has granted a loan.", cells)
+  end
+
+  test "past-participle-only or unverified gloss never manufactures finite past" do
+    base = [
+      %{norm: "the", pos: "determiner"},
+      %{norm: "bank", pos: "noun"},
+      %{norm: "a", pos: "determiner"},
+      %{norm: "loan", pos: "noun"}
+    ]
+
+    for {definition, tags} <- [
+      {"(form-of, participle, past) past participle of break",
+       ["tag:form-of", "tag:participle", "tag:past"]},
+      {nil, ["tag:form-of", "tag:participle", "tag:past"]},
+      {"simple past and past participle of break",
+       ["tag:participle", "tag:past"]}
+    ] do
+      cells = base ++ [%{
+        id: "broken|verb|1",
+        norm: "broken",
+        pos: "verb",
+        definition: definition,
+        semantic_atoms: tags
+      }]
+
+      refute :finite_past_svo_candidate in
+               ids("The bank broken a loan.", cells)
+    end
+
+    participle = base ++ [%{
+      id: "broken|verb|1",
+      norm: "broken",
+      pos: "verb",
+      definition: "(form-of, participle, past) past participle of break",
+      semantic_atoms: ["tag:form-of", "tag:participle", "tag:past"]
+    }]
+    assert :perfect_predicate in ids("The bank has broken a loan.", participle)
+  end
+
 end
