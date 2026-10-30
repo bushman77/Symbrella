@@ -78,6 +78,49 @@ defmodule Brain.LIFG.PrepositionSemanticsTest do
     assert Enum.sort(Map.keys(updated)) == Enum.sort(Map.keys(original))
   end
 
+  test "complete noun phrase outranks an earlier bare PP reading of a determiner" do
+    bare = %{
+      id: :prepositional_phrase, source: :core_syntax, span: {3, 4},
+      roles: %{preposition: 3, object: 4},
+      evidence: [:preposition, :bare_nominal_complement]
+    }
+
+    # This is the actual ambiguity observed with "on the bank": "the" has
+    # another dictionary POS reading and creates a competing bare signature.
+    # The complete, observed NP still supplies the appropriate object head.
+    for signatures <- [[bare, @pp], [@pp, bare]] do
+      si = input() |> Map.put(:sentence_signatures, signatures)
+      {scored, report} =
+        PrepositionSemantics.adjust(scores(), [@ordinary, @topic, @obsolete],
+          si, 3, enabled?: true)
+
+      assert report.applied?
+      assert report.object_index == 5
+      assert report.object_witness == "bank|noun|11"
+      assert scored["on|preposition|1"] > scored["on|preposition|19"]
+      assert Map.keys(scored) |> Enum.sort() == Map.keys(scores()) |> Enum.sort()
+    end
+  end
+
+  test "invalid composed head is not allowed to provide an object witness" do
+    malformed = %{@pp | roles: %{preposition: 3, object: 5, head: 4}}
+    bare = %{
+      id: :prepositional_phrase, source: :core_syntax, span: {3, 4},
+      roles: %{preposition: 3, object: 4},
+      evidence: [:preposition, :bare_nominal_complement]
+    }
+
+    si = input() |> Map.put(:sentence_signatures, [malformed, bare])
+    original = scores()
+
+    assert {^original, %{applied?: false,
+                          reason: :missing_contextual_location_object_witness,
+                          object_index: 4, object_word: "the",
+                          matching_noun_candidates: 0}} =
+             PrepositionSemantics.adjust(original, [@ordinary, @topic, @obsolete],
+               si, 3, enabled?: true)
+  end
+
   test "topic, missing object evidence, and unauthenticated PP all abstain" do
     original = scores()
 
