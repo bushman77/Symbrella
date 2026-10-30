@@ -65,7 +65,7 @@ defmodule SymbrellaWeb.SocialLive do
       # Real neural observation is enabled only for this explicit operator
       # action, never for background topic browsing or passive page rendering.
       outcome =
-        if function_exported?(analyzer, :analyze, 2) do
+        if Code.ensure_loaded?(analyzer) and function_exported?(analyzer, :analyze, 2) do
           analyzer.analyze(report_input, brain_observation?: true)
         else
           analyzer.analyze(report_input)
