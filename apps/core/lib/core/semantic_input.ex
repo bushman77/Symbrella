@@ -39,8 +39,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 8 adds canonical source-aligned Phase 1 tokenization metadata.
-  @contract_v 8
+  # Version 9 preserves fuzzy/intent evidence and Phase 2 reference arbitration.
+  @contract_v 9
 
   @list_fields MapSet.new([
                  :tokens,
@@ -50,6 +50,7 @@ defmodule Core.SemanticInput do
                  :trace,
                  :fuzzy_corrections,
                  :fuzzy_aliases,
+                 :intent_evidence,
                  :token_cover,
                  :resolved_tokens,
                  :lifg_choices,
@@ -70,6 +71,8 @@ defmodule Core.SemanticInput do
   @map_fields MapSet.new([
                 :intent_bias,
                 :tokenization,
+                :fuzzy_text,
+                :reference_resolution,
                 :sense_candidates,
                 :sentence_competition,
                 :role_competition,
@@ -195,6 +198,8 @@ defmodule Core.SemanticInput do
           fuzzy_corrections: [map()] | nil,
           fuzzy_aliases: [atom()] | nil,
           fuzzy_confidence: number() | nil,
+          fuzzy_text: map() | nil,
+          intent_evidence: [map()] | nil,
 
           # Intent and context
           intent: atom() | nil,
@@ -207,6 +212,7 @@ defmodule Core.SemanticInput do
           topic_domain: atom() | nil,
           context_frame: map() | nil,
           discourse_reference: map() | nil,
+          reference_resolution: map() | nil,
           discourse_context: map() | nil,
           wm_context: map() | nil,
           intent_bias: map(),
@@ -297,6 +303,8 @@ defmodule Core.SemanticInput do
             fuzzy_corrections: [],
             fuzzy_aliases: [],
             fuzzy_confidence: 0.0,
+            fuzzy_text: nil,
+            intent_evidence: [],
             intent: nil,
             keyword: nil,
             confidence: nil,
@@ -307,6 +315,7 @@ defmodule Core.SemanticInput do
             topic_domain: nil,
             context_frame: nil,
             discourse_reference: nil,
+            reference_resolution: nil,
             discourse_context: nil,
             wm_context: nil,
             intent_bias: %{},
