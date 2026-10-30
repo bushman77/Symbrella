@@ -33,6 +33,27 @@ defmodule Core.MWE.BoundariesTest do
            ])
   end
 
+  test "canonical Phase 1 word indices cannot bridge source punctuation" do
+    for sentence <- ["turn. off", "turn, off", "turn—off", "turn… off",
+                     "turn; off", "turn! off", "turn? off", "turn\\noff"] do
+      si = Core.Pipeline.Input.prepare(sentence, max_wordgram_n: 3)
+      assert si.tokenization.valid?
+      assert Enum.map(si.tokens, & &1.index) == [0, 1]
+      refute Boundaries.valid_window?(si.tokens, si), sentence
+    end
+  end
+
+  test "canonical source-aligned spans admit horizontal whitespace, not line breaks" do
+    for text <- ["turn off", "turn  off", "Café turn off."] do
+      si = Core.Pipeline.Input.prepare(text, max_wordgram_n: 3)
+      segment = Enum.take(si.tokens, -2)
+      assert Boundaries.valid_window?(segment, si), text
+    end
+
+    si = Core.Pipeline.Input.prepare("turn\\noff")
+    refute Boundaries.valid_window?(si.tokens, si)
+  end
+
   test "refuses index gaps and invalid inputs" do
     refute Boundaries.valid_window?([
              %{phrase: "turn", index: 0},
