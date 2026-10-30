@@ -154,4 +154,93 @@ defmodule Core.Pipeline.LexicalBridgeTest do
              LexicalBridge.audit("loan", "bank",
                lookup: lookup(%{"loan" => @loan, "bank" => too_many}))
   end
+
+  test "provenance audit labels shared usage qualifiers without discarding the match" do
+    sets = %{
+      "canoe" => [
+        %{id: "canoe|noun|2", norm: "canoe", definition: "(slang) A luxury car."}
+      ],
+      "bank" => [
+        %{id: "bank|noun|6", norm: "bank", definition: "(slang, uncountable) Money; profit."}
+      ]
+    }
+
+    assert {:ok, report} =
+             LexicalBridge.audit("canoe", "bank", lookup: lookup(sets))
+
+    assert report.candidate_count == 1
+    assert report.evidence_quality_counts == %{includes_leading_qualifier: 1}
+
+    assert [%{
+             source_sense_id: "canoe|noun|2",
+             target_sense_id: "bank|noun|6",
+             witness: "slang",
+             evidence_quality: :includes_leading_qualifier,
+             evidence_audit: %{
+               source_region: :leading_qualifier,
+               target_region: :leading_qualifier,
+               source_senses_with_witness: 1,
+               target_senses_with_witness: 1,
+               comparison_scope: :retrieved_senses_only,
+               semantic_relevance: :not_measured
+             }
+           }] = report.candidates
+
+    refute report.verified_intended_sense?
+    refute report.changes_lifg?
+  end
+
+  test "ordinary shared definition terms remain unverified including false positives" do
+    sets = %{
+      "loan" => [
+        %{id: "loan|noun|2", norm: "loan", definition: "A natural person borrows money."},
+        %{id: "loan|noun|5", norm: "loan", definition: "An area of uncultivated ground."}
+      ],
+      "watercourse" => [
+        %{id: "watercourse|noun|1", norm: "watercourse",
+          definition: "Any natural or artificial channel through which water flows."}
+      ]
+    }
+
+    assert {:ok, report} =
+             LexicalBridge.audit("loan", "watercourse", lookup: lookup(sets))
+
+    assert report.candidate_count == 1
+    assert report.evidence_quality_counts == %{definition_body_overlap_unverified: 1}
+
+    assert [%{
+             witness: "natural",
+             evidence_quality: :definition_body_overlap_unverified,
+             evidence_audit: %{
+               source_region: :definition_body,
+               target_region: :definition_body,
+               semantic_relevance: :not_measured
+             }
+           }] = report.candidates
+  end
+
+  test "multi-hop bridge has source-specific evidence locations but no truth claim" do
+    sets = %{
+      "canoe" => @canoe, "boat" => @boat,
+      "watercourse" => @watercourse, "bank" => @bank
+    }
+
+    assert {:ok, report} =
+             LexicalBridge.audit("canoe", "bank",
+               via: ["boat", "watercourse"], lookup: lookup(sets))
+
+    assert report.evidence_quality_counts == %{multi_hop_gloss_overlap_unverified: 1}
+    assert [%{
+             evidence_quality: :multi_hop_gloss_overlap_unverified,
+             evidence_audit: %{
+               source_lemma_region: :definition_body,
+               first_intermediate_region: :definition_body,
+               second_intermediate_region: :definition_body,
+               target_lemma_region: :definition_body,
+               semantic_relevance: :not_measured
+             }
+           }] = report.candidates
+    refute report.verified_intended_sense?
+  end
+
 end
