@@ -11,7 +11,7 @@ defmodule Core.MWE.Boundaries do
   """
 
   @spec valid_window?(list(), map() | nil) :: boolean()
-  def valid_window?(tokens, context \ nil)
+  def valid_window?(tokens, context \\ nil)
 
   def valid_window?([_, _ | _] = tokens, context) do
     tokens
