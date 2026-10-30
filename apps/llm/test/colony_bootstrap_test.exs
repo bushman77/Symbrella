@@ -10,7 +10,7 @@ defmodule Llm.Colony.BootstrapTest do
 
     path =
       Path.join(
-        "priv",
+        Path.expand("../../../priv", __DIR__),
         ".colony_bootstrap_test_#{System.unique_integer([:positive, :monotonic])}"
       )
 
