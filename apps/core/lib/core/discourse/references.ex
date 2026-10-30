@@ -18,14 +18,92 @@ defmodule Core.Discourse.References do
     sentence = Map.get(si, :sentence)
     session_id = Map.get(si, :session_id)
 
-    case resolve(sentence, session_id) || nominal_followup_reference(si) ||
-           Ledger.reference(si) do
-      nil -> si
-      reference -> Map.put(si, :discourse_reference, reference)
+    # Earlier WM and later discourse resolvers are independent hypotheses.
+    # Do not silently overwrite a prior binding or choose a winner if their
+    # antecedents conflict. Every candidate retains its evidence provenance.
+    candidates = [
+      Map.get(si, :discourse_reference),
+      resolve(sentence, session_id),
+      nominal_followup_reference(si),
+      Ledger.reference(si)
+    ]
+
+    case arbitrate(candidates) do
+      :none ->
+        si
+
+      {:unique, reference, audit} ->
+        si
+        |> Map.put(:discourse_reference, reference)
+        |> Map.put(:reference_resolution, audit)
+
+      {:ambiguous, audit} ->
+        si
+        |> Map.put(:discourse_reference, nil)
+        |> Map.put(:reference_resolution, audit)
     end
   end
 
   def attach(other), do: other
+
+  @doc "Compare bounded contextual antecedent hypotheses without asserting factual truth."
+  @spec arbitrate(list()) :: :none | {:unique, map(), map()} | {:ambiguous, map()}
+  def arbitrate(candidates) when is_list(candidates) do
+    refs =
+      candidates
+      |> Enum.filter(&is_map/1)
+      |> Enum.uniq_by(fn ref -> {ref[:source], reference_key(ref)} end)
+      |> Enum.take(4)
+
+    case refs do
+      [] ->
+        :none
+
+      [one] ->
+        {:unique, one, resolution_audit(:unique, refs)}
+
+      [first | _] ->
+        keys = Enum.map(refs, &reference_key/1) |> Enum.uniq()
+
+        if length(keys) == 1 do
+          {:unique, first, resolution_audit(:corroborated, refs)}
+        else
+          {:ambiguous, resolution_audit(:ambiguous, refs)}
+        end
+    end
+  end
+
+  defp resolution_audit(status, refs) do
+    %{
+      status: status,
+      candidates:
+        Enum.map(refs, fn ref ->
+          Map.take(ref, [:source, :antecedent, :antecedents, :subject, :target,
+                         :pronoun, :evidence, :verification, :referent_status])
+        end),
+      verification: :conversation_context_only,
+      factual_authority?: false
+    }
+  end
+
+  defp reference_key(%{antecedents: refs}) when is_list(refs) do
+    {:plural, Enum.map(refs, &normalized_reference/1)}
+  end
+
+  defp reference_key(%{antecedent: value}) when is_binary(value) do
+    {:singular, normalized_reference(value)}
+  end
+
+  defp reference_key(%{subject: a, target: b}) when is_binary(a) and is_binary(b) do
+    {:pair, normalized_reference(a), normalized_reference(b)}
+  end
+
+  defp reference_key(ref), do: {:unresolved, Map.get(ref, :source), Map.get(ref, :evidence)}
+
+  defp normalized_reference(value) when is_binary(value),
+    do: value |> String.trim() |> String.downcase()
+
+  defp normalized_reference(value), do: value
 
   # The WM frame was recalled strictly within this session, before discourse
   # binding. It carries a replay-verified nominal property, not a verified
