@@ -29,9 +29,9 @@ defmodule Brain.LIFG.PrepositionSemantics do
   # Require direct predicate adjacency to the PP and an independently
   # corroborated physical-location object. "sat on the committee" will not
   # qualify merely because a predicate involves sitting.
-  @posture_gloss ~r/\b(?:sit|sitting|seated|seat|rest|resting|stand|standing|lie|lying|recline|perch|perching|land|landing|positioned|posture)\b/ui
-  @place_gloss ~r/\b(?:river|watercourse|lake|shore|coast|bank|edge|surface|ground|land|terrain|location|place|road|building|floor|chair|table|seat|bed)\b/ui
-  @spatial_gloss ~r/\b(?:position|location|surface|spatial|adjacent|alongside|touching|resting|contact)\b/ui
+  defp posture_gloss, do: ~r/\b(?:sit|sitting|seated|seat|rest|resting|stand|standing|lie|lying|recline|perch|perching|land|landing|positioned|posture)\b/ui
+  defp place_gloss, do: ~r/\b(?:river|watercourse|lake|shore|coast|bank|edge|surface|ground|land|terrain|location|place|road|building|floor|chair|table|seat|bed)\b/ui
+  defp spatial_gloss, do: ~r/\b(?:position|location|surface|spatial|adjacent|alongside|touching|resting|contact)\b/ui
 
   @spec adjust(map(), [map()], map(), non_neg_integer(), keyword()) :: {map(), map()}
   def adjust(scores, candidates, si, index, opts \\ [])
@@ -105,13 +105,13 @@ defmodule Brain.LIFG.PrepositionSemantics do
         predicate =
           Enum.find(cells, fn cell ->
             same_word_and_pos?(cell, predicate_index, predicate_word, "verb") and
-              gloss_match?(field(cell, :definition), @posture_gloss)
+              gloss_match?(field(cell, :definition), posture_gloss())
           end)
 
         object =
           Enum.find(cells, fn cell ->
             same_word_and_pos?(cell, object_index, object_word, "noun") and
-              gloss_match?(field(cell, :definition), @place_gloss) and
+              gloss_match?(field(cell, :definition), place_gloss()) and
               ContextFit.score(si.sentence, object_word, cell) >= 0.18
           end)
 
@@ -128,7 +128,7 @@ defmodule Brain.LIFG.PrepositionSemantics do
                 id = field(cand, :id)
                 is_binary(id) and Map.has_key?(scores, id) and
                   same_word_and_pos?(cand, index, target, "preposition", false) and
-                  gloss_match?(field(cand, :definition), @spatial_gloss)
+                  gloss_match?(field(cand, :definition), spatial_gloss())
               end)
               |> Enum.uniq_by(&field(&1, :id))
               |> Enum.map(fn cand ->
@@ -201,7 +201,7 @@ defmodule Brain.LIFG.PrepositionSemantics do
 
     place_readings =
       nouns
-      |> Enum.filter(&gloss_match?(field(&1, :definition), @place_gloss))
+      |> Enum.filter(&gloss_match?(field(&1, :definition), place_gloss()))
       |> Enum.map(fn cell ->
         %{id: field(cell, :id),
           context_fit: ContextFit.score(sentence, word, cell)}
