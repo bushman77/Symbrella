@@ -61,7 +61,12 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
       |> Enum.sort_by(& &1.index)
 
     if length(tokens) == 6 and Enum.map(tokens, & &1.index) == Enum.to_list(0..5) do
-      {:ok, Enum.map(tokens, &String.downcase(&1.phrase))}
+      {:ok, Enum.map(tokens, fn token ->
+        token.phrase
+        |> String.downcase()
+        |> String.trim()
+        |> String.replace(~r/^\p{P}+|\p{P}+$/u, "")
+      end)}
     else
       :not_applicable
     end
