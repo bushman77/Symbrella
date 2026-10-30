@@ -101,4 +101,53 @@ defmodule Core.Pipeline.Input do
         )
     end
   end
+
+  # This is an optional syntactic projection, NOT a second tokenizer.
+  # The source-aligned canonical tokens from prepare/2 remain unchanged in
+  # the original SI. A possessive suffix can be inspected independently,
+  # without inventing a dictionary sense for the whole inflected surface.
+  # Contractions with ambiguous auxiliary readings are not expanded here.
+  @nonpossessive_bases MapSet.new(~w(he she it that there who what where when why how here let))
+
+  @spec grammatical_projection(SemanticInput.t()) :: SemanticInput.t()
+  def grammatical_projection(%SemanticInput{} = si) do
+    projected =
+      si.tokens
+      |> Enum.flat_map(&expand_possessive/1)
+      |> Enum.with_index()
+      |> Enum.map(fn {token, index} -> %{token | index: index} end)
+
+    tokenization =
+      si.tokenization
+      |> Kernel.||(%{})
+      |> Map.put(:grammatical_projection, :possessive_suffix_candidates)
+
+    %{si | tokens: projected, tokenization: tokenization}
+  end
+
+  defp expand_possessive(%Token{phrase: phrase, span: {start, stop}} = token)
+       when is_binary(phrase) and is_integer(start) and is_integer(stop) do
+    case Regex.run(~r/\A([\p{L}][\p{L}\p{M}-]*)['’]s\z/ui, phrase) do
+      [_, base] ->
+        if MapSet.member?(@nonpossessive_bases, String.downcase(base)) do
+          [token]
+        else
+          base_end = start + byte_size(base)
+          clitic_start = base_end
+          clitic = binary_part(phrase, byte_size(base), byte_size(phrase) - byte_size(base))
+
+          [
+            %Token{token | phrase: base, norm: String.downcase(base),
+              span: {start, base_end}},
+            %Token{token | phrase: clitic, norm: String.downcase(clitic),
+              span: {clitic_start, stop}, source: :grammatical_possessive_clitic}
+          ]
+        end
+
+      _ ->
+        [token]
+    end
+  end
+
+  defp expand_possessive(token), do: [token]
 end
