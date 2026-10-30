@@ -121,12 +121,15 @@ defmodule Core.Pipeline.LexicalFocus do
             0.0
           end
 
+        grammar? = is_binary(supported_pos) and pos == supported_pos
+        evidence =
+          (if grammar?, do: [:supported_dictionary_pos], else: []) ++
+            (if fit > 0.0, do: [:dictionary_context_fit], else: [])
+
         %{
           id: row.id, pos: pos, context_fit: fit,
-          grammatical_support?: is_binary(supported_pos) and pos == supported_pos,
-          evidence: if(is_binary(supported_pos) and pos == supported_pos,
-            do: [:supported_dictionary_pos, :dictionary_context_fit],
-            else: [:dictionary_context_fit])
+          grammatical_support?: grammar?,
+          evidence: evidence
         }
       end)
       |> Enum.sort_by(fn candidate ->
