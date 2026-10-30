@@ -2,9 +2,8 @@ defmodule Core.Semantic.CompositionCrossConstructionRegressionTest do
   use ExUnit.Case, async: true
 
   alias Core.Semantic.Composition
-  alias Core.Semantic.Composition.{FinitePastLocative, FinitePastLocativeIntegration, Proof}
+  alias Core.Semantic.Composition.{FinitePastLocative, FinitePastLocativeIntegration}
   alias Core.Syntax.{Signatures, StructuralCompetition}
-  alias Core.TokenFilters
 
   defp standard(words, positions, atoms \\ %{}) do
     cells =
