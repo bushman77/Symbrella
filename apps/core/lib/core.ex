@@ -34,35 +34,14 @@ defmodule Core do
   @spec resolve_input(String.t(), opts()) :: SemanticInput.t()
   def resolve_input(phrase, opts \\ []) when is_binary(phrase) do
     mode = Keyword.get(opts, :mode, :prod)
-    max_n = Keyword.get(opts, :max_wordgram_n, 3)
     lifg_opts = build_lifg_opts(opts)
-    fuzzy? = Keyword.get(opts, :fuzzy, true)
 
-    fuzzy = if fuzzy?, do: Core.Text.Fuzzy.interpret(phrase, fuzzy_opts(opts)), else: nil
-
-    si0 =
-      phrase
-      |> Core.Pipeline.Input.prepare(max_wordgram_n: max_n)
-      |> maybe_put_fuzzy(fuzzy)
-      |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
-      |> Map.put(:experience_origin, Keyword.get(opts, :experience_origin))
-      |> Map.put(:session_id, Keyword.get(opts, :session_id))
-      |> Map.put_new(:trace, [])
-      |> Map.put(:lifg_opts, lifg_opts)
-      |> StateDump.capture(:initial)
-
-    si1 =
-      si0
-      |> apply_intent_selection(opts)
-      |> Core.Brain.WM.Comprehension.recall(opts)
-      |> Core.Discourse.Ledger.recall(opts)
-      |> Core.Discourse.References.attach()
-      |> StateDump.capture(:intent_selected)
+    si = phrase |> phase_one(opts, mode, lifg_opts) |> phase_two(opts, mode)
 
     out =
       case mode do
-        :prod -> run_prod_pipeline(si1, opts, lifg_opts)
-        _ -> si1
+        :prod -> run_prod_pipeline(si, opts, lifg_opts)
+        _ -> si
       end
 
     out
@@ -70,6 +49,52 @@ defmodule Core do
     |> coerce_si()
     |> StateDump.capture(:final)
   end
+
+  # Phase 1: Preserve source text, canonical tokens and tentative fuzzy evidence.
+  # No lexical sense or meaning is selected here.
+  defp phase_one(phrase, opts, mode, lifg_opts) do
+    max_n = Keyword.get(opts, :max_wordgram_n, 3)
+    fuzzy? = Keyword.get(opts, :fuzzy, true)
+    fuzzy = if fuzzy?, do: Core.Text.Fuzzy.interpret(phrase, fuzzy_opts(opts)), else: nil
+
+    phrase
+    |> Core.Pipeline.Input.prepare(max_wordgram_n: max_n)
+    |> maybe_put_fuzzy(fuzzy)
+    |> Map.put(:source, if(mode == :prod, do: :prod, else: :test))
+    |> Map.put(:experience_origin, Keyword.get(opts, :experience_origin))
+    |> Map.put(:session_id, Keyword.get(opts, :session_id))
+    |> Map.put_new(:trace, [])
+    |> Map.put(:lifg_opts, lifg_opts)
+    |> StateDump.capture(:initial)
+  end
+
+  # Phase 2: Recall prior conversational context and working memory.
+  # Production also takes the existing STM snapshot and resets stale slates.
+  # Non-production modes intentionally stop before STM, as before.
+  defp phase_two(si, opts, mode) do
+    recalled =
+      si
+      |> apply_intent_selection(opts)
+      |> Core.Brain.WM.Comprehension.recall(opts)
+      |> Core.Discourse.Ledger.recall(opts)
+      |> Core.Discourse.References.attach()
+      |> StateDump.capture(:intent_selected)
+
+    case mode do
+      :prod ->
+        recalled
+        |> pipeline_map()
+    |> Core.Brain.STM.run()
+    |> StateDump.capture(:stm)
+    |> Core.Pipeline.Candidates.reset(:post_stm)
+    |> StateDump.capture(:candidates_reset)
+      _ ->
+        recalled
+    end
+  end
+
+  defp pipeline_map(%SemanticInput{} = si), do: Map.from_struct(si)
+  defp pipeline_map(si), do: si
 
   defp maybe_put_fuzzy(si, nil), do: si
 
@@ -107,17 +132,24 @@ defmodule Core do
     end
   end
 
+  # Keep the original order of every production stage. Phase boundaries are
+  # organizational seams, not permission to reorder dependent computations.
   defp run_prod_pipeline(%SemanticInput{} = si, opts, lifg_opts),
     do: run_prod_pipeline(Map.from_struct(si), opts, lifg_opts)
 
   defp run_prod_pipeline(%{} = si, opts, lifg_opts) when is_list(opts) and is_list(lifg_opts) do
-    atl_opts = Keyword.get(opts, :atl_opts, [])
-
     si
-    |> Core.Brain.STM.run()
-    |> StateDump.capture(:stm)
-    |> Core.Pipeline.Candidates.reset(:post_stm)
-    |> StateDump.capture(:candidates_reset)
+    |> phase_three(opts)
+    |> phase_four(opts, lifg_opts)
+    |> phase_five(opts)
+    |> phase_six(opts)
+    |> phase_seven(opts)
+    |> phase_eight(opts)
+  end
+
+  # Phase 3: Retrieve and prepare lexical candidates, including MWE hypotheses.
+  defp phase_three(si, opts) do
+    si
     |> TokenFilters.keep_only_word_boundary_tokens()
     |> StateDump.capture(:word_boundaries)
     |> Core.MWE.Stage.run(:early, opts)
@@ -135,6 +167,13 @@ defmodule Core do
     |> StateDump.capture(:mwe_late)
     |> Core.MWE.Lexicon.attach(opts)
     |> StateDump.capture(:mwe_lexicon)
+  end
+
+  # Phase 4: Grammar, contextual evidence, LIFG/ATL competition and structural ranking.
+  defp phase_four(si, opts, lifg_opts) do
+    atl_opts = Keyword.get(opts, :atl_opts, [])
+
+    si
     |> Core.Syntax.Signatures.attach()
     |> StateDump.capture(:sentence_signatures)
     |> Core.Syntax.RoleCompetition.attach()
@@ -185,6 +224,11 @@ defmodule Core do
     # This is observational: no lexical winners or memory contents are altered.
     |> Core.Syntax.StructuralCompetition.attach()
     |> StateDump.capture(:structural_competition)
+  end
+
+  # Phase 5: Compose and verify provisional semantics; attach feedback evidence.
+  defp phase_five(si, opts) do
+    si
     # Pure typed semantic composition with replayable non-factual proof records.
     |> Core.Semantic.Composition.attach()
     |> StateDump.capture(:semantic_composition)
@@ -212,11 +256,21 @@ defmodule Core do
     # ONLY a bounded Explain trace, never a replacement semantic winner.
     |> Core.Brain.SemanticSenseShadow.attach(opts)
     |> StateDump.capture(:semantic_sense_shadow)
+  end
+
+  # Phase 6: Summarize comprehension and identify the speaker's speech act.
+  defp phase_six(si, opts) do
+    si
     |> Core.Comprehension.Summary.attach(opts)
     |> StateDump.capture(:comprehension)
     # Read-only post-LIFG speech-act and vocative binding. No scoring changes.
     |> Core.Semantic.SpeechActs.attach()
     |> StateDump.capture(:speech_act)
+  end
+
+  # Phase 7: Update task-relevant WM and select an action/response plan.
+  defp phase_seven(si, opts) do
+    si
     |> Core.Brain.WM.Comprehension.store(opts)
     |> StateDump.capture(:wm_comprehension)
     |> Core.Brain.Prefrontal.attach(opts)
@@ -227,6 +281,11 @@ defmodule Core do
     |> StateDump.capture(:working_memory)
     |> maybe_build_response_plan(opts)
     |> StateDump.capture(:response_plan)
+  end
+
+  # Phase 8: Persist qualified experience, notify neurons and record discourse.
+  defp phase_eight(si, opts) do
+    si
     |> Core.Brain.Hippocampus.encode(opts)
     |> StateDump.capture(:hippocampus_encode)
     |> Core.Brain.Hippocampus.persist(opts)
