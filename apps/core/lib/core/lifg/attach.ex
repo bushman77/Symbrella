@@ -140,6 +140,7 @@ defmodule Core.LIFG.Attach do
               example: candidate_field(chosen_candidate, [:example, :ex, :usage, :sample]),
               alt_ids: alt_ids,
               semantic_control: Map.get(ch, :semantic_control),
+              usage_register: Map.get(ch, :usage_register),
               sense_focus: Map.get(ch, :sense_focus),
               definition_context_evidence: Map.get(ch, :definition_context_evidence, []),
               # Full Stage1 post-softmax distribution. A second-pass LIFG
