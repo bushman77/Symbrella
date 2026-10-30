@@ -91,7 +91,7 @@ defmodule Core.Semantic.CompositionCrossConstructionRegressionTest do
       |> Composition.attach()
 
     baseline = past.compositional_derivation
-    assert FinitePastLocativeIntegration.attach(past) == past
+    assert FinitePastLocativeIntegration.attach(past, finite_past_locative?: false) == past
 
     lookup = fn "sit" ->
       [%{id: "sit|verb|1", norm: "sit", pos: "verb",
@@ -99,7 +99,8 @@ defmodule Core.Semantic.CompositionCrossConstructionRegressionTest do
         semantic_atoms: []}]
     end
 
-    attached = FinitePastLocativeIntegration.attach(past,
+    attached = FinitePastLocativeIntegration.attach(past, lookup: lookup)
+    assert attached == FinitePastLocativeIntegration.attach(past,
       finite_past_locative?: true, lookup: lookup)
 
     assert %{kind: :finite_past_locative_property} = proof =
