@@ -35,7 +35,26 @@ defmodule SymbrellaWeb.SocialBrainActivity do
   @impl true
   def handle_call({:record, summary}, _from, _state) do
     stamp = System.monotonic_time(:millisecond)
-    activity = Map.put(summary, :recorded_at_ms, System.system_time(:millisecond))
+    # A diagnostic snapshot at completion avoids confusing a late-opened
+    # /brain chart (whose samples start at mount) with a failed neuron bridge.
+    # This is an all-source snapshot, NOT a receipt attributing individual
+    # Brain.Cell activations to Colony.
+    runtime_neurons =
+      case SymbrellaWeb.BrainRuntime.activation_snapshot() do
+        {:ok, %{} = snapshot} ->
+          Enum.count(snapshot, fn {_id, activation} ->
+            is_number(activation) and activation > 0
+          end)
+
+        _ ->
+          nil
+      end
+
+    activity =
+      summary
+      |> Map.put(:recorded_at_ms, System.system_time(:millisecond))
+      |> Map.put(:runtime_active_neurons_at_completion, runtime_neurons)
+
     Bus.broadcast(@topic, {:social_cognition, activity})
 
     # Emit exactly one trace per completed thread rather than one per
