@@ -38,6 +38,16 @@ defmodule Core.Social.BrainObservation do
         result(:brain_unavailable, 0)
 
       true ->
+        attested =
+          si
+          |> Map.get(:active_cells, [])
+          |> List.wrap()
+          |> Enum.flat_map(fn
+            %{id: id} when is_binary(id) -> [id]
+            _ -> []
+          end)
+          |> MapSet.new()
+
         plan =
           Activation.feedback_plan(si,
             semantic_propagation?: false,
@@ -45,8 +55,9 @@ defmodule Core.Social.BrainObservation do
           )
           |> Enum.filter(fn
             %{id: id, delta: delta} ->
-              is_binary(id) and is_number(delta) and delta > 0 and
-                delta <= 1.0 and not String.ends_with?(id, "|fallback")
+              is_binary(id) and MapSet.member?(attested, id) and
+                is_number(delta) and delta > 0 and delta <= 1.0 and
+                not String.ends_with?(id, "|fallback")
 
             _ ->
               false
@@ -63,6 +74,12 @@ defmodule Core.Social.BrainObservation do
             via: :colony_external_observation
           })
         end)
+
+        :telemetry.execute(
+          [:core, :social, :neuron_observation],
+          %{stimuli_issued: length(plan)},
+          %{source: :colony_external, mode: :transient_neural_observation}
+        )
 
         result(if(plan == [], do: :no_attested_targets, else: :stimuli_issued), length(plan))
     end
