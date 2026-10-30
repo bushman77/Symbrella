@@ -35,7 +35,7 @@ defmodule Core.MWE.BoundariesTest do
 
   test "canonical Phase 1 word indices cannot bridge source punctuation" do
     for sentence <- ["turn. off", "turn, off", "turn—off", "turn… off",
-                     "turn; off", "turn! off", "turn? off", "turn\\noff"] do
+                     "turn; off", "turn! off", "turn? off", "turn\noff"] do
       si = Core.Pipeline.Input.prepare(sentence, max_wordgram_n: 3)
       assert si.tokenization.valid?
       assert Enum.map(si.tokens, & &1.index) == [0, 1]
@@ -50,7 +50,7 @@ defmodule Core.MWE.BoundariesTest do
       assert Boundaries.valid_window?(segment, si), text
     end
 
-    si = Core.Pipeline.Input.prepare("turn\\noff")
+    si = Core.Pipeline.Input.prepare("turn\noff")
     refute Boundaries.valid_window?(si.tokens, si)
   end
 
