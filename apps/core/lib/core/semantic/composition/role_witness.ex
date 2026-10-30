@@ -48,6 +48,57 @@ defmodule Core.Semantic.Composition.RoleWitness do
   def resolve(_, _, _, _), do: :unsupported
 
   @doc """
+  A bounded noun-POS witness for an event's subject or location head.
+  Preserves every scored, attested noun candidate without choosing a sense.
+  This does not replace resolve/4 for sense-sensitive constructions.
+  """
+  @spec resolve_noun_kind(map(), atom(), non_neg_integer()) ::
+          {:ok, map()} | :unsupported
+  def resolve_noun_kind(si, role, index)
+      when is_map(si) and role in [:subject_head, :location_head] and
+           is_integer(index) and index >= 0 do
+    choices = si |> Map.get(:lifg_choices, []) |> List.wrap()
+      |> Enum.filter(&(is_map(&1) and Map.get(&1, :token_index) == index))
+    tokens = si |> Map.get(:tokens, []) |> List.wrap()
+      |> Enum.filter(&(is_map(&1) and Map.get(&1, :index) == index and
+        Map.get(&1, :n, 1) == 1))
+
+    with [choice] <- choices,
+         [token] <- tokens,
+         phrase when is_binary(phrase) <- Map.get(token, :phrase),
+         word <- normalize(phrase),
+         true <- word != "",
+         selected when is_binary(selected) <- Map.get(choice, :id) || Map.get(choice, :chosen_id),
+         scores when is_map(scores) <- choice_scores(choice),
+         true <- map_size(scores) > 0 and map_size(scores) <= @max_scores do
+      candidates =
+        scores
+        |> Enum.flat_map(fn
+          {id, score} when is_binary(id) and is_number(score) and score > 0 ->
+            if attested?(si, word, id, ["noun"], role), do: [{id, score}], else: []
+          _ -> []
+        end)
+        |> Enum.sort_by(fn {id, score} -> {-score, id} end)
+
+      case candidates do
+        [_ | _] ->
+          {:ok, %{
+            token_index: index, word: word, pos: "noun", role: role,
+            sense_id: nil, original_lifg_id: selected,
+            selection_basis: :construction_noun_pos_only,
+            attested_sense_ids: Enum.map(candidates, &elem(&1, 0)),
+            attested_candidate_scores: candidates
+          }}
+        [] -> :unsupported
+      end
+    else
+      _ -> :unsupported
+    end
+  end
+
+  def resolve_noun_kind(_, _, _), do: :unsupported
+
+  @doc """
   Read-only audit for current-turn event-role evidence. This does not relax
   resolve/4 or reveal sentence contents in the Blackboard.
   """
