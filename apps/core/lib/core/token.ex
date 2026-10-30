@@ -394,9 +394,10 @@ defmodule Core.Token do
           []
         else
           for n <- max_here..2//-1,
-              {first, _} = Enum.at(word_tokens, wi),
-              {last, _} = Enum.at(word_tokens, wi + n - 1),
-              first.segment == last.segment do
+              same_sentence_window?(word_tokens, wi, n) do
+            {first, _} = Enum.at(word_tokens, wi)
+            {last, _} = Enum.at(word_tokens, wi + n - 1)
+
             phrase =
               word_tokens
               |> Enum.slice(wi, n)
@@ -421,6 +422,12 @@ defmodule Core.Token do
         end
       end)
     end
+  end
+
+  defp same_sentence_window?(words, start, size) do
+    {first, _} = Enum.at(words, start)
+    {last, _} = Enum.at(words, start + size - 1)
+    first.segment == last.segment
   end
 
   # ---------- legacy helpers (byte spans) ----------
