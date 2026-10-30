@@ -55,9 +55,18 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       |> Map.put(:recorded_at_ms, System.system_time(:millisecond))
       |> Map.put(:runtime_active_neurons_at_completion, runtime_neurons)
 
+    # Report the actual clicked source. The old thread_aggregate label
+    # incorrectly described explicitly selected original posts and replies.
+    analysis_scope =
+      case activity.analyzed_target.kind do
+        :original_post -> :original_post
+        :reply -> :reply
+        _ -> :thread_aggregate
+      end
+
     Bus.broadcast(@topic, {:social_cognition, activity})
 
-    # Emit exactly one trace per completed thread rather than one per
+    # Emit one trace per explicitly analyzed piece rather than one per
     # sentence, so the bounded Brain blackboard retains useful context.
     :telemetry.execute(
       [:core, :social, :cognitive_shadow],
@@ -72,7 +81,7 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       }),
       %{
         source: :colony_external, mode: :read_only_shadow,
-        analysis_scope: :thread_aggregate,
+        analysis_scope: analysis_scope,
         sentence_status: if(activity.supported_interpretations > 0,
           do: :partially_interpreted, else: :not_yet_interpreted),
         provenance: :external_unverified,
@@ -90,7 +99,7 @@ defmodule SymbrellaWeb.SocialBrainActivity do
         no_attested_targets: Map.get(activity.neuron_observation_statuses, :no_attested_targets, 0),
         stimuli_issued_segments: Map.get(activity.neuron_observation_statuses, :stimuli_issued, 0)},
       %{source: :colony_external, mode: :transient_neural_observation,
-        analysis_scope: :thread_aggregate}
+        analysis_scope: analysis_scope}
     )
 
     :telemetry.execute(
