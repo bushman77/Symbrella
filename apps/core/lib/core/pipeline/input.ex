@@ -36,11 +36,23 @@ defmodule Core.Pipeline.Input do
           |> Enum.with_index()
           |> Enum.map(fn {token, index} -> %{token | index: index} end)
 
+        phrase_candidates =
+          Enum.map(parsed.phrase_candidates, fn
+            %{span: {start, stop}} = candidate
+            when is_integer(start) and is_integer(stop) and
+                   start >= 0 and stop >= start and stop <= byte_size(text) ->
+              Map.put(candidate, :surface, binary_part(text, start, stop - start))
+
+            candidate ->
+              candidate
+          end)
+
         parsed
         |> Map.put(:sentence, text)
         |> Map.put(:original_text, text)
         |> Map.put(:tokens, words)
         |> Map.put(:punctuation_tokens, punct)
+        |> Map.put(:phrase_candidates, phrase_candidates)
         |> Map.put(:tokenization, %{
           version: 1,
           span_unit: :utf8_bytes,
