@@ -117,7 +117,10 @@ defmodule Brain.LIFG.PrepositionSemantics do
 
         cond do
           is_nil(predicate) -> {scores, abstain(:missing_posture_predicate_witness)}
-          is_nil(object) -> {scores, abstain(:missing_contextual_location_object_witness)}
+          is_nil(object) ->
+            diagnostic = object_witness_diagnostic(cells, object_index, object_word, si.sentence)
+            {scores,
+             Map.merge(abstain(:missing_contextual_location_object_witness), diagnostic)}
           true ->
             adjustments =
               candidates
@@ -152,6 +155,34 @@ defmodule Brain.LIFG.PrepositionSemantics do
             {updated, report}
         end
     end
+  end
+
+  # Diagnostic only: report why a location-complement witness was unavailable.
+  # No synthetic senses, fallback guesses, or relaxed thresholds.
+  defp object_witness_diagnostic(cells, index, word, sentence) do
+    nouns =
+      Enum.filter(cells, &same_word_and_pos?(&1, index, word, "noun"))
+
+    place_readings =
+      nouns
+      |> Enum.filter(&gloss_match?(field(&1, :definition), @place_gloss))
+      |> Enum.map(fn cell ->
+        %{id: field(cell, :id),
+          context_fit: ContextFit.score(sentence, word, cell)}
+      end)
+
+    best =
+      Enum.max_by(place_readings, & &1.context_fit, fn -> nil end)
+
+    %{
+      object_index: index,
+      object_word: word,
+      matching_noun_candidates: length(nouns),
+      place_gloss_candidates: length(place_readings),
+      best_place_sense: if(is_map(best), do: best.id, else: nil),
+      best_place_context_fit: if(is_map(best), do: best.context_fit, else: nil),
+      required_context_fit: 0.18
+    }
   end
 
   defp abstain(reason),
