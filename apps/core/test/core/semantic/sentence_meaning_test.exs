@@ -75,6 +75,59 @@ defmodule Core.Semantic.SentenceMeaningTest do
     }
   end
 
+  test "COLONY-14: modal conditional question reports ATL agreement without invented meaning" do
+    roles = %{
+      wh: 0, modal: 1, subject: 2, predicate: 3,
+      condition_marker: 4, condition_subject: 5,
+      condition_copula: 6, condition_complement: 7
+    }
+
+    input = %{
+      sentence: "What would you do if you were free?",
+      tokens: [
+        %{index: 0, phrase: "What", n: 1},
+        %{index: 1, phrase: "would", n: 1},
+        %{index: 2, phrase: "you", n: 1},
+        %{index: 3, phrase: "do", n: 1},
+        %{index: 4, phrase: "if", n: 1},
+        %{index: 5, phrase: "you", n: 1},
+        %{index: 6, phrase: "were", n: 1},
+        %{index: 7, phrase: "free?", n: 1}
+      ],
+      sentence_signatures: [%{
+        id: :wh_modal_conditional_question,
+        source: :core_syntax, span: {0, 7}, roles: roles
+      }],
+      atl_slate: %{constituents: [%{
+        id: :wh_modal_conditional_question,
+        span: {0, 7}, status: :resolved, unresolved_roles: [],
+        roles: Map.new(roles, fn {name, idx} ->
+          {name, %{token_index: idx, sense_id: "test|noun|#{idx}"}}
+        end)
+      }]}
+    }
+
+    assert %{
+      status: :modal_conditional_atl_resolved,
+      atl_role_agreement: true, unresolved_roles: [],
+      semantic_composition: :not_yet_interpreted
+    } = SentenceMeaning.question_diagnostic(input)
+
+    # ATL structural resolution does not mean we have established the
+    # hypothetical proposition or author intent.
+    assert %{status: :not_yet_interpreted} = SentenceMeaning.build(input)
+
+    partial = put_in(input.atl_slate.constituents, [%{
+      id: :wh_modal_conditional_question,
+      span: {0, 7}, status: :partially_resolved,
+      unresolved_roles: [:condition_complement]
+    }])
+
+    assert %{status: :modal_conditional_roles_unresolved,
+      unresolved_roles: [:condition_complement], atl_role_agreement: false} =
+      SentenceMeaning.question_diagnostic(partial)
+  end
+
   test "produces a readable definition and structured interpretation for a verified question" do
     si = input()
     meaning = SentenceMeaning.build(si)
