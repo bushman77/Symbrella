@@ -3,7 +3,9 @@ defmodule Llm.Colony.Client do
   Colony API client with read-by-default behavior and separately gated comments.
 
   POST /auth/token exchanges the locally stored API key for a short-lived
-  JWT. Account/content reads use GET. Only reviewed_comment/3 can send a
+  JWT. Public topic/thread reads use anonymous GET without a key.
+  When configured, authenticated reads reuse and refresh the JWT.
+  Only reviewed_comment/3 can send a
   content POST, and only after two explicit local configuration gates.
   JWTs are reused from an OTP memory cache until shortly before expiry.
   Nothing is written to disk. A failed GET may reauthenticate once.
@@ -33,7 +35,7 @@ defmodule Llm.Colony.Client do
   def posts(opts) when is_list(opts) do
     with {:ok, config} <- Adapter.require_observe(),
          {:ok, params} <- posts_params(opts, config.max_posts) do
-      authorized_get("/posts", params, config, opts)
+      observable_get("/posts", params, config, opts)
     end
   end
 
@@ -73,7 +75,7 @@ defmodule Llm.Colony.Client do
     with {:ok, config} <- Adapter.require_observe(),
          :ok <- validate_opts(opts),
          :ok <- valid_post_id(post_id) do
-      authorized_get("/posts/" <> post_id <> "/context", %{}, config, opts)
+      observable_get("/posts/" <> post_id <> "/context", %{}, config, opts)
     end
   end
 
@@ -197,6 +199,29 @@ defmodule Llm.Colony.Client do
 
   defp valid_limit?(value, max), do: is_integer(value) and value >= 1 and value <= max
 
+  # Public topics and thread context work without authentication.
+  # A missing key is not an error for these read-only operations; keep
+  # insecure credentials and malformed config as explicit failures.
+  defp observable_get(path, params, config, opts) do
+    case Adapter.api_key() do
+      {:ok, _api_key} ->
+        authorized_get(path, params, config, opts)
+
+      {:error, :missing_colony_api_key} ->
+        do_public_get(path, params, config, opts)
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp do_public_get(path, params, config, opts) do
+    request_opts(path, config, opts)
+    |> Keyword.put(:params, params)
+    |> Req.get()
+    |> handle_get_result()
+  end
+
   defp authorized_get(path, params, config, opts) do
     with {:ok, token} <- cached_token(config, opts) do
       case do_get(path, params, token, config, opts) do
@@ -261,18 +286,19 @@ defmodule Llm.Colony.Client do
       |> Keyword.put(:params, params)
       |> Keyword.put(:auth, {:bearer, token})
 
-    case Req.get(request_opts) do
-      {:ok, %Req.Response{status: status, body: body}}
-      when status >= 200 and status < 300 and is_map(body) ->
-        {:ok, body}
+    request_opts
+    |> Req.get()
+    |> handle_get_result()
+  end
 
-      {:ok, %Req.Response{status: status}} ->
-        response_error(status)
+  defp handle_get_result({:ok, %Req.Response{status: status, body: body}})
+       when status in 200..299 and is_map(body), do: {:ok, body}
 
-      {:error, _} ->
-        # Never return raw Req errors containing Authorization or request bodies.
-        {:error, :transport_error}
-    end
+  defp handle_get_result({:ok, %Req.Response{status: status}}), do: response_error(status)
+
+  defp handle_get_result({:error, _}) do
+    # Never expose raw Req errors that might include credentials.
+    {:error, :transport_error}
   end
 
   defp request_opts(path, config, opts) do
