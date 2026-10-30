@@ -243,4 +243,82 @@ defmodule Core.Pipeline.LexicalBridgeTest do
     refute report.verified_intended_sense?
   end
 
+
+  test "one-sided finance metadata cannot negate a loan-bank definition bridge" do
+    source = %{
+      id: "loan|noun|2", norm: "loan",
+      definition: "A sum of borrowed money.",
+      semantic_atoms: ["ety:1", "cat:en:finance", "cat:en:law", "pos_raw:noun"]
+    }
+
+    target = %{
+      id: "bank|noun|1", norm: "bank",
+      definition: "An institution that lends money.",
+      semantic_atoms: ["ety:1", "tag:countable", "pos_raw:noun"]
+    }
+
+    assert {:ok, report} =
+             LexicalBridge.audit("loan", "bank",
+               lookup: lookup(%{"loan" => [source], "bank" => [target]}))
+
+    assert report.candidate_count == 1
+    assert report.category_evidence_counts == %{one_sided_category: 1}
+    assert [%{witness: "money", category_evidence: categories}] = report.candidates
+    assert categories.status == :one_sided_category
+    assert categories.source_categories == ["finance", "law"]
+    assert categories.target_categories == []
+    assert categories.shared_categories == []
+    refute categories.semantic_compatibility_proven?
+    refute categories.semantic_incompatibility_proven?
+    refute report.changes_lifg?
+  end
+
+  test "matching dictionary categories are positive metadata only, not sense proof" do
+    source = %{
+      id: "loan|noun|2", norm: "loan",
+      definition: "Borrowing money.",
+      semantic_atoms: ["cat:en:finance", "ety:1", "tag:slang", "pos_raw:noun"]
+    }
+
+    target = %{
+      id: "bank|noun|1", norm: "bank",
+      definition: "A place that lends money.",
+      semantic_atoms: ["cat:en:finance", "ety:2", "tag:slang", "pos_raw:noun"]
+    }
+
+    assert {:ok, report} =
+             LexicalBridge.audit("loan", "bank",
+               lookup: lookup(%{"loan" => [source], "bank" => [target]}))
+
+    assert report.category_evidence_counts == %{shared_category: 1}
+    assert [%{category_evidence: categories}] = report.candidates
+    assert categories.shared_categories == ["finance"]
+    refute categories.semantic_compatibility_proven?
+    refute report.verified_intended_sense?
+  end
+
+  test "disjoint categories and shared etymology cannot become contradictions" do
+    source = %{
+      id: "loan|noun|2", norm: "loan", definition: "Money borrowed.",
+      semantic_atoms: ["cat:en:finance", "ety:1", "pos_raw:noun"]
+    }
+
+    target = %{
+      id: "bank|noun|11", norm: "bank", definition: "A reserve of money.",
+      semantic_atoms: ["cat:en:hydrology", "ety:1", "pos_raw:noun"]
+    }
+
+    assert {:ok, report} =
+             LexicalBridge.audit("loan", "bank",
+               lookup: lookup(%{"loan" => [source], "bank" => [target]}))
+
+    assert report.category_evidence_counts == %{disjoint_category_labels_unverified: 1}
+    assert [%{category_evidence: categories}] = report.candidates
+    assert categories.source_categories == ["finance"]
+    assert categories.target_categories == ["hydrology"]
+    assert categories.shared_categories == []
+    refute categories.semantic_incompatibility_proven?
+    refute report.changes_lifg?
+  end
+
 end
