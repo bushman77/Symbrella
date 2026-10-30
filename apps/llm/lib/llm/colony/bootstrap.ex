@@ -198,16 +198,65 @@ defmodule Llm.Colony.Bootstrap do
 
         outcome =
           with :ok <- result,
-               :ok <- close_result,
-               :ok <- File.ln(temporary, path) do
-            :ok
+               :ok <- close_result do
+            case File.ln(temporary, path) do
+              :ok ->
+                :ok
+
+              {:error, :eexist} ->
+                {:error, :key_file_already_exists}
+
+              # Some Android/Termux mounts forbid hard links. Preserve the
+              # exclusive-create (never overwrite) guarantee without requiring
+              # hard-link support. Permissions are set BEFORE key bytes are
+              # written to the newly created destination file.
+              {:error, reason} when reason in [:eperm, :eacces, :enotsup, :enosys, :exdev] ->
+                persist_key_without_links(path, key)
+
+              {:error, _} ->
+                {:error, :key_file_write_failed}
+            end
           else
-            {:error, :eexist} -> {:error, :key_file_already_exists}
             {:error, _} -> {:error, :key_file_write_failed}
           end
 
         _ = File.rm(temporary)
         outcome
+
+      {:error, _} ->
+        {:error, :key_file_write_failed}
+    end
+  end
+
+  # Fallback for filesystems without hard links. Exclusive creation prevents
+  # silently replacing an existing identity; the file is permission-restricted
+  # before any credential bytes are written. Delete only files created by us
+  # if a write, sync, or close fails.
+  defp persist_key_without_links(path, key) do
+    case File.open(path, [:write, :exclusive, :binary]) do
+      {:ok, io} ->
+        result =
+          with :ok <- File.chmod(path, 0o600),
+               :ok <- IO.binwrite(io, key <> "\\n"),
+               :ok <- :file.sync(io) do
+            :ok
+          else
+            _ -> {:error, :key_file_write_failed}
+          end
+
+        closed = File.close(io)
+
+        case {result, closed} do
+          {:ok, :ok} ->
+            :ok
+
+          _ ->
+            _ = File.rm(path)
+            {:error, :key_file_write_failed}
+        end
+
+      {:error, :eexist} ->
+        {:error, :key_file_already_exists}
 
       {:error, _} ->
         {:error, :key_file_write_failed}
