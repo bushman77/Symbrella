@@ -137,7 +137,7 @@ defmodule Core.Syntax.Signatures do
       else
         candidate = %{
           pos: MapSet.new([pos]),
-          morphology: morphology(get(cell, :semantic_atoms)),
+          morphology: morphology(get(cell, :semantic_atoms), get(cell, :definition)),
           finite_present_verb?: pos == "verb" and finite_present_verb?(get(cell, :semantic_atoms)),
           plural_noun?: pos == "noun" and plural_noun?(get(cell, :semantic_atoms)),
           base_present_verb?: pos == "verb" and base_present_verb?(get(cell, :semantic_atoms))
@@ -158,22 +158,44 @@ defmodule Core.Syntax.Signatures do
 
   defp build_lexicon(_), do: %{}
 
-  defp morphology(atoms) when is_list(atoms) do
+  # Wiktextract can collapse "simple past and past participle" into a single
+  # form-of sense tagged only past + participle. Preserve BOTH morphological
+  # alternatives only when that combined reading is explicit in its gloss.
+  # Tags without an attesting gloss remain participle-only, not finite past.
+  defp morphology(atoms, definition) when is_list(atoms) do
     tags = MapSet.new(atoms)
     form_of? = MapSet.member?(tags, "tag:form-of")
     past? = MapSet.member?(tags, "tag:past")
     participle? = MapSet.member?(tags, "tag:participle")
 
     cond do
-      form_of? and past? and participle? -> MapSet.new([:past_participle])
+      form_of? and past? and participle? and
+          attested_both_past_forms?(definition) ->
+        MapSet.new([:simple_past, :past_participle])
+
+      form_of? and past? and participle? ->
+        MapSet.new([:past_participle])
+
       form_of? and participle? and MapSet.member?(tags, "tag:present") ->
         MapSet.new([:present_participle])
-      form_of? and past? -> MapSet.new([:simple_past])
-      true -> MapSet.new()
+
+      form_of? and past? ->
+        MapSet.new([:simple_past])
+
+      true ->
+        MapSet.new()
     end
   end
 
-  defp morphology(_), do: MapSet.new()
+  defp morphology(_, _), do: MapSet.new()
+
+  defp attested_both_past_forms?(definition) when is_binary(definition),
+    do: Regex.match?(
+      ~r/\bsimple past and past participle of [\p{L}]+(?:[-'’][\p{L}]+)*\b/ui,
+      definition
+    )
+
+  defp attested_both_past_forms?(_), do: false
 
   defp finite_present_verb?(atoms) when is_list(atoms) do
     tags = MapSet.new(atoms)
