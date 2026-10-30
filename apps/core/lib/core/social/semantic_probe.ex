@@ -156,7 +156,7 @@ defmodule Core.Social.SemanticProbe do
            |> Map.get(:constituents, [])
            |> List.wrap()
            |> Enum.count(fn constituent ->
-             Map.get(constituent, :id) in [:wh_aux_topic_question, :wh_aux_object_question] and
+             Map.get(constituent, :id) in [:wh_aux_topic_question, :wh_aux_object_question, :wh_modal_conditional_question] and
                Map.get(constituent, :status) == :resolved
            end)
        },
