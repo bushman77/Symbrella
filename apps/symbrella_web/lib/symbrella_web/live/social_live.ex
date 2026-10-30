@@ -687,6 +687,10 @@ defmodule SymbrellaWeb.SocialLive do
                           <div>Sentence interpretation:
                             <strong>{@segment.result.stage_diagnostic.sentence_interpretation}</strong>
                           </div>
+                          <div>Comprehension received sentence-meaning result:
+                            <strong>{if @segment.result.stage_diagnostic.comprehension_received_meaning,
+                              do: "yes", else: "no"}</strong>
+                          </div>
                           <div>Provisional hypothesis:
                             <strong>{@segment.result.stage_diagnostic.provisional_hypothesis}</strong>
                           </div>
