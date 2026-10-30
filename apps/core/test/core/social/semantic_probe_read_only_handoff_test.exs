@@ -56,7 +56,8 @@ defmodule Core.Social.SemanticProbeReadOnlyHandoffTest do
       )
 
     assert result.sentence_meaning.provenance == :external_unverified
-    assert result.sentence_meaning.status == :not_yet_interpreted
+    refute Map.get(result.sentence_meaning, :factual_authority?, false)
+    assert result.reported_proposition.verification == :external_unverified
     assert result.stage_diagnostic.working_memory_admission == :not_performed
     assert result.stage_diagnostic.episodic_persistence == :not_performed
   end
