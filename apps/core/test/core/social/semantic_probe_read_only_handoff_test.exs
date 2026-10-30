@@ -39,7 +39,8 @@ defmodule Core.Social.SemanticProbeReadOnlyHandoffTest do
 
     assert result.brain_observation.status == :disabled
     assert result.brain_observation.stimuli_issued == 0
-    assert result.comprehension.recognized_topics == []
+    assert result.stage_diagnostic.comprehension_received_meaning == true
+    assert is_list(result.comprehension.recognized_topics)
   end
 
   test "external shadow retains lexical and semantic uncertainty rather than asserting events" do
