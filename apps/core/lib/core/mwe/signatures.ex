@@ -205,7 +205,7 @@ defmodule Core.MWE.Signatures do
             |> Enum.reduce([], fn i, acc2 ->
               seq = Enum.slice(words, i, n)
               {phrase, pos_sig, kind} =
-                if Boundaries.valid_window?(seq) do
+                if Boundaries.valid_window?(seq, si) do
                   classify_window(seq, tokens, stage, pos_cache, extra_lex)
                 else
                   {"", [], :none}
