@@ -23,12 +23,13 @@ defmodule Core.Semantic.Composition.LemmaGroundedPredicate do
 
   # Require recognizable morphological headwords. The form-of tag and POS
   # are checked independently; the regex itself is not sufficient evidence.
-  @form_of ~r/\b(present participle and gerund|present participle|simple past and past participle|simple past|past participle|third-person singular simple present)\s+of\s+([\p{L}]+(?:[-'’][\p{L}]+)*)\b/ui
+  defp form_of_pattern, do: ~r/\b(present participle and gerund|present participle|simple past and past participle|simple past|past participle|third-person singular simple present)\s+of\s+([\p{L}]+(?:[-'’][\p{L}]+)*)\b/ui
 
   # Closed, deliberately conservative hypothesis rules. Never infer a feature
   # from the lemma string ("sit") or the inflected token ("sitting") alone.
   # Unrecognized definitions remain in the output with no derived features.
-  @semantic_rules [
+  defp semantic_rules do
+    [
     %{
       feature: :seated_posture,
       family: :physical_posture,
@@ -54,7 +55,8 @@ defmodule Core.Semantic.Composition.LemmaGroundedPredicate do
       family: :communication,
       pattern: ~r/\b(?:discuss a subject|discuss a topic|talk about a subject|speak about a topic|converse about)\b/ui
     }
-  ]
+    ]
+  end
 
   @doc """
   Identify scored, attested inflected verb senses and their dictionary-derived
@@ -115,7 +117,7 @@ defmodule Core.Semantic.Composition.LemmaGroundedPredicate do
 
             if is_binary(definition) and is_list(atoms) and
                  "tag:form-of" in atoms do
-              case Regex.run(@form_of, definition) do
+              case Regex.run(form_of_pattern(), definition) do
                 [span, form, lemma] ->
                   lemma = normalize(lemma)
 
@@ -209,7 +211,7 @@ defmodule Core.Semantic.Composition.LemmaGroundedPredicate do
 
           features =
             if is_binary(definition) do
-              Enum.flat_map(@semantic_rules, fn rule ->
+              Enum.flat_map(semantic_rules(), fn rule ->
                 case Regex.run(rule.pattern, definition) do
                   [match | _] ->
                     [%{
