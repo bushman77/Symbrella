@@ -62,7 +62,16 @@ defmodule SymbrellaWeb.SocialLive do
       report_input = %{topic: socket.assigns.topic, comments: socket.assigns.comments}
       analyzer = Application.get_env(:symbrella_web, :social_cognitive_analyzer, SocialCognitiveReport)
 
-      case analyzer.analyze(report_input) do
+      # Real neural observation is enabled only for this explicit operator
+      # action, never for background topic browsing or passive page rendering.
+      outcome =
+        if function_exported?(analyzer, :analyze, 2) do
+          analyzer.analyze(report_input, brain_observation?: true)
+        else
+          analyzer.analyze(report_input)
+        end
+
+      case outcome do
         {:ok, report} ->
           # Share only transient aggregate stage activity with /brain, never the
           # untrusted Colony text or a claim of neural/synaptic activation.
@@ -280,7 +289,8 @@ defmodule SymbrellaWeb.SocialLive do
                     <p class="text-xs text-zinc-400">
                       Only supported sentence interpretations are shown as interpretations.
                       External statements are not verified facts; the brain activity feed
-                      does not stimulate neurons or store memories.
+                      may produce bounded transient neuron activation; no statements are
+                      saved as memories or verified facts.
                     </p>
                     <div id="social-topic-analysis" class="space-y-2">
                       <h4 class="font-semibold">1. What is being discussed?</h4>
