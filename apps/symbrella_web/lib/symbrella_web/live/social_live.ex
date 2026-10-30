@@ -249,18 +249,21 @@ defmodule SymbrellaWeb.SocialLive do
           >
             <div class="flex w-full max-w-6xl min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-cyan-300/30 bg-zinc-950 text-zinc-100 shadow-2xl"
               style="height: calc(100vh - 2rem); height: calc(100dvh - 2rem); max-height: 900px;">
-              <header class="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
-                <div class="min-w-0">
+              <%!-- Stack the heading and controls on narrow screens: otherwise the
+                    non-shrinking buttons compress the subtitle to one character wide
+                    and the giant header pushes the report out of view. --%>
+              <header class="flex shrink-0 flex-col items-stretch gap-3 border-b border-white/10 px-4 py-4 lg:flex-row lg:items-center lg:justify-between sm:px-6">
+                <div class="min-w-0 lg:flex-1">
                   <h2 class="text-lg font-semibold">Cognitive inspection</h2>
-                  <p class="break-words text-xs text-zinc-400">External Colony observations · isolated read-only semantic shadow · no learning or posting</p>
+                  <p class="text-xs text-zinc-400">External Colony observations · isolated read-only semantic shadow · no learning or posting</p>
                 </div>
-                <div class="flex shrink-0 items-center gap-2">
-                  <.link navigate={~p"/brain"} class="rounded border border-white/20 px-3 py-2 text-cyan-200 hover:bg-white/10">Brain activity</.link>
+                <div class="flex min-w-0 flex-wrap items-center gap-2 lg:shrink-0">
+                  <.link navigate={~p"/brain"} class="whitespace-nowrap rounded border border-white/20 px-3 py-2 text-sm text-cyan-200 hover:bg-white/10">Brain activity</.link>
                   <button id="social-copy-analysis" type="button" phx-hook="ClipboardCopy"
                     data-clipboard-target="#social-report-content"
-                    class="rounded border border-cyan-400/50 px-3 py-2 text-cyan-200 hover:bg-cyan-400/10">Copy report</button>
+                    class="whitespace-nowrap rounded border border-cyan-400/50 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-400/10">Copy report</button>
                   <button id="social-close-analysis" type="button" phx-click="close_analysis" aria-label="Close analysis"
-                    class="rounded border border-white/20 px-3 py-2 hover:bg-white/10">Close</button>
+                    class="whitespace-nowrap rounded border border-white/20 px-3 py-2 text-sm hover:bg-white/10">Close</button>
                 </div>
               </header>
               <div id="social-report-content" tabindex="0" class="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-5 pb-8 sm:px-6"
