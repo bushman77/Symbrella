@@ -62,7 +62,9 @@ defmodule Core.Pipeline.LTM do
 
     %{
       budget: budget,
-      pos_diverse?: Keyword.get(opts, :pos_diverse?, false) == true,
+      pos_diverse_requested?: Keyword.get(opts, :pos_diverse?, false) == true,
+      pos_diverse?:
+        budget != :all and Keyword.get(opts, :pos_diverse?, false) == true,
       candidate_rows: length(rows),
       token_positions: map_size(groups),
       max_senses_per_token:
