@@ -37,22 +37,20 @@ defmodule Core.Social.SemanticProbe do
   def run(_, _), do: {:error, :invalid_social_text}
 
   defp analyze(excerpt, opts) do
-    all_tokens =
-      excerpt
-      |> Core.LIFG.Input.tokenize(fuzzy: false, max_wordgram_n: 1)
-      |> Enum.filter(&is_map/1)
-
+    # Chat and Colony share the same source-aligned Phase 1 tokenization.
+    # The read-only probe remains bounded and does not admit memory.
+    input = Core.Pipeline.Input.prepare(excerpt, max_wordgram_n: 1)
+    all_tokens = input.tokens
     tokens = Enum.take(all_tokens, @max_tokens)
 
-    si = %{
-      sentence: excerpt,
-      tokens: tokens,
-      source: :colony_external,
-      experience_origin: :colony_external,
-      active_cells: [],
-      sense_candidates: %{},
-      trace: []
-    }
+    si =
+      input
+      |> Map.from_struct()
+      |> Map.put(:tokens, tokens)
+      |> Map.put(:source, :colony_external)
+      |> Map.put(:experience_origin, :colony_external)
+      |> Map.put(:active_cells, [])
+      |> Map.put(:sense_candidates, %{})
 
     # Checked, bounded *read*: a failed DB query must not look like a
     # legitimate empty lexicon. Never write or activate retrieved BrainCells.
