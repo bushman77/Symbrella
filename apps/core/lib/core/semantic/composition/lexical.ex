@@ -96,6 +96,26 @@ defmodule Core.Semantic.Composition.Lexical do
       else: :unsupported
   end
 
+  @doc """
+  Reusable past-tense operator: action-kind -> event -> truth.
+
+  The resulting property does not assert that an event occurred. A caller
+  must independently establish the predicate's canonical lemma and syntax.
+  """
+  @spec past_event() :: {:ok, map()} | :unsupported
+  def past_event do
+    type = {:arrow, :action_kind, @event_property}
+    term =
+      {:lambda, "action", :action_kind,
+       {:lambda, "e", :event,
+        {:and, {:event_action, {:var, "action"}, {:var, "e"}},
+         {:event_tense, :past, {:var, "e"}}}}}
+
+    if Expression.type_of(term) == {:ok, type},
+      do: {:ok, %{term: term, type: type}},
+      else: :unsupported
+  end
+
   @doc "Reusable actor operator: actor-kind -> event-property -> event-property."
   @spec actor_modifier() :: {:ok, map()} | :unsupported
   def actor_modifier do
