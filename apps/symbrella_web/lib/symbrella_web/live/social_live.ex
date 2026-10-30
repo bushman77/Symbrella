@@ -525,50 +525,109 @@ defmodule SymbrellaWeb.SocialLive do
                     <p :for={gap <- @cognitive_report.discourse.unresolved}
                       class="text-sm text-zinc-400">{gap}</p>
                   </section>
-                  <article :for={{segment, index} <- Enum.with_index(@cognitive_report.segments)}
-                    id={"social-analysis-segment-#{index}"}
+                  <%!-- Maintain explicit source provenance through the display.
+                        Replies are analyzed separately, never as a continuation
+                        of the original author's cognitive sample. --%>
+                  <section :if={Map.has_key?(@cognitive_report, :sections)}
+                    id="social-analysis-original-post"
+                    class="space-y-3 rounded-lg border border-emerald-400/25 p-3 sm:p-4">
+                    <h3 class="text-lg font-semibold text-emerald-200">Original post · independent analysis</h3>
+                    <p class="text-xs text-zinc-400">
+                      Author: {@cognitive_report.sections.original_post.author} ·
+                      {length(@cognitive_report.sections.original_post.segments)} sentence samples ·
+                      external, unverified
+                    </p>
+                    <.analysis_segment :for={segment <- @cognitive_report.sections.original_post.segments}
+                      segment={segment} index={segment.sample_index}/>
+                  </section>
+                  <section :if={Map.has_key?(@cognitive_report, :sections)}
+                    id="social-analysis-replies"
+                    class="space-y-3 rounded-lg border border-cyan-400/25 p-3 sm:p-4">
+                    <h3 class="text-lg font-semibold text-cyan-200">Replies · independent participant analyses</h3>
+                    <p class="text-xs text-zinc-400">
+                      Each reply retains its own speaker, grammatical evidence and
+                      interpretation. A reply is not the original author's assertion.
+                    </p>
+                    <div :for={reply <- @cognitive_report.sections.replies}
+                      id={"social-analysis-reply-#{reply.index}"}
+                      class="space-y-3 rounded border border-white/10 p-3">
+                      <h4 class="font-semibold">{reply.label} · {reply.author}</h4>
+                      <p class="text-xs text-zinc-400">
+                        {length(reply.segments)} sentence samples · {reply.understanding.status} ·
+                        external, unverified
+                      </p>
+                      <.analysis_segment :for={segment <- reply.segments}
+                        segment={segment} index={segment.sample_index}/>
+                    </div>
+                    <p :if={@cognitive_report.sections.replies == []}
+                      class="text-sm text-zinc-400">No replies were included in this analysis.</p>
+                  </section>
+                  <div :if={!Map.has_key?(@cognitive_report, :sections)} class="space-y-3">
+                    <.analysis_segment :for={{segment, index} <- Enum.with_index(@cognitive_report.segments)}
+                      segment={segment} index={index}/>
+                  </div>
+                <% else %>
+                  <p class="text-sm text-amber-200">The cognitive report is unavailable.</p>
+                <% end %>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </Layouts.app>
+    """
+  end
+
+
+  attr :segment, :map, required: true
+  attr :index, :integer, required: true
+
+  defp analysis_segment(assigns) do
+    ~H"""
+                  <article
+                    id={"social-analysis-segment-#{@index}"}
                     class="min-w-0 space-y-3 rounded-lg border border-white/10 bg-zinc-900/70 p-4">
-                    <h3 class="break-words font-semibold">{segment.label} · {segment.author}</h3>
-                    <%= if segment.status == :analyzed do %>
+                    <h3 class="break-words font-semibold">{@segment.label} · {@segment.author}</h3>
+                    <%= if @segment.status == :analyzed do %>
                       <div class="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                        <p>LIFG: <strong>{segment.result.lifg.status}</strong> · {segment.result.lifg.chosen_count} choices</p>
-                        <p>ATL: <strong>{segment.result.atl.status}</strong> · {segment.result.atl.winner_count} winners</p>
-                        <p>Sentence meaning: <strong>{segment.result.sentence_meaning.status}</strong></p>
-                        <p :if={get_in(segment.result, [:sentence_meaning, :speech_act])}>
-                          Speech act: <strong>{segment.result.sentence_meaning.speech_act}</strong>
+                        <p>LIFG: <strong>{@segment.result.lifg.status}</strong> · {@segment.result.lifg.chosen_count} choices</p>
+                        <p>ATL: <strong>{@segment.result.atl.status}</strong> · {@segment.result.atl.winner_count} winners</p>
+                        <p>Sentence meaning: <strong>{@segment.result.sentence_meaning.status}</strong></p>
+                        <p :if={get_in(@segment.result, [:sentence_meaning, :speech_act])}>
+                          Speech act: <strong>{@segment.result.sentence_meaning.speech_act}</strong>
                         </p>
-                        <p :if={Map.has_key?(segment.result, :question_composition) and
-                                   segment.result.question_composition.status != :no_question_signature}>
-                          Question composition: <strong>{segment.result.question_composition.status}</strong>
-                          <pre class="mt-2 max-w-full whitespace-pre-wrap break-all text-xs text-zinc-400">{inspect(Map.drop(segment.result.question_composition, [:status]), limit: :infinity, printable_limit: :infinity, charlists: :as_lists, pretty: true)}</pre>
+                        <p :if={Map.has_key?(@segment.result, :question_composition) and
+                                   @segment.result.question_composition.status != :no_question_signature}>
+                          Question composition: <strong>{@segment.result.question_composition.status}</strong>
+                          <pre class="mt-2 max-w-full whitespace-pre-wrap break-all text-xs text-zinc-400">{inspect(Map.drop(@segment.result.question_composition, [:status]), limit: :infinity, printable_limit: :infinity, charlists: :as_lists, pretty: true)}</pre>
                         </p>
-                        <p :if={Map.has_key?(segment.result, :question_evidence)}>
-                          Question frames: {segment.result.question_evidence.signature_count} · ATL resolved: {segment.result.question_evidence.resolved_constituents}
+                        <p :if={Map.has_key?(@segment.result, :question_evidence)}>
+                          Question frames: {@segment.result.question_evidence.signature_count} · ATL resolved: {@segment.result.question_evidence.resolved_constituents}
                         </p>
-                        <p>Grammar: <strong>{segment.result.syntax.audit.outcome}</strong></p>
-                        <p>Dictionary POS coverage: {segment.result.syntax.audit.pos_covered_tokens} / {segment.result.token_count} tokens</p>
-                        <p>Lexical ambiguity: {if segment.result.acc_shadow.uncertain?, do: "flagged", else: "not flagged"}</p>
+                        <p>Grammar: <strong>{@segment.result.syntax.audit.outcome}</strong></p>
+                        <p>Dictionary POS coverage: {@segment.result.syntax.audit.pos_covered_tokens} / {@segment.result.token_count} tokens</p>
+                        <p>Lexical ambiguity: {if @segment.result.acc_shadow.uncertain?, do: "flagged", else: "not flagged"}</p>
                       </div>
-                      <div :if={get_in(segment.result, [:sentence_meaning, :definition])} class="rounded border border-cyan-400/20 p-3">
+                      <div :if={get_in(@segment.result, [:sentence_meaning, :definition])} class="rounded border border-cyan-400/20 p-3">
                         <h4 class="mb-1 text-sm font-semibold">Structural interpretation (not verified fact)</h4>
-                        <p class="break-words text-sm text-zinc-300">{segment.result.sentence_meaning.definition}</p>
+                        <p class="break-words text-sm text-zinc-300">{@segment.result.sentence_meaning.definition}</p>
                       </div>
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Sentence signatures</h4>
                         <p class="break-words text-sm text-zinc-300">
-                          {signature_labels(segment.result.syntax.signatures)}
+                          {signature_labels(@segment.result.syntax.signatures)}
                         </p>
                       </div>
-                      <div :if={is_map(Map.get(segment.result, :declarative_evidence)) and
-                                  Map.get(segment.result.declarative_evidence, :examined_frames, 0) > 0}
+                      <div :if={is_map(Map.get(@segment.result, :declarative_evidence)) and
+                                  Map.get(@segment.result.declarative_evidence, :examined_frames, 0) > 0}
                         class="space-y-2 rounded border border-white/10 p-3">
                         <h4 class="text-sm font-semibold">COLONY-13 · Local declarative clause evidence</h4>
                         <p class="text-xs text-zinc-400">
-                          {segment.result.declarative_evidence.examined_frames} grammar frames examined ·
-                          {length(segment.result.declarative_evidence.candidates)} local candidates ·
+                          {@segment.result.declarative_evidence.examined_frames} grammar frames examined ·
+                          {length(@segment.result.declarative_evidence.candidates)} local candidates ·
                           not whole-sentence interpretation
                         </p>
-                        <div :for={clause <- segment.result.declarative_evidence.candidates}
+                        <div :for={clause <- @segment.result.declarative_evidence.candidates}
                           class="space-y-1 rounded border border-cyan-400/20 p-2 text-xs text-zinc-300">
                           <p class="font-semibold text-cyan-200">
                             {clause.source_frame} · {clause.status}
@@ -586,7 +645,7 @@ defmodule SymbrellaWeb.SocialLive do
                             {clause.verification}
                           </p>
                         </div>
-                        <p :for={rejection <- segment.result.declarative_evidence.abstentions}
+                        <p :for={rejection <- @segment.result.declarative_evidence.abstentions}
                           class="break-words text-xs text-zinc-400">
                           {rejection.frame} {inspect(rejection.span)} withheld:
                           {rejection.reason}
@@ -594,25 +653,16 @@ defmodule SymbrellaWeb.SocialLive do
                       </div>
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Recognized topics (unverified)</h4>
-                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(segment.result.comprehension.recognized_topics, limit: 8, printable_limit: 300)}</pre>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(@segment.result.comprehension.recognized_topics, limit: 8, printable_limit: 300)}</pre>
                       </div>
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Attributed proposition</h4>
-                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(segment.result.reported_proposition, limit: 15, printable_limit: 500)}</pre>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(@segment.result.reported_proposition, limit: 15, printable_limit: 500)}</pre>
                       </div>
                     <% else %>
-                      <p class="text-sm text-amber-200">Probe unavailable: {inspect(segment.reason)}</p>
+                      <p class="text-sm text-amber-200">Probe unavailable: {inspect(@segment.reason)}</p>
                     <% end %>
                   </article>
-                <% else %>
-                  <p class="text-sm text-amber-200">The cognitive report is unavailable.</p>
-                <% end %>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </Layouts.app>
     """
   end
 
