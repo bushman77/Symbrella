@@ -84,10 +84,11 @@ defmodule Core do
       :prod ->
         recalled
         |> pipeline_map()
-    |> Core.Brain.STM.run()
-    |> StateDump.capture(:stm)
-    |> Core.Pipeline.Candidates.reset(:post_stm)
-    |> StateDump.capture(:candidates_reset)
+        |> Core.Brain.STM.run()
+        |> StateDump.capture(:stm)
+        |> Core.Pipeline.Candidates.reset(:post_stm)
+        |> StateDump.capture(:candidates_reset)
+
       _ ->
         recalled
     end
