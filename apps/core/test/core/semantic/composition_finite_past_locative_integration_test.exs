@@ -142,10 +142,11 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
     assert {:ok, proof} = Integration.derive(changed, lookup: &lookup/1)
     assert proof.premises.selected_lifg_id == "sat|noun|1"
 
-    unscored = put_in(changed, [:lifg_choices],
-      Enum.map(changed.lifg_choices, fn choice ->
+    unscored = %{changed |
+      lifg_choices: Enum.map(changed.lifg_choices, fn choice ->
         if choice.token_index == 1, do: %{choice | candidate_probs: %{}}, else: choice
-      end))
+      end)
+    }
     assert :unsupported = RoleWitness.resolve_noun_kind(unscored, :subject_head, 1)
     assert :not_applicable = Integration.derive(unscored, lookup: &lookup/1)
   end
