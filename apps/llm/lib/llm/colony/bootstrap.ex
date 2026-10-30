@@ -24,7 +24,11 @@ defmodule Llm.Colony.Bootstrap do
 
   @impl true
   def init(_) do
-    {:ok, %{status: :starting}, {:continue, :bootstrap}}
+    if Application.get_env(:llm, :colony_bootstrap_enabled?, true) do
+      {:ok, %{status: :starting}, {:continue, :bootstrap}}
+    else
+      {:ok, %{status: {:ok, :disabled}}}
+    end
   end
 
   @impl true
