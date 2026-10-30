@@ -22,17 +22,16 @@ defmodule Core.Pipeline.LexicalBridge do
     one ones any all each either some such other others something anything
     someone another more less than much many one two three after before
     used use using having has had being often usually sometimes also
-    especially including etc like called known kind kinds type types
-    a the an or as is)
+    especially including etc like called known kind kinds type types)
 
   @type report :: map()
 
   @doc """
   Inspect a direct shared-gloss bridge, or an explicitly supplied two-lemma
-  chain (\`via: ["boat", "watercourse"]\`). A default checked DB lookup reads
+  chain (`via: ["boat", "watercourse"]`). A default checked DB lookup reads
   full sense slates, never an eight-sense subset.
 
-  A \`:lookup\` callback of arity 1 may return \`{:ok, rows}\` for tests.
+  A `:lookup` callback of arity 1 may return `{:ok, rows}` for tests.
   No source text or credentials are logged.
   """
   @spec audit(String.t(), String.t(), keyword()) :: {:ok, report()} | {:error, atom()}
