@@ -28,6 +28,7 @@ defmodule Core.Semantic.Composition.Expression do
           | {:and, t(), t()}
           | {:event_action, atom() | t(), t()}
           | {:event_aspect, :progressive, t()}
+          | {:event_tense, :past, t()}
           | {:event_actor_kind, atom() | t(), t()}
           | {:event_actor_entity, t(), t()}
           | {:event_spatial, atom(), atom(), t()}
@@ -128,6 +129,9 @@ defmodule Core.Semantic.Composition.Expression do
   end
 
   def type_of({:event_aspect, :progressive, event}, env),
+    do: event_predicate_type(true, event, env)
+
+  def type_of({:event_tense, :past, event}, env),
     do: event_predicate_type(true, event, env)
 
   def type_of({:event_actor_kind, kind, event}, env) do
