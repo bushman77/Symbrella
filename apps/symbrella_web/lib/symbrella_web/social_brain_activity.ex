@@ -76,7 +76,11 @@ defmodule SymbrellaWeb.SocialBrainActivity do
     :telemetry.execute(
       [:core, :social, :neuron_observation],
       %{stimuli_issued: activity.neuron_stimuli_issued,
-        inspected_segments: activity.segments},
+        inspected_segments: activity.segments,
+        observation_disabled: Map.get(activity.neuron_observation_statuses, :disabled, 0),
+        brain_unavailable: Map.get(activity.neuron_observation_statuses, :brain_unavailable, 0),
+        no_attested_targets: Map.get(activity.neuron_observation_statuses, :no_attested_targets, 0),
+        stimuli_issued_segments: Map.get(activity.neuron_observation_statuses, :stimuli_issued, 0)},
       %{source: :colony_external, mode: :transient_neural_observation,
         analysis_scope: :thread_aggregate}
     )
@@ -123,6 +127,11 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       source: :colony_external,
       mode: :read_only_shadow,
       neuron_stimuli_issued: count(segments, [:result, :brain_observation, :stimuli_issued]),
+      neuron_observation_statuses:
+        segments
+        |> Enum.map(&get_in(&1, [:result, :brain_observation, :status]))
+        |> Enum.reject(&is_nil/1)
+        |> Enum.frequencies(),
       processed_tokens: count(segments, [:result, :token_count]),
       pos_covered_tokens: count(segments, [:result, :syntax, :audit, :pos_covered_tokens]),
       dictionary_rows: count(segments, [:result, :syntax, :audit, :ltm_source_rows]),
