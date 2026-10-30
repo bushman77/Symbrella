@@ -100,7 +100,7 @@ defmodule Core.Semantic.CompositionLemmaGroundedPredicateTest do
   test "a morphological tag is required, even if a string contains 'of sit'" do
     input = si("sat", "simple past and past participle", "sit", "sat|noun|1")
     altered =
-      update_in(input.active_cells, fn cells ->
+      Map.update!(input, :active_cells, fn cells ->
         Enum.map(cells, &Map.put(&1, :semantic_atoms, ["pos_raw:verb"]))
       end)
 
@@ -110,7 +110,7 @@ defmodule Core.Semantic.CompositionLemmaGroundedPredicateTest do
   test "unscored forms and mismatched token indices cannot authorize lemma discovery" do
     input = si("sat", "simple past and past participle", "sit", "sat|noun|1")
     without_score =
-      put_in(input.lifg_choices, [
+      Map.put(input, :lifg_choices, [
         %{token_index: 3, id: "sat|noun|1",
           candidate_probs: %{"sat|noun|1" => 0.9}}
       ])
