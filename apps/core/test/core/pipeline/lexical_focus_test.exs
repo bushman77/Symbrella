@@ -90,6 +90,31 @@ defmodule Core.Pipeline.LexicalFocusTest do
     assert length(LexicalFocus.expand(out, 5)) == 2
   end
 
+  test "repeated words keep independent focus and complete per-position recall" do
+    rows = [
+      %{id: "bank|noun|1", token_index: 0, pos: "noun", definition: "River edge."},
+      %{id: "bank|noun|2", token_index: 0, pos: "noun", definition: "Money institution."},
+      %{id: "bank|noun|1", token_index: 2, pos: "noun", definition: "River edge."},
+      %{id: "bank|noun|2", token_index: 2, pos: "noun", definition: "Money institution."}
+    ]
+    si = %SemanticInput{sentence: "bank near bank",
+      tokens: [%{index: 0, phrase: "bank"}, %{index: 2, phrase: "bank"}],
+      active_cells: rows,
+      sense_candidates: %{0 => [%{id: "bank|noun|2"}],
+                          2 => [%{id: "bank|noun|1"}]},
+      neuron_activation: %{"bank|noun|1" => 0.3}}
+
+    out = LexicalFocus.attach(si, lexical_focus_size: 1)
+    assert Map.keys(out.lexical_focus.positions) |> Enum.sort() == [0, 2]
+    assert out.lexical_focus.positions[0].deferred_senses == 1
+    assert out.lexical_focus.positions[2].deferred_senses == 1
+    assert length(LexicalFocus.expand(out, 0)) == 2
+    assert length(LexicalFocus.expand(out, 2)) == 2
+    assert out.sense_candidates == si.sense_candidates
+    assert out.neuron_activation == si.neuron_activation
+    assert out.active_cells == rows
+  end
+
   test "unsupported roles cannot fabricate grammatical support" do
     si = %SemanticInput{
       sentence: "light",
