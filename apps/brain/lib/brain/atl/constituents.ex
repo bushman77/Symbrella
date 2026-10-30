@@ -15,7 +15,8 @@ defmodule Brain.ATL.Constituents do
   @max_constituents 48
   @ids [:noun_phrase, :possessive_noun_phrase, :prepositional_phrase,
         :nominalized_adjective_subject_candidate, :verb_particle_construction,
-        :wh_aux_topic_question, :wh_aux_object_question]
+        :wh_aux_topic_question, :wh_aux_object_question,
+        :wh_modal_conditional_question]
 
   @spec attach(map(), list()) :: map()
   def attach(%{winners: winners} = slate, signatures)
@@ -120,12 +121,31 @@ defmodule Brain.ATL.Constituents do
 
       case List.wrap(features) do
         [] -> pos != nil
-        required -> Enum.any?(required, &matches_pos?(&1, pos))
+        required -> Enum.any?(required, &matches_role_feature?(&1, id, pos))
       end
     end
   end
 
   defp compatible_choice?(_, _), do: false
+
+  # COLONY-14: role evidence must agree with the *selected* sense ID.
+  # A grammar signature may attest that a word could serve a role; it must
+  # not silently replace an incompatible LIFG/ATL winner with that candidate.
+  defp matches_role_feature?(:pos_modal_or_auxiliary_or_verb, _id, pos),
+    do: pos in ["modal", "auxiliary", "verb"]
+
+  defp matches_role_feature?(:explicit_if_surface, id, pos),
+    do: selected_lemma(id) == "if" and
+      pos in ["conjunction", "preposition", "adverb"]
+
+  defp matches_role_feature?(:attested_copular_form, id, pos),
+    do: selected_lemma(id) in ["was", "were"] and
+      pos in ["verb", "auxiliary"]
+
+  defp matches_role_feature?(other, _id, pos), do: matches_pos?(other, pos)
+
+  defp selected_lemma(id) when is_binary(id),
+    do: id |> String.split("|", parts: 3) |> List.first()
 
   defp matches_pos?(:pos_noun_or_pronoun, pos),
     do: pos in ["noun", "proper_noun", "pronoun"]
