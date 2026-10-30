@@ -46,7 +46,10 @@ defmodule SymbrellaWeb.SocialDiscourse do
         |> Enum.with_index()
         |> Enum.filter(fn {other, index} ->
           index != claim.segment_index and Map.get(other, :status) == :analyzed and
-            Map.get(other, :author) == claim.speaker
+            Map.get(other, :author) == claim.speaker and
+            # A participant can publish multiple separate comments; matching
+            # usernames alone never merges those sources into one discourse.
+            source_boundary(other) == source_boundary(source)
         end)
         |> Enum.flat_map(fn {other, index} ->
           overlap = MapSet.intersection(terms, terms(Map.get(other, :excerpt, "")))
@@ -71,6 +74,17 @@ defmodule SymbrellaWeb.SocialDiscourse do
       mode: :read_only
     }
   end
+
+  defp source_boundary(%{source_type: kind, source_index: index}),
+    do: {kind, index}
+
+  defp source_boundary(%{source_label: label}) when is_binary(label),
+    do: label
+
+  defp source_boundary(%{label: label}) when is_binary(label),
+    do: label |> String.split(" · sentence", parts: 2) |> hd()
+
+  defp source_boundary(_), do: :unknown
 
   defp terms(text) when is_binary(text) do
     Regex.scan(~r/[\p{L}]{3,}/u, String.downcase(text))
