@@ -116,6 +116,10 @@ defmodule SymbrellaWeb.BrainLive do
               <p>Sentences inspected: <strong>{@social_activity.segments}</strong></p>
               <p>LIFG choices: <strong>{@social_activity.lifg_choices}</strong></p>
               <p>ATL winners: <strong>{@social_activity.atl_winners}</strong></p>
+              <p :if={is_map(Map.get(@social_activity, :analyzed_target))}>
+                Last analyzed piece:
+                <strong>{@social_activity.analyzed_target.label}</strong>
+              </p>
               <p>Neuron stimuli issued: <strong>{Map.get(@social_activity, :neuron_stimuli_issued, 0)}</strong></p>
               <p>Observation enabled and stimulated:
                 <strong>{get_in(@social_activity, [:neuron_observation_statuses, :stimuli_issued]) || 0} sentences</strong>
