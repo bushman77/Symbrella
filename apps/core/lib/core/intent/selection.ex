@@ -288,8 +288,7 @@ defmodule Core.Intent.Selection do
           acc
       end)
 
-    keyword
-    |> Regex.replace(~r/[\\p{L}\\p{N}']+/u, fn term ->
+    Regex.replace(~r/[\p{L}\p{N}']+/u, keyword, fn term ->
       Map.get(replacements, String.downcase(term), term)
     end)
     |> normalize_text()
