@@ -109,7 +109,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
 
     discourse = SocialDiscourse.build(analyses)
 
-    {:ok, %{
+    %{
       post_id: id,
       source: :colony_external,
       trust: :untrusted_external,
