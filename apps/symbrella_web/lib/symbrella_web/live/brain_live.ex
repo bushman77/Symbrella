@@ -137,6 +137,34 @@ defmodule SymbrellaWeb.BrainLive do
               <p>Sources sampled: <strong>{@social_activity.participants}</strong></p>
               <p>Evidence links: <strong>{@social_activity.relations}</strong></p>
             </div>
+            <div :if={is_map(Map.get(@social_activity, :source_breakdown))}
+              id="brain-social-source-breakdown"
+              class="mt-4 grid gap-3 sm:grid-cols-2">
+              <section id="brain-social-original-post"
+                class="space-y-1 rounded border border-emerald-400/25 p-3 text-sm">
+                <h3 class="font-semibold text-emerald-200">Original post</h3>
+                <p>Sentences: <strong>{@social_activity.source_breakdown.original_post.sentences}</strong></p>
+                <p>LIFG / ATL: <strong>{@social_activity.source_breakdown.original_post.lifg_choices} /
+                  {@social_activity.source_breakdown.original_post.atl_winners}</strong></p>
+                <p>Neuron stimuli: <strong>{@social_activity.source_breakdown.original_post.neuron_stimuli}</strong></p>
+                <p>Supported sentences: <strong>{@social_activity.source_breakdown.original_post.interpreted_sentences}</strong></p>
+              </section>
+              <section id="brain-social-replies"
+                class="space-y-1 rounded border border-cyan-400/25 p-3 text-sm">
+                <h3 class="font-semibold text-cyan-200">Replies</h3>
+                <p>Sentences: <strong>{@social_activity.source_breakdown.replies.sentences}</strong></p>
+                <p>LIFG / ATL: <strong>{@social_activity.source_breakdown.replies.lifg_choices} /
+                  {@social_activity.source_breakdown.replies.atl_winners}</strong></p>
+                <p>Neuron stimuli: <strong>{@social_activity.source_breakdown.replies.neuron_stimuli}</strong></p>
+                <p>Supported sentences: <strong>{@social_activity.source_breakdown.replies.interpreted_sentences}</strong></p>
+                <div :for={reply <- Map.get(@social_activity, :reply_breakdown, [])}
+                  class="mt-2 border-t border-white/10 pt-2 text-xs text-zinc-300">
+                  <p class="font-medium">Reply {reply.reply_index}</p>
+                  <p>{reply.metrics.sentences} sentences · {reply.metrics.neuron_stimuli} stimuli ·
+                    {reply.metrics.interpreted_sentences} supported meanings</p>
+                </div>
+              </section>
+            </div>
             <p class="mt-2 text-xs text-zinc-500">Memory-only aggregate, retained for up to five minutes.</p>
           <% else %>
             <p id="brain-social-idle" class="mt-3 text-sm text-zinc-400">
