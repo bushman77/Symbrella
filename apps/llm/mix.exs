@@ -12,8 +12,9 @@ defmodule Llm.MixProject do
     ]
   end
 
-  # Supervise temporary Colony access tokens in RAM. No network calls
-  # occur until an explicit API read or separately authorized social write.
+  # Supervise ephemeral Colony JWTs in RAM. A separately supervised worker
+  # may provision credentials at startup only for an explicitly named NEW agent;
+  # otherwise network calls occur only on authorized Colony reads/writes.
   def application do
     [
       mod: {Llm.Application, []},
