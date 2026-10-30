@@ -17,13 +17,16 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
     :attested_simple_past_verb, :attested_preposition, :attested_nominal_location]
   @static_relations ~w(on in under beside above below)
   @event_property {:arrow, :event, :truth}
+  # Explicit lemma-to-feature admission policy. Extend only with independently
+  # validated predicate evidence; a morphological form alone is insufficient.
+  @predicate_features %{"sit" => :seated_posture}
 
   @spec compose(map()) :: {:ok, map()} | :unsupported
   def compose(%{signature: signature, grounding: grounding, actor: actor,
                 preposition: prep, landmark: landmark} = input) do
     with true <- valid_signature?(signature),
          {:ok, lemma, form, feature} <- morphological_support(grounding, input),
-         {:ok, %{term: action_term, symbol: :sit}} <- Lexical.canonical_action(lemma),
+         {:ok, %{term: action_term, symbol: action_symbol}} <- Lexical.canonical_action(lemma),
          {:ok, %{term: actor_term, symbol: actor_symbol}} <- Lexical.actor(actor),
          {:ok, %{term: past_operator}} <- Lexical.past_event(),
          {:ok, %{term: actor_operator}} <- Lexical.actor_modifier(),
@@ -39,7 +42,7 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
            {:ok, result, steps} <- Reducer.reduce(initial),
            :ok <- Proof.verify(%{initial: initial, result: result,
                                  steps: steps, result_type: @event_property}),
-           true <- normal_form?(result, actor_symbol, relation, landmark_symbol) do
+           true <- normal_form?(result, action_symbol, actor_symbol, relation, landmark_symbol) do
         {:ok, %{
           kind: :finite_past_locative_property,
           status: :derived,
@@ -53,7 +56,7 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
                       selected_lifg_id: grounding.selected_lifg_id},
           event_semantics: %{
             tense: :past,
-            predicate: :sit,
+            predicate: action_symbol,
             actor: %{kind: actor_symbol, referent: :unresolved},
             spatial: %{relation: relation, landmark_kind: landmark_symbol,
                        arrival: :not_established},
@@ -119,27 +122,36 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
        when is_binary(surface) and is_binary(selected_id) and
             is_list(forms) and is_list(features) do
     valid_forms = Enum.filter(forms, fn
-      %{surface: ^surface, lemma: "sit", inflection: inflection,
+      %{surface: ^surface, lemma: lemma, inflection: inflection,
         source: :attested_scored_form_of_dictionary_sense,
         morphological_only?: true, inflected_sense_id: id, score: score}
-        when inflection in ["simple past", "simple past and past participle"] and
+        when is_binary(lemma) and
+             inflection in ["simple past", "simple past and past participle"] and
              is_binary(id) and is_number(score) and score >= 0 ->
-        String.starts_with?(id, surface <> "|verb|")
+        Map.has_key?(@predicate_features, lemma) and
+          String.starts_with?(id, surface <> "|verb|")
       _ -> false
     end)
 
     matching_features = Enum.filter(features, fn
-      %{feature: :seated_posture, source_lemma: "sit",
+      %{feature: feature, source_lemma: lemma,
         source: :lemma_dictionary_definition,
         epistemic_status: :candidate_only, source_lemma_sense_id: id}
-        when is_binary(id) -> String.starts_with?(id, "sit|verb|")
+        when is_binary(lemma) and is_binary(id) ->
+        Map.get(@predicate_features, lemma) == feature and
+          String.starts_with?(id, lemma <> "|verb|")
       _ -> false
     end)
 
     case {valid_forms, matching_features} do
       {[form], [_ | _] = candidates} ->
-        feature = Enum.min_by(candidates, & &1.source_lemma_sense_id)
-        {:ok, "sit", form, feature}
+        matching = Enum.filter(candidates, &(&1.source_lemma == form.lemma))
+        case matching do
+          [] -> :unsupported
+          _ ->
+            feature = Enum.min_by(matching, & &1.source_lemma_sense_id)
+            {:ok, form.lemma, form, feature}
+        end
       _ -> :unsupported
     end
   end
@@ -151,15 +163,15 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
           {:and,
            {:and,
             {:and,
-             {:event_action, {:action_kind, :sit}, {:var, e1}},
+             {:event_action, {:action_kind, action}, {:var, e1}},
              {:event_tense, :past, {:var, e2}}},
             {:event_actor_kind, {:actor_kind, actor}, {:var, e3}}},
            {:event_spatial, relation, {:landmark_kind, landmark}, {:var, e4}}}},
-         actor, relation, landmark)
+         action, actor, relation, landmark)
        when is_binary(event) and event == e1 and event == e2 and
             event == e3 and event == e4, do: true
 
-  defp normal_form?(_, _, _, _), do: false
+  defp normal_form?(_, _, _, _, _), do: false
 
   defp symbol_word(value) when is_atom(value), do: Atom.to_string(value)
   defp symbol_word(_), do: nil
