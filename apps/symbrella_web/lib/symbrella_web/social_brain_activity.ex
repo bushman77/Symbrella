@@ -38,6 +38,30 @@ defmodule SymbrellaWeb.SocialBrainActivity do
     activity = Map.put(summary, :recorded_at_ms, System.system_time(:millisecond))
     Bus.broadcast(@topic, {:social_cognition, activity})
 
+    # Emit exactly one trace per completed thread rather than one per
+    # sentence, so the bounded Brain blackboard retains useful context.
+    :telemetry.execute(
+      [:core, :social, :cognitive_shadow],
+      Map.take(activity, [:segments, :lifg_choices, :atl_winners, :syntax_frames,
+        :dictionary_rows, :pos_covered_tokens, :processed_tokens,
+        :supported_interpretations, :neuron_stimuli_issued]),
+      %{
+        source: :colony_external, mode: :read_only_shadow,
+        analysis_scope: :thread_aggregate,
+        sentence_status: if(activity.supported_interpretations > 0,
+          do: :partially_interpreted, else: :not_yet_interpreted),
+        provenance: :external_unverified
+      }
+    )
+
+    :telemetry.execute(
+      [:core, :social, :neuron_observation],
+      %{stimuli_issued: activity.neuron_stimuli_issued,
+        inspected_segments: activity.segments},
+      %{source: :colony_external, mode: :transient_neural_observation,
+        analysis_scope: :thread_aggregate}
+    )
+
     :telemetry.execute(
       [:symbrella_web, :social, :analysis],
       Map.take(activity, [:segments, :lifg_choices, :atl_winners,
@@ -80,6 +104,12 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       source: :colony_external,
       mode: :read_only_shadow,
       neuron_stimuli_issued: count(segments, [:result, :brain_observation, :stimuli_issued]),
+      processed_tokens: count(segments, [:result, :token_count]),
+      pos_covered_tokens: count(segments, [:result, :syntax, :audit, :pos_covered_tokens]),
+      dictionary_rows: count(segments, [:result, :syntax, :audit, :ltm_source_rows]),
+      syntax_frames: Enum.reduce(segments, 0, fn segment, acc ->
+        acc + length(get_in(segment, [:result, :syntax, :signatures]) || [])
+      end),
       segments: length(segments),
       lifg_choices: count(segments, [:result, :lifg, :chosen_count]),
       atl_winners: count(segments, [:result, :atl, :winner_count]),
