@@ -79,6 +79,8 @@ defmodule SymbrellaWeb.SocialCognitiveReportTest do
 
     assert report.sections.original_post.understanding.interpreted_segments == 2
     assert Enum.map(report.sections.replies, & &1.understanding.interpreted_segments) == [2, 1]
+    assert length(report.sections.original_post.discourse.interpretations) == 2
+    assert Enum.map(report.sections.replies, &length(&1.discourse.interpretations)) == [2, 1]
     assert report.sections.original_post.author == "same_agent"
 
     # Same author across two sources must not produce fake intra-source
