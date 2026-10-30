@@ -44,6 +44,7 @@ defmodule Brain.LIFG.Stage1 do
   alias Brain.LIFG.Stage1.Boundary
   alias Brain.LIFG.GrammarEvidence
   alias Brain.LIFG.SemanticControl
+  alias Brain.LIFG.UsageRegister
   alias Brain.LIFG.SenseFocus
 
   @default_weights %{
@@ -236,6 +237,8 @@ defmodule Brain.LIFG.Stage1 do
           buckets: buckets,
           grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
           sense_focus?: Keyword.get(opts, :sense_focus?, true),
+          usage_register?: Keyword.get(opts, :usage_register?,
+            Application.get_env(:brain, :lifg_usage_register?, true)),
           semantic_control_opts: [
             enabled?: Keyword.get(opts, :semantic_control?,
               Application.get_env(:brain, :lifg_semantic_control?, true)),
@@ -911,6 +914,13 @@ defmodule Brain.LIFG.Stage1 do
             SemanticControl.apply(cal_scores, scored_rows, semantic_opts)
           end
 
+        # A weak historical-register prior applies only to explicitly marked
+        # senses with an attested same-word/POS ordinary alternative. Preserve
+        # every candidate and let the original full-slate softmax decide.
+        {cal_scores, usage_register} =
+          UsageRegister.adjust(cal_scores, cand_list, ctx.sent,
+            enabled?: ctx.usage_register?)
+
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
         probs = Numeric.softmax(logits)
 
@@ -1018,6 +1028,7 @@ defmodule Brain.LIFG.Stage1 do
           prob_margin: margin,
           weak?: margin_weak? or low_confidence?,
           semantic_control: semantic_control,
+          usage_register: usage_register,
           sense_focus: focus,
           # Live production breakdown, bounded to strongest context-supported
           # candidates. This diagnostic does not change the actual score.
