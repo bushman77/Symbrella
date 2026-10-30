@@ -335,7 +335,7 @@ defmodule Brain.Thalamus do
     {probe2, post_acc_score, acc_applied?} =
       if is_number(c) and alpha > 0.0 and c > 0.0 do
         c1 = clamp01(c)
-        s2 = clamp01(blended_score * (1.0 - alpha * c1))
+        s2 = acc_braked_score(blended_score, alpha, c1)
         {Map.put(probe1, :score, s2), s2, true}
       else
         {probe1, blended_score, false}
@@ -387,6 +387,18 @@ defmodule Brain.Thalamus do
 
   @impl GenServer
   def handle_info(_msg, state), do: {:noreply, state}
+
+  @doc """
+  Pure ACC attenuation for deterministic numerical property tests.
+
+  The live Thalamus applies this only when an ACC conflict is present and
+  both alpha and conflict are positive. The formula and clamp are unchanged.
+  """
+  @spec acc_braked_score(number(), number(), number()) :: float()
+  def acc_braked_score(score, alpha, conflict)
+      when is_number(score) and is_number(alpha) and is_number(conflict) do
+    clamp01(score * (1.0 - alpha * conflict))
+  end
 
   # ── Mood math ──────────────────────────────────────────────────────────────
 
