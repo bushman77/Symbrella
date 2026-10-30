@@ -141,6 +141,7 @@ defmodule Core.LIFG.Attach do
               alt_ids: alt_ids,
               semantic_control: Map.get(ch, :semantic_control),
               usage_register: Map.get(ch, :usage_register),
+              spatial_pp: Map.get(ch, :spatial_pp),
               sense_focus: Map.get(ch, :sense_focus),
               definition_context_evidence: Map.get(ch, :definition_context_evidence, []),
               # Full Stage1 post-softmax distribution. A second-pass LIFG
