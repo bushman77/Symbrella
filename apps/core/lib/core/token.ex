@@ -26,6 +26,7 @@ defmodule Core.Token do
   @enforce_keys [:phrase, :span, :n]
   defstruct index: nil,
             phrase: "",
+            norm: nil,
             span: {0, 0},
             mw: false,
             source: nil,
@@ -44,6 +45,7 @@ defmodule Core.Token do
   @type t :: %__MODULE__{
           index: nil | non_neg_integer(),
           phrase: String.t(),
+          norm: String.t() | nil,
           span: {non_neg_integer(), non_neg_integer()},
           mw: boolean(),
           instances: list(),
@@ -109,6 +111,7 @@ defmodule Core.Token do
       "index" -> :index
       "token_index" -> :index
       "phrase" -> :phrase
+      "norm" -> :norm
       "span" -> :span
       "mw" -> :mw
       "source" -> :source
@@ -144,20 +147,32 @@ defmodule Core.Token do
 
     # ── Step 2: Normalize whitespace ──
     s =
-      s
-      |> to_string()
-      |> String.trim()
-      |> String.replace(~r/\s+/u, " ")
+      if Keyword.get(opts, :preserve_source?, false) do
+        s
+      else
+        s |> to_string() |> String.trim() |> String.replace(~r/\s+/u, " ")
+      end
 
     # ── Step 3: Scan the normalized string into primitive tokens ──
     # Returns words and punctuation with BYTE spans.
     prim = scan_primitive_tokens(s)
 
     # ── Step 4: Derive the list of word tokens (order preserved) ──
-    word_tokens =
-      prim
-      |> Enum.with_index()
-      |> Enum.filter(fn {t, _i} -> t.kind == :word end)
+    # Sentence-final punctuation separates lexical phrase windows. Stable
+    # word indices do not include punctuation, even though source spans do.
+    {word_rev, _segment} =
+      Enum.reduce(prim, {[], 0}, fn
+        %{kind: :word} = word, {acc, segment} ->
+          {[Map.put(word, :segment, segment) | acc], segment}
+
+        %{kind: :punct, subpos: :sentence_final}, {acc, segment} ->
+          {acc, segment + 1}
+
+        _, state ->
+          state
+      end)
+
+    word_tokens = word_rev |> Enum.reverse() |> Enum.with_index()
 
     # ── Step 5: Build boundary word tokens and phrase candidates ──
     {word_base_tokens, phrase_candidates} =
@@ -176,6 +191,7 @@ defmodule Core.Token do
             |> Enum.map(fn p ->
               %__MODULE__{
                 phrase: p.text,
+                norm: p.text,
                 span: {p.start, p.stop},
                 n: 1,
                 mw: false,
@@ -259,10 +275,21 @@ defmodule Core.Token do
   # NOTE: start/stop are **BYTE OFFSETS** (end-exclusive) over the normalized sentence.
   defp scan_primitive_tokens(s) do
     graphemes = String.graphemes(s)
+    ahead = Enum.drop(graphemes, 1) ++ [nil]
 
     {idx, run, acc} =
-      Enum.reduce(graphemes, {0, nil, []}, fn g, {i, run, acc} ->
-        cls = char_class(g)
+      graphemes
+      |> Enum.zip(ahead)
+      |> Enum.reduce({0, nil, []}, fn {g, next}, {i, run, acc} ->
+        # Intra-word apostrophes are part of a contraction, not a boundary.
+        # A dotted initial or decimal dot can likewise be internal.
+        cls =
+          if (g in ["'", "’"] and run != nil and word_grapheme?(next)) or
+               (g == "." and dotted_word_continuation?(run, next)) do
+            :word
+          else
+            char_class(g)
+          end
         w = byte_size(g)
 
         case {cls, run} do
@@ -301,6 +328,18 @@ defmodule Core.Token do
     Enum.reverse(acc)
   end
 
+  defp word_grapheme?(g) when is_binary(g), do: char_class(g) == :word
+  defp word_grapheme?(_), do: false
+
+  defp dotted_word_continuation?({text, _, _}, next) do
+    word_grapheme?(next) and
+      (String.length(text) == 1 or
+         String.match?(text, ~r/^(?:\\p{L}\\.)+\\p{L}$/u) or
+         (String.match?(text, ~r/^\\d+$/u) and String.match?(next, ~r/^\\d$/u)))
+  end
+
+  defp dotted_word_continuation?(_, _), do: false
+
   # ---------- word token / phrase candidate builder ----------
 
   # word_tokens: [{%{text,start,stop,kind: :word}, primitive_index}, ...]
@@ -322,6 +361,7 @@ defmodule Core.Token do
 
           %__MODULE__{
             phrase: word.text,
+            norm: String.downcase(word.text),
             span: span,
             mw: false,
             confirmed?: false,
@@ -353,10 +393,10 @@ defmodule Core.Token do
         if max_here < 2 do
           []
         else
-          for n <- max_here..2//-1 do
-            {first, _} = Enum.at(word_tokens, wi)
-            {last, _} = Enum.at(word_tokens, wi + n - 1)
-
+          for n <- max_here..2//-1,
+              {first, _} = Enum.at(word_tokens, wi),
+              {last, _} = Enum.at(word_tokens, wi + n - 1),
+              first.segment == last.segment do
             phrase =
               word_tokens
               |> Enum.slice(wi, n)
