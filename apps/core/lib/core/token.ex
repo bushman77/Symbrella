@@ -165,8 +165,12 @@ defmodule Core.Token do
         %{kind: :word} = word, {acc, segment} ->
           {[Map.put(word, :segment, segment) | acc], segment}
 
-        %{kind: :punct, subpos: subpos}, {acc, segment}
-        when subpos in [:sentence_final, :line_break] ->
+        %{kind: :punct, subpos: :ambiguous_abbreviation_period}, state ->
+          state
+
+        %{kind: :punct}, {acc, segment} ->
+          # Unconfirmed phrase windows must be contiguous source words. Never
+          # pretend a comma, dash, linebreak or other separator is absent.
           {acc, segment + 1}
 
         _, state ->
