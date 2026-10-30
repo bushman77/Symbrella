@@ -759,9 +759,9 @@ defmodule SymbrellaWeb.SocialLive do
                         <h4 class="mb-1 text-sm font-semibold">Recognized topics (unverified)</h4>
                         <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(@segment.result.comprehension.recognized_topics, limit: 8, printable_limit: 300)}</pre>
                         <h4 class="mb-1 mt-2 text-sm font-semibold">Selected lexical candidates (not verified meanings)</h4>
-                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(@segment.result.comprehension.selected_lexical_candidates, limit: 8, printable_limit: 300)}</pre>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-zinc-300">{inspect(Map.get(@segment.result.comprehension, :selected_lexical_candidates, []), limit: 8, printable_limit: 300)}</pre>
                         <h4 class="mb-1 mt-2 text-sm font-semibold">Comprehension blockers</h4>
-                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-amber-200">{inspect(@segment.result.comprehension.reasons, limit: 8, printable_limit: 500)}</pre>
+                        <pre class="max-w-full whitespace-pre-wrap break-all text-xs text-amber-200">{inspect(Map.get(@segment.result.comprehension, :reasons, []), limit: 8, printable_limit: 500)}</pre>
                       </div>
                       <div>
                         <h4 class="mb-1 text-sm font-semibold">Attributed proposition</h4>
