@@ -36,6 +36,13 @@ defmodule Core.Semantic.Composition.LemmaGroundedPredicate do
       pattern: ~r/\b(?:upper body is upright|body in an upright position|be seated|is seated|sitting position|seated position|occupy a seat|rest(?:ing)? on (?:the|one's) buttocks)\b/ui
     },
     %{
+      # Attested sleep|verb|1 explicitly describes reduced consciousness;
+      # other senses of "sleep" remain independent, unclassified candidates.
+      feature: :sleep_state,
+      family: :consciousness_state,
+      pattern: ~r/\brest in a state of reduced consciousness\b/ui
+    },
+    %{
       feature: :physical_motion,
       family: :movement,
       pattern: ~r/\b(?:move from one place to another|move from one location to another|travel from one place to another|change location by moving)\b/ui
