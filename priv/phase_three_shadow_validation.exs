@@ -4,7 +4,7 @@
 # Phase 3 shadow-only end-to-end diagnostic against the production Core pipeline.
 # Core.resolve_input/2 executes ordinary runtime memory/experience side effects.
 # The Phase 3 Ledger flag is explicitly enabled ONLY for this probe's sessions.
-# No live answer/planner integration is enabled. Ledger sessions are cleared on
+# Response attachment is explicitly opt-in and disabled by default. Ledger sessions are cleared on
 # exit; other ordinary production side effects are not rolled back.
 
 defmodule PhaseThreeShadowValidation do
@@ -22,10 +22,11 @@ defmodule PhaseThreeShadowValidation do
   @samples 25
 
   def run do
-    ids = for _ <- 1..5, do: unique_session()
+    ids = for _ <- 1..8, do: unique_session()
 
     try do
-      [sit_id, sleep_id, off_id, ambiguous_id, intervention_id] = ids
+      [sit_id, sleep_id, off_id, ambiguous_id, intervention_id,
+       gated_answer_id, gated_ambiguity_id, gated_stale_id] = ids
 
       accepted = Enum.zip(@positives, [sit_id, sleep_id])
       |> Enum.map(fn {{sentence, predicate, lifg_id}, session} ->
@@ -183,6 +184,66 @@ defmodule PhaseThreeShadowValidation do
       require!(Ledger.entries(sleep_id) |> Enum.count() == 1,
         "other session was mutated during ambiguous probe")
 
+      # Controlled FULL response attachment checks (separate sessions):
+      # the new gate runs before episodic fallback, but remains opt-in.
+      Core.resolve_input("The bird slept on the fence.",
+        session_id: gated_answer_id,
+        response: :off, finite_past_discourse_ledger?: true)
+
+      {response_us, answered} = :timer.tc(fn ->
+        Core.resolve_input("What was the bird doing?",
+          session_id: gated_answer_id,
+          finite_past_discourse_ledger?: true,
+          finite_past_response_arbitration?: true)
+      end)
+
+      require!(is_binary(answered.response_text) and
+                 String.contains?(answered.response_text, "bird as sleeping") and
+                 String.contains?(answered.response_text, "not an independently verified event"),
+        "opt-in production response was not speaker-qualified")
+      require!(Map.get(answered.response_meta, :status) == :speaker_description_candidate and
+                 Map.get(answered.response_meta, :response_source) ==
+                   :symbolic_finite_past_report and
+                 Map.get(answered.response_meta, :factual_authority?) == false and
+                 Map.get(answered.response_meta, :llm_called?) == false,
+        "opt-in production response did not carry the safe metadata")
+
+      Core.resolve_input("The bird sat on the fence.",
+        session_id: gated_ambiguity_id,
+        response: :off, finite_past_discourse_ledger?: true)
+      Core.resolve_input("The bird slept on the fence.",
+        session_id: gated_ambiguity_id,
+        response: :off, finite_past_discourse_ledger?: true)
+
+      ambiguous_response = Core.resolve_input("Where was the bird?",
+        session_id: gated_ambiguity_id,
+        finite_past_discourse_ledger?: true,
+        finite_past_response_arbitration?: true)
+
+      require!(Map.get(ambiguous_response.response_meta, :status) ==
+                 :referent_ambiguous and
+                 String.contains?(ambiguous_response.response_text || "",
+                   "multiple descriptions"),
+        "full response path guessed a referent instead of clarifying")
+
+      Core.resolve_input("The bird sat on the fence.",
+        session_id: gated_stale_id,
+        response: :off, finite_past_discourse_ledger?: true)
+      Core.resolve_input("An unrelated question?",
+        session_id: gated_stale_id,
+        response: :off, finite_past_discourse_ledger?: true)
+
+      stale_response = Core.resolve_input("Where was the bird?",
+        session_id: gated_stale_id,
+        finite_past_discourse_ledger?: true,
+        finite_past_response_arbitration?: true)
+
+      require!(Map.get(stale_response.response_meta, :status) ==
+                 :continuity_unresolved and
+                 String.contains?(stale_response.response_text || "",
+                   "cannot safely connect"),
+        "full response path retrieved stale episodic memory")
+
       IO.inspect(%{
         status: :passed,
         scope: :shadow_only,
@@ -193,9 +254,11 @@ defmodule PhaseThreeShadowValidation do
         unrelated_turn: :abstained,
         cross_session: :isolated,
         readout_observation_only?: true,
-        arbitration_observation_only?: true,
+        arbitration_observation_only?: false,
+        explicit_opt_in_response_path?: true,
+        opt_in_response_us: response_us,
         legacy_fallback_blocked_on_ambiguity?: true,
-        live_answer_path_enabled?: false,
+        live_answer_path_default_enabled?: false,
         complete_phase_three?: false,
         samples_per_question_timing_case: @samples,
         warning: :production_pipeline_has_normal_runtime_side_effects
