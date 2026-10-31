@@ -49,9 +49,10 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
                                                   &1.span == {0, 5})),
          true <- Enum.member?(List.wrap(Map.get(si, :sentence_signatures)), signature),
          :ok <- validate_roles(si, signature),
-         %{status: :forms_attested, requested_lemmas: ["sit"]} = discovered <-
+         %{status: :forms_attested, requested_lemmas: [lemma]} = discovered <-
            LemmaGroundedPredicate.discover(si, 2),
-         {:ok, rows} <- safe_lookup(lookup, "sit"),
+         true <- lemma in ["sit", "sleep"],
+         {:ok, rows} <- safe_lookup(lookup, lemma),
          %{status: :predicate_feature_candidates} = grounded <-
            LemmaGroundedPredicate.ground(discovered, rows),
          {:ok, proof} <- FinitePastLocative.compose(%{
