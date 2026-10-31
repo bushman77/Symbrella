@@ -98,7 +98,7 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
         forms: [Map.get(premises, :form_witness)],
         feature_hypotheses: [Map.get(premises, :lemma_feature_candidate)]
       },
-      predicate_surface: get_in(premises, [:form_witness, :surface]),
+      predicate_surface: nested(premises, [:form_witness, :surface]),
       actor: nested(proof, [:event_semantics, :actor, :kind]) |> symbol_word(),
       preposition: nested(proof, [:event_semantics, :spatial, :relation]) |> symbol_word(),
       landmark: nested(proof, [:event_semantics, :spatial, :landmark_kind]) |> symbol_word()
