@@ -27,6 +27,7 @@ defmodule Core.Discourse.Ledger do
   alias Core.Syntax.Signatures
   alias Core.Semantic.ProvisionalInterpretation
   alias Core.Semantic.ParticipantQuestions
+  alias Core.Semantic.FinitePastDiscourse
 
   @fuzzy_confirmation_window_ms 5 * 60 * 1_000
 
@@ -34,7 +35,7 @@ defmodule Core.Discourse.Ledger do
   @max_public_candidates 5
   @max_clarified_followup_questions 3
 
-  @doc "Store the current independently interpreted user turn, without altering SI."
+  @doc "Store independently interpreted user evidence; finite-past reports require explicit opt-in."
   @spec record(map(), keyword()) :: map()
   def record(si, opts \\ [])
   def record(%{} = si, opts) when is_list(opts) do
@@ -44,7 +45,7 @@ defmodule Core.Discourse.Ledger do
     if enabled?(opts) and valid_session?(session) and
          Map.get(si, :source) in [:user, :prod, :test] and
          is_binary(sentence) and sentence != "" do
-      payload = semantic_record(si)
+      payload = semantic_record(si, opts)
       case owner_append(session, payload) do
         {:ok, sequence} ->
           Trace.append(si, :discourse_ledger,
@@ -445,7 +446,7 @@ defmodule Core.Discourse.Ledger do
       do: Owner.clear(session), else: :ok
   end
 
-  defp semantic_record(si) do
+  defp semantic_record(si, opts) do
     case fuzzy_dialogue_record(si) do
       %{} = record -> record
       _ ->
@@ -454,13 +455,13 @@ defmodule Core.Discourse.Ledger do
           _ ->
             case unresolved_predicate_record(si) do
               %{} = record -> record
-              _ -> semantic_record_without_fuzzy(si)
+              _ -> semantic_record_without_fuzzy(si, opts)
             end
         end
     end
   end
 
-  defp semantic_record_without_fuzzy(si) do
+  defp semantic_record_without_fuzzy(si, opts) do
     case TemporalSentence.verified(si) do
       {:ok, meaning} -> temporal_claim_record(meaning)
       :not_applicable ->
@@ -469,7 +470,7 @@ defmodule Core.Discourse.Ledger do
           :not_applicable ->
             case TemporalClaimReconciliation.verified(si) do
               {:ok, meaning} -> temporal_request_record(meaning)
-              :not_applicable -> ordinary_semantic_record(si)
+              :not_applicable -> ordinary_semantic_record(si, opts)
             end
         end
     end
@@ -836,7 +837,7 @@ defmodule Core.Discourse.Ledger do
 
   defp replay_fuzzy_source(_, _, _), do: :not_applicable
 
-  defp ordinary_semantic_record(si) do
+  defp ordinary_semantic_record(si, opts) do
     core = %{kind: :uninterpreted, status: :no_verified_semantics,
       factual_authority?: false}
 
@@ -905,7 +906,33 @@ defmodule Core.Discourse.Ledger do
           referent_verified?: false
         })
 
-      _ -> core
+      _ -> maybe_finite_past_record(si, opts, core)
+    end
+  end
+
+  # Phase 3 gate 2 is *opt-in* until cross-turn ambiguity, speech-act and
+  # retrieval policies are independently validated. Never convert a formal
+  # event property into an assertion or a fact. Retain only bounded proof
+  # fingerprints and typed descriptor atoms; no raw sentence or LIFG slate.
+  defp maybe_finite_past_record(si, opts, default) do
+    if Keyword.get(opts, :finite_past_discourse_ledger?, false) == true do
+      lookup = Keyword.get(opts, :finite_past_lemma_lookup, &Db.brain_cells_for_norm/1)
+
+      case FinitePastDiscourse.project(si, lookup: lookup) do
+        {:ok, %{kind: :reported_finite_past_locative_candidate,
+                status: :provisional,
+                event_existence: :not_asserted,
+                event_occurrence_verified?: false,
+                referent_identity_verified?: false,
+                semantic_compatibility_proven?: false,
+                factual_authority?: false} = candidate} ->
+          candidate
+
+        _ ->
+          default
+      end
+    else
+      default
     end
   end
 
