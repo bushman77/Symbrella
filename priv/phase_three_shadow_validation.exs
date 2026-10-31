@@ -87,6 +87,19 @@ defmodule PhaseThreeShadowValidation do
         }
       end)
 
+      # A fully shaped record is still not an authorization to write:
+      # only the owner-side evidence revalidation path can append this kind.
+      saved = hd(Ledger.entries(sit_id))
+      require!(Core.Discourse.Ledger.Owner.append(sit_id, saved) ==
+                 {:error, :verified_finite_past_required},
+        "owner allowed a raw finite-past record")
+      require!(GenServer.call(Core.Discourse.Ledger.Owner,
+                   {:append, sit_id, %{saved | source_turn_sha256: "forged"}}) ==
+                 {:error, :verified_finite_past_required},
+        "owner accepted forged finite-past evidence")
+      require!(length(Ledger.entries(sit_id)) == 1,
+        "raw rejected writes mutated sequence state")
+
       # Production default must remain off without explicit Phase 3 opt-in.
       Core.resolve_input("The bird sat on the fence.", session_id: off_id)
       require!(Enum.all?(Ledger.entries(off_id),
@@ -133,6 +146,7 @@ defmodule PhaseThreeShadowValidation do
         scope: :shadow_only,
         accepted: accepted,
         default_gate: :disabled,
+        raw_owner_append: :rejected,
         repeated_actor_kind: :ambiguous,
         unrelated_turn: :abstained,
         cross_session: :isolated,
