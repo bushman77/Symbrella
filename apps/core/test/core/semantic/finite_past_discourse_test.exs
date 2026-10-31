@@ -988,4 +988,28 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
       response: :off, finite_past_response_arbitration?: true) == question
   end
 
+
+  test "LiveView fast path skips only opted-in terminal finite-past arbitration" do
+    source = si("sat")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    refute ResponseGate.skip_legacy_fast_path?(
+      source.session_id, "Where was the bird?", false)
+    assert ResponseGate.skip_legacy_fast_path?(
+      source.session_id, "Where was the bird?", true)
+    refute ResponseGate.skip_legacy_fast_path?(
+      source.session_id, "Where is the bird?", true)
+    refute ResponseGate.skip_legacy_fast_path?(
+      "different-session", "Where was the bird?", true)
+    refute ResponseGate.skip_legacy_fast_path?(
+      nil, "Where was the bird?", true)
+
+    Ledger.record(%{source | sentence: "An unrelated turn.",
+                            finite_past_locative_derivation: nil})
+    assert ResponseGate.skip_legacy_fast_path?(
+      source.session_id, "Where was the bird?", true)
+  end
+
 end
