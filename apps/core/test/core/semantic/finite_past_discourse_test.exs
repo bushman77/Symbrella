@@ -5,6 +5,7 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
   alias Core.Semantic.FinitePastDiscourse
   alias Core.Semantic.FinitePastDiscourseQuestion
   alias Core.Response.FinitePastDiscourseReadout
+  alias Core.Response.FinitePastDiscourseArbitration, as: Arbitration
   alias Core.Discourse.Ledger.Owner
   alias Core.Semantic.Composition.FinitePastLocativeIntegration
   alias Core.SemanticInput
@@ -707,6 +708,130 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
                             finite_past_locative_derivation: nil})
     assert :not_applicable == FinitePastDiscourseReadout.read(
       source.session_id, "Where was the bird?")
+  end
+
+
+
+  test "arbitration is default off even when a valid report is admitted" do
+    source = si("sat")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    assert :pass = Arbitration.decide(source.session_id, "Where was the bird?")
+    assert :pass = Arbitration.decide(source.session_id, "Where was the bird?",
+      finite_past_response_arbitration?: false)
+    assert {:fallback, :legacy_reply} = Arbitration.route(
+      source.session_id, "Where was the bird?", fn -> :legacy_reply end)
+
+    assert Enum.at(source.lifg_choices, 2).id == "sat|noun|1"
+  end
+
+  test "opt-in arbitration returns qualified report and suppresses fallback" do
+    source = si("slept")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    parent = self()
+    dangerous_fallback = fn ->
+      send(parent, :wrong_episodic_answer)
+      {"An unrelated historical response.", %{}}
+    end
+
+    assert {:answer, text, meta} = Arbitration.route(
+      source.session_id, "What was the bird doing?", dangerous_fallback,
+      finite_past_response_arbitration?: true)
+
+    assert String.contains?(text, "bird as sleeping")
+    assert String.contains?(text, "not an independently verified event")
+    assert meta.arbitration == :finite_past_report
+    assert meta.status == :speaker_description_candidate
+    assert meta.response_source == :symbolic_finite_past_report_readout
+    refute meta.event_occurrence_verified?
+    refute meta.referent_identity_verified?
+    refute meta.factual_authority?
+    refute meta.llm_called?
+    refute_received :wrong_episodic_answer
+    assert Ledger.entries(source.session_id) |> length() == 1
+  end
+
+  test "multiple actor-kind reports require clarification and never hit fallback" do
+    first = si("sat")
+    second = %{si("slept") | session_id: first.session_id}
+    cleanup(first.session_id)
+    Ledger.record(first, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(second, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    assert {:clarify, text, meta} = Arbitration.route(
+      first.session_id, "Where was the bird?",
+      fn -> flunk("ambiguous report fell through to old episodic memory") end,
+      finite_past_response_arbitration?: true)
+
+    assert String.contains?(text, "multiple descriptions")
+    assert meta.status == :referent_ambiguous
+    assert meta.source_turn_sequences == [2, 1]
+    assert meta.arbitration == :finite_past_report
+    refute meta.factual_authority?
+  end
+
+  test "intervening unrelated turn blocks fallback instead of reviving stale episode" do
+    source = si("slept")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    Ledger.record(%{source | sentence: "Unrelated conversation.",
+                            finite_past_locative_derivation: nil})
+
+    assert {:abstain, text, meta} = Arbitration.route(
+      source.session_id, "Where was the bird?",
+      fn -> flunk("stale report fell through to older memory") end,
+      finite_past_response_arbitration?: true)
+
+    assert String.contains?(text, "cannot safely connect")
+    assert meta.status == :continuity_unresolved
+    assert meta.response_source == :symbolic_finite_past_report_arbitration
+    assert meta.arbitration == :finite_past_report
+    refute meta.referent_identity_verified?
+    refute meta.factual_authority?
+    refute meta.llm_called?
+  end
+
+  test "different actor or unsupported question preserves ordinary memory behavior" do
+    source = si("sat")
+    other = si("slept")
+    cleanup(source.session_id)
+    cleanup(other.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    for {session, question} <- [
+          {source.session_id, "Where was the cat?"},
+          {source.session_id, "Where is the bird?"},
+          {source.session_id, "What was it doing?"},
+          {source.session_id, "What was the bird doing"},
+          {other.session_id, "Where was the bird?"}
+        ] do
+      assert {:fallback, :ordinary} = Arbitration.route(session, question,
+        fn -> :ordinary end, finite_past_response_arbitration?: true)
+    end
+  end
+
+  test "no ledger reports preserves fallback and never fabricates an answer" do
+    source = si("sat")
+    cleanup(source.session_id)
+    assert {:fallback, :none_found} = Arbitration.route(
+      source.session_id, "Where was the bird?",
+      fn -> :none_found end, finite_past_response_arbitration?: true)
+    assert :pass == Arbitration.decide(nil, "Where was the bird?",
+      finite_past_response_arbitration?: true)
+    assert :pass == Arbitration.decide(source.session_id, nil,
+      finite_past_response_arbitration?: true)
+    assert :pass == Arbitration.decide(source.session_id, "Where was the bird?",
+      [42])
   end
 
 
