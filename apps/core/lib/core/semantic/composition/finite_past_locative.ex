@@ -19,7 +19,7 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
   @event_property {:arrow, :event, :truth}
   # Explicit lemma-to-feature admission policy. Extend only with independently
   # validated predicate evidence; a morphological form alone is insufficient.
-  @predicate_features %{"sit" => :seated_posture}
+  @predicate_features %{"sit" => :seated_posture, "sleep" => :sleep_state}
 
   @spec compose(map()) :: {:ok, map()} | :unsupported
   def compose(%{signature: signature, grounding: grounding, actor: actor,
