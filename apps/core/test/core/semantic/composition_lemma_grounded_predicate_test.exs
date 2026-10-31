@@ -97,6 +97,34 @@ defmodule Core.Semantic.CompositionLemmaGroundedPredicateTest do
              grounded.feature_hypotheses
   end
 
+  test "slept grounds an explicit sleep-state definition but not unrelated senses" do
+    input = si("slept", "simple past and past participle", "sleep", "slept|verb|1")
+    discovery = Predicate.discover(input, 3)
+    assert discovery.status == :forms_attested
+    assert discovery.requested_lemmas == ["sleep"]
+
+    rows = [
+      %{id: "sleep|verb|1", norm: "sleep", pos: "verb",
+        definition: "(intransitive) To rest in a state of reduced consciousness."},
+      %{id: "sleep|verb|2", norm: "sleep", pos: "verb",
+        definition: "(euphemistic, idiomatic) To have sexual intercourse."},
+      %{id: "sleep|verb|5", norm: "sleep", pos: "verb",
+        definition: "(euphemistic) To be dead."}
+    ]
+
+    grounded = Predicate.ground(discovery, rows)
+    assert grounded.status == :predicate_feature_candidates
+    assert Enum.map(grounded.feature_hypotheses, &{&1.feature, &1.source_lemma_sense_id}) ==
+             [{:sleep_state, "sleep|verb|1"}]
+    assert length(grounded.lemma_senses) == 3
+    assert grounded.selected_lifg_id == "slept|verb|1"
+    refute grounded.semantic_compatibility_proven?
+
+    unrelated_only = Predicate.ground(discovery, tl(rows))
+    assert unrelated_only.status == :lemma_senses_unclassified
+    assert unrelated_only.feature_hypotheses == []
+  end
+
   test "a morphological tag is required, even if a string contains 'of sit'" do
     input = si("sat", "simple past and past participle", "sit", "sat|noun|1")
     altered =
