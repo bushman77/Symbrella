@@ -46,7 +46,7 @@ Gate 1 exit test:
 mix test apps/core/test/core/semantic/finite_past_discourse_test.exs
 ```
 
-### Gate 2 — explicit opt-in provisional Ledger admission (implemented, testing pending)
+### Gate 2 — explicit opt-in provisional Ledger admission (verified in targeted tests)
 
 - `Core.Discourse.Ledger.record/2` accepts
   `finite_past_discourse_ledger?: true` to *explicitly* opt in. Existing
@@ -71,20 +71,43 @@ mix test apps/core/test/core/semantic/finite_past_discourse_test.exs
   to ignore finite-past candidates; Gate 3 must establish identity ambiguity,
   corrective turns and tense-aligned question binding before any retrieval.
 - Tests: `apps/core/test/core/semantic/finite_past_discourse_test.exs`.
-  Gate 2 is not considered verified until this and the pre-existing Ledger
-  regression suite both pass.
+  Targeted tests and the pre-existing Ledger regression suite passed in the
+  user's local environment. Full umbrella regression remains a separate gate.
 
-### Gate 3 — constrained cross-turn question projection (not implemented)
+### Gate 3 — opt-in read-only past-question projection (implemented, testing pending)
 
-- Bind only explicitly matched, in-scope question roles. Extend
-  `Core.Semantic.ParticipantQuestions` with a separate past-tense path only
-  if the existing parser cannot express the required role.
-- Treat `bird` as a **kind**, never a unique identity without separate
-  antecedent evidence; multiple possible events must produce ambiguity.
-- Handle `What was the bird doing?` and `Where was the bird?` with
-  tense-aligned answers only after verified same-session provenance.
-- Block stale, cross-session, contradictory and unresolved turns; never
-  answer by extracting a string from the previous sentence.
+- `Core.Semantic.FinitePastDiscourseQuestion.project/2` is a **separate,
+  explicitly invoked read-only API**, not a planner hook, Ledger.resolve
+  extension, or generated answer. Its inputs are a session ID and an exact
+  past-tense question.
+- It recognizes only `What was the bird doing?` / `Where was the bird?`
+  (also `cat` and `dog` as closed actor kinds). Present tense, bare pronouns,
+  quoted speech, vague questions and compound forms abstain.
+- The newest Ledger entry must be an eligible, validated, same-actor
+  `:reported_finite_past_locative_candidate`. It must carry the expected
+  admission-time provenance flags, hashes, and explicit **nonfactual** status.
+- `bird` denotes a *kind*, not a proven unique individual. If multiple
+  finite-past reports for the same actor kind survive in the session, return
+  `{:ambiguous, sources}` without recency guessing. Another known mention
+  of that actor-kind without a valid report is an abstention barrier.
+- Even a single match returns **only** a typed reported predicate or location
+  descriptor, `:speaker_description_candidate`, with a source sequence and
+  proof digest. It does not render a response string or assert event occurrence.
+- Any later unrelated turn blocks retrieval until a future explicit continuity
+  policy is proven. The Ledger remains in-memory and session-scoped.
+- **Proof fingerprints identify admitted evidence but are not cryptographic
+  proof of trustworthy writes.** Readback depends on the trusted Ledger
+  admission path; no original SI/proof is retained to replay at read time.
+  This is why the module remains unconnected to live responses.
+- Run the Phase 3 tests and prior Ledger regressions:
+
+```bash
+mix test apps/core/test/core/semantic/finite_past_discourse_test.exs apps/core/test/core/discourse/ledger_test.exs
+```
+
+- Before enabling user-visible answers, audit stable speaker-commitment evidence,
+  correction/negation barriers, repeated mentions, safe reference identity,
+  and whether ledger admissions can be trusted by all internal callers.
 
 ### Gate 4 — production and regression gate (not implemented)
 
