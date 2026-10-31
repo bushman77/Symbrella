@@ -493,19 +493,70 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
       source.session_id, "What was the bird doing?")
   end
 
-  test "forged or invalid newest record blocks fallback to an older valid report" do
+  test "Owner refuses forged or replayed finite-past records without source proof" do
     source = si("sat")
     cleanup(source.session_id)
 
     Ledger.record(source, finite_past_discourse_ledger?: true,
       finite_past_lemma_lookup: &lookup/1)
     good = hd(Ledger.entries(source.session_id))
+    assert good.seq == 1
 
+    assert {:error, :verified_finite_past_required} =
+      Owner.append(source.session_id, good)
+
+    assert {:error, :verified_finite_past_required} =
+      Owner.append(source.session_id, %{good | source_turn_sha256: "invalid"})
+
+    # Calling the GenServer directly must not bypass the public API's guard.
+    assert {:error, :verified_finite_past_required} =
+      GenServer.call(Owner, {:append, source.session_id, good})
+
+    assert Enum.map(Ledger.entries(source.session_id), & &1.seq) == [1]
+    assert {:ok, %{description: %{lemma: :sit}}} =
+      FinitePastDiscourseQuestion.project(source.session_id,
+        "What was the bird doing?")
+
+    # Other kinds remain appendable; an intervening unsupported turn
+    # conservatively blocks the older source rather than reviving it.
     assert {:ok, 2} = Owner.append(source.session_id,
-      %{good | source_turn_sha256: "invalid", seq: 2})
+      %{kind: :uninterpreted, status: :no_verified_semantics,
+        factual_authority?: false})
 
     assert :not_applicable = FinitePastDiscourseQuestion.project(
       source.session_id, "Where was the bird?")
+  end
+
+  test "owner admission independently rejects mismatched session, proof and descriptor" do
+    source = si("slept")
+    cleanup(source.session_id)
+
+    assert {:ok, candidate} =
+      FinitePastDiscourse.project(source, lookup: &lookup/1)
+
+    altered = %{candidate | predicate: :sit}
+    assert {:error, :invalid_finite_past_evidence} =
+      Owner.append_verified_finite_past(source.session_id, source, altered, &lookup/1)
+
+    assert {:error, :invalid_finite_past_evidence} =
+      Owner.append_verified_finite_past("different-session", source, candidate, &lookup/1)
+
+    stale = %{source | sentence: "The bird sat on the fence."}
+    assert {:error, :invalid_finite_past_evidence} =
+      Owner.append_verified_finite_past(source.session_id, stale, candidate, &lookup/1)
+
+    assert {:error, :invalid_finite_past_evidence} =
+      Owner.append_verified_finite_past(source.session_id, source, candidate,
+        fn "sleep" -> [] end)
+
+    assert Ledger.entries(source.session_id) == []
+
+    assert {:ok, 1} = Owner.append_verified_finite_past(
+      source.session_id, source, candidate, &lookup/1)
+
+    assert [%{kind: :reported_finite_past_locative_candidate,
+              predicate: :sleep, seq: 1, factual_authority?: false}] =
+      Ledger.entries(source.session_id)
   end
 
   test "closed past-question grammar rejects present, pronouns, and malformed input" do
