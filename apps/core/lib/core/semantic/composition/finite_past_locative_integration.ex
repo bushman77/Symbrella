@@ -51,7 +51,7 @@ defmodule Core.Semantic.Composition.FinitePastLocativeIntegration do
          :ok <- validate_roles(si, signature),
          %{status: :forms_attested, requested_lemmas: [lemma]} = discovered <-
            LemmaGroundedPredicate.discover(si, 2),
-         true <- lemma in ["sit", "sleep"],
+         true <- FinitePastLocative.supported_lemma?(lemma),
          {:ok, rows} <- safe_lookup(lookup, lemma),
          %{status: :predicate_feature_candidates} = grounded <-
            LemmaGroundedPredicate.ground(discovered, rows),
