@@ -17,7 +17,8 @@ defmodule PhaseTwoFinalValidation do
   ]
   @negative [
     "The bird is sleeping on the fence.",
-    "The bird slept into the tree."
+    "The bird slept into the tree.",
+    "The bird walked on the fence."
   ]
   @samples 25
 
@@ -70,7 +71,7 @@ defmodule PhaseTwoFinalValidation do
           predicate: predicate,
           proof_valid?: true,
           selected_lifg_id: Map.get(selected, :id),
-          past_attachment_latency_us: compare_attachment_latency(blank)
+          past_attachment_latency_us: compare_attachment_latency(blank, true)
         }
       end)
 
@@ -83,7 +84,8 @@ defmodule PhaseTwoFinalValidation do
         %{
           sentence: sentence,
           finite_past_proof: nil,
-          original_composition_kind: composition_kind(si)
+          original_composition_kind: composition_kind(si),
+          past_attachment_latency_us: compare_attachment_latency(si, false)
         }
       end)
 
@@ -106,13 +108,13 @@ defmodule PhaseTwoFinalValidation do
     :ok
   end
 
-  defp compare_attachment_latency(si) do
+  defp compare_attachment_latency(si, expect_proof?) do
     # Warm up once, so first-use compilation isn't counted.
     _ = FinitePastLocativeIntegration.attach(si, finite_past_locative?: false)
     _ = FinitePastLocativeIntegration.attach(si)
 
-    disabled = measure(si, finite_past_locative?: false)
-    enabled = measure(si, [])
+    disabled = measure(si, [finite_past_locative?: false], false)
+    enabled = measure(si, [], expect_proof?)
     %{
       disabled_p50_us: percentile(disabled, 50),
       disabled_p95_us: percentile(disabled, 95),
@@ -122,15 +124,18 @@ defmodule PhaseTwoFinalValidation do
     }
   end
 
-  defp measure(si, opts) do
+  defp measure(si, opts, expect_proof?) do
     Enum.map(1..@samples, fn _ ->
       {elapsed, updated} = :timer.tc(fn ->
         FinitePastLocativeIntegration.attach(si, opts)
       end)
 
       if Keyword.get(opts, :finite_past_locative?, true) do
-        require!(is_map(updated.finite_past_locative_derivation),
-          "timed default-on replay unexpectedly abstained")
+        require!(is_map(updated.finite_past_locative_derivation) == expect_proof?,
+          "timed default-on replay disagreed with expected derivation status")
+        require!(Map.delete(updated, :finite_past_locative_derivation) ==
+                   Map.delete(si, :finite_past_locative_derivation),
+          "timed default-on replay changed unrelated SemanticInput fields")
       else
         require!(updated == si, "timed opt-out changed SemanticInput")
       end
