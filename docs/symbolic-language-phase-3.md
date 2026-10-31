@@ -132,11 +132,14 @@ mix test
 mix run priv/phase_three_shadow_validation.exs
 ```
 
-- The user confirmed the initial production shadow probe passed on
+- The user confirmed the *hardened* production shadow probe passed on
   October 31, 2026: both predicates retained their expected LIFG winner,
-  default gate stayed disabled, repeated actors remained ambiguous, and
-  unrelated turns/session isolation abstained as intended. The report's
-  `complete_phase_three?: false` remains authoritative for status.
+  default gate stayed disabled, repeated actors remained ambiguous, unrelated
+  turns/session isolation abstained, and `raw_owner_append: :rejected`.
+  Their full umbrella suite reported **2,717 passed, 3 skipped**, with
+  **31 passed** in the two targeted test files. Nonfatal compiler warnings
+  were present. The report's `complete_phase_three?: false` remains
+  authoritative for the broader workstream.
 - A trust-boundary hardening change now requires **owner-side independent
   revalidation** of any finite-past Ledger entry against its current
   `SemanticInput` before ETS admission. `Ledger.Owner.append/2` and a
@@ -155,6 +158,39 @@ mix run priv/phase_three_shadow_validation.exs
   and dictionary lookup failure.
 - No live response planning, speaker-commitment claim, real-world event
   assertion, or automatic LIFG/learning change is authorized by the probe.
+
+### Gate 5 — speaker-qualified readout and live precedence audit (in progress)
+
+- Added `Core.Response.FinitePastDiscourseReadout.read/2`, an **explicit,
+  read-only diagnostic API** that realizes only the typed predicate/location
+  or ambiguity result already returned by the Gate 3 question projector.
+- It uses closed lexical forms (`sit` -> "sitting", `sleep` -> "sleeping"),
+  describes **what an earlier sentence said**, and always states that the
+  described event was not independently verified.
+- Multiple same-kind reports produce an explicit ambiguity message; stale
+  intervening turns, cross-session requests and unsupported questions abstain.
+  No response is produced from a general dictionary lookup or language model.
+- This is **not** connected to `Core.Response.plan/2`,
+  `Core.Response.Memory.reply_for/1`, or LiveView Chat. It cannot override the
+  existing episodic, temporal, spatial or attention response policies.
+- Added 3 focused tests (26 in the Phase 3 file) and extended the production
+  shadow validation to check readout qualification, ambiguity and abstention.
+  **These new readout changes have not yet been locally validated.**
+- Next: check how live response-memory ordering handles `{:ambiguous, ...}`
+  and `:not_applicable` before wiring the adapter. If past-tense retrieval
+  declines because of an intervening turn or unresolved reference, existing
+  owner-wide episodic answers must not silently supply an unrelated answer.
+  This needs an explicit arbitration contract and regression tests.
+- Keep any eventual live feature behind its own default-off gate; the
+  opt-in Ledger admission flag is separate.
+
+Run after pulling the readout change:
+
+```bash
+mix test apps/core/test/core/semantic/finite_past_discourse_test.exs apps/core/test/core/discourse/ledger_test.exs
+mix test
+mix run priv/phase_three_shadow_validation.exs
+```
 
 ## LIFG sense-resolution workstream
 
