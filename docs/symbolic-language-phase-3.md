@@ -132,11 +132,27 @@ mix test
 mix run priv/phase_three_shadow_validation.exs
 ```
 
-- Gate 4 remains open even after a passing probe until a provenance-trust
-  review establishes whether every write into the Ledger is admitted through
-  the verified Core path. `Ledger.Owner.append/2` can receive arbitrary maps
-  from internal callers; a structurally valid digest alone does **not**
-  authenticate re-derivation of the original proof.
+- The user confirmed the initial production shadow probe passed on
+  October 31, 2026: both predicates retained their expected LIFG winner,
+  default gate stayed disabled, repeated actors remained ambiguous, and
+  unrelated turns/session isolation abstained as intended. The report's
+  `complete_phase_three?: false` remains authoritative for status.
+- A trust-boundary hardening change now requires **owner-side independent
+  revalidation** of any finite-past Ledger entry against its current
+  `SemanticInput` before ETS admission. `Ledger.Owner.append/2` and a
+  direct `{:append, ...}` GenServer call reject the special record kind.
+  `Ledger.record/2` routes only that kind via the separate verified owner
+  entry point, preserving all other record types. The source/proof fingerprints
+  are audit identifiers, *not* self-authenticating proof tokens.
+- This preserves the original default-off opt-in and keeps the answer/planner
+  path disconnected. The owner audit still assumes trusted application
+  callers and a canonical lemma lookup; test-only lookup injection is not a
+  production authenticity mechanism.
+- **The hardened admission implementation has not yet been retested.**
+  Rerun the targeted suite, full umbrella suite, and the shadow probe before
+  marking Gate 4 passed. Check the new owner-negative tests for tampered
+  candidate maps, direct GenServer bypass, altered source, session mismatch,
+  and dictionary lookup failure.
 - No live response planning, speaker-commitment claim, real-world event
   assertion, or automatic LIFG/learning change is authorized by the probe.
 
