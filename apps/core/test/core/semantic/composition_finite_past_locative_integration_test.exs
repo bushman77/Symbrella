@@ -119,6 +119,71 @@ defmodule Core.Semantic.CompositionFinitePastLocativeIntegrationTest do
     assert original.lifg_choices |> Enum.at(2) |> Map.fetch!(:id) == "sat|noun|1"
   end
 
+  test "realistic slept form supports a distinct sleep predicate with strict abstention" do
+    original = si()
+    changed = %{original |
+      sentence: "The bird slept on the fence.",
+      tokens: Enum.map(original.tokens, fn
+        %{index: 2} = t -> %{t | phrase: "slept"}
+        t -> t
+      end),
+      active_cells: Enum.reject(original.active_cells, &(&1.token_index == 2)) ++ [
+        %{id: "slept|verb|1", norm: "slept", pos: "verb",
+          token_index: 2,
+          definition: "(form-of, participle, past) simple past and past participle of sleep",
+          semantic_atoms: ["tag:form-of", "tag:participle", "tag:past"]}
+      ],
+      lifg_choices: Enum.map(original.lifg_choices, fn
+        %{token_index: 2} = choice ->
+          %{choice | id: "slept|verb|1",
+            candidate_probs: %{"slept|verb|1" => 1.0}}
+        choice -> choice
+      end)
+    } |> Signatures.attach()
+
+    lookup = fn
+      "sleep" -> [
+        %{id: "sleep|verb|1", norm: "sleep", pos: "verb",
+          definition: "(intransitive) To rest in a state of reduced consciousness."},
+        %{id: "sleep|verb|2", norm: "sleep", pos: "verb",
+          definition: "(idiomatic) To have sexual intercourse."}
+      ]
+    end
+
+    assert Enum.any?(changed.sentence_signatures,
+      &(&1.id == :finite_past_locative_candidate))
+    assert {:ok, proof} = Integration.derive(changed, lookup: lookup)
+    assert proof.event_semantics.predicate == :sleep
+    assert proof.event_semantics.tense == :past
+    assert proof.event_semantics.event_existence == :not_asserted
+    assert proof.premises.form_witness.lemma == "sleep"
+    assert proof.premises.lemma_feature_candidate.source_lemma_sense_id == "sleep|verb|1"
+    assert :ok = FinitePastLocative.verify(proof)
+
+    attached = Integration.attach(changed, lookup: lookup)
+    assert attached.finite_past_locative_derivation == proof
+    assert attached.lifg_choices == changed.lifg_choices
+
+    assert :not_applicable = Integration.derive(changed, lookup: fn "sleep" -> [
+      %{id: "sleep|verb|2", norm: "sleep", pos: "verb",
+        definition: "(idiomatic) To have sexual intercourse."}
+    ] end)
+
+    without_form_tag = %{changed | active_cells:
+      Enum.map(changed.active_cells, fn
+        %{id: "slept|verb|1"} = cell -> %{cell | semantic_atoms: ["tag:past"]}
+        cell -> cell
+      end)}
+    assert :not_applicable = Integration.derive(without_form_tag, lookup: lookup)
+
+    without_score = %{changed | lifg_choices:
+      Enum.map(changed.lifg_choices, fn
+        %{token_index: 2} = choice -> %{choice | candidate_probs: %{}}
+        choice -> choice
+      end)}
+    assert :not_applicable = Integration.derive(without_score, lookup: lookup)
+  end
+
   test "tied attested noun senses license a noun-kind role without choosing a sense" do
     original = si()
     cells = original.active_cells ++ [
