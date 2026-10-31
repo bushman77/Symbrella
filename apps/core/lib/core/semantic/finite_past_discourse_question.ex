@@ -125,8 +125,8 @@ defmodule Core.Semantic.FinitePastDiscourseQuestion do
       not match?({:ok, _}, validated_report(record, actor))
   end
 
-  defp same_actor_record?(%{actor_kind: actor}, actor)
-       when actor in @actors, do: true
+  defp same_actor_record?(%{actor_kind: candidate}, actor)
+       when actor in @actors and candidate == actor, do: true
 
   defp same_actor_record?(%{actor: actor}, kind)
        when is_binary(actor) and kind in @actors,
@@ -149,7 +149,7 @@ defmodule Core.Semantic.FinitePastDiscourseQuestion do
            status: :provisional,
            tense: :past,
            predicate: predicate,
-           actor_kind: actor,
+           actor_kind: actor_kind,
            relation: relation,
            landmark_kind: landmark,
            speaker: :user,
@@ -166,6 +166,7 @@ defmodule Core.Semantic.FinitePastDiscourseQuestion do
            factual_authority?: false
          } = record, actor)
        when is_integer(seq) and seq > 0 and actor in @actors and
+              actor_kind == actor and
               predicate in @actions and relation in @relations and
               landmark in @landmarks do
     if hex_digest?(source_hash) and hex_digest?(proof_hash),
