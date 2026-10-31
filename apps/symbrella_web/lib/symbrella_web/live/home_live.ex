@@ -9,6 +9,7 @@ defmodule SymbrellaWeb.HomeLive do
   alias SymbrellaWeb.HomeLive.MoodBadge
   alias SymbrellaWeb.HomeLive.ExplainEvidence
   alias Core.Response
+  alias Core.Response.FinitePastResponseGate
   alias Core.Curiosity.EpisodeProbe
   alias Core.LexicalExplain
 
@@ -562,6 +563,15 @@ defmodule SymbrellaWeb.HomeLive do
     Application.get_env(:symbrella_web, __MODULE__, [])
   end
 
+  # Both independent opt-ins are required before the UI may use Phase 3.
+  # No user text, query string, or browser parameter can enable the gate.
+  defp finite_past_chat_enabled? do
+    config = home_live_config()
+
+    Keyword.get(config, :finite_past_discourse_ledger?, false) == true and
+      Keyword.get(config, :finite_past_response_arbitration?, false) == true
+  end
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Planner integration
   # ─────────────────────────────────────────────────────────────────────────────
@@ -574,8 +584,17 @@ defmodule SymbrellaWeb.HomeLive do
       source: :user
     }
 
+    # The memory fast path executes before Core's semantic pipeline. When an
+    # opted-in same-session finite-past question has a terminal arbitration
+    # decision, bypass this fast path and let Core's guarded planner handle it.
+    skip_memory? =
+      finite_past_chat_enabled?() and
+        FinitePastResponseGate.skip_legacy_fast_path?(
+          session_id, user_text, true)
+
     memory_reply =
-      if Code.ensure_loaded?(Response) and function_exported?(Response, :memory_reply, 1) do
+      if not skip_memory? and Code.ensure_loaded?(Response) and
+           function_exported?(Response, :memory_reply, 1) do
         Response.memory_reply(memory_si_like)
       end
 
@@ -630,7 +649,9 @@ defmodule SymbrellaWeb.HomeLive do
         enrich_lexicon?: true,
         lexicon_stage?: true,
         lifg_opts: [grammar_weight: 1.0],
-        session_id: session_id
+        session_id: session_id,
+        finite_past_discourse_ledger?: finite_past_chat_enabled?(),
+        finite_past_response_arbitration?: finite_past_chat_enabled?()
       )
       |> Map.put(:session_id, session_id)
 
@@ -678,7 +699,11 @@ defmodule SymbrellaWeb.HomeLive do
           }
 
         Code.ensure_loaded?(Response) and function_exported?(Response, :plan, 2) ->
-          Response.plan(si_like, mood)
+          # A missing preattached response must not reopen the legacy memory
+          # fallback for a terminal Phase 3 question.
+          FinitePastResponseGate.route(si_like,
+            [finite_past_response_arbitration?: finite_past_chat_enabled?()],
+            fn -> Response.plan(si_like, mood) end)
 
         true ->
           {nil, format_si_reply(si), %{}}
