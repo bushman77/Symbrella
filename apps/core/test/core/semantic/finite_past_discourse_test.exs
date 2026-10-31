@@ -4,6 +4,7 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
   alias Core.Discourse.Ledger
   alias Core.Semantic.FinitePastDiscourse
   alias Core.Semantic.FinitePastDiscourseQuestion
+  alias Core.Response.FinitePastDiscourseReadout
   alias Core.Discourse.Ledger.Owner
   alias Core.Semantic.Composition.FinitePastLocativeIntegration
   alias Core.SemanticInput
@@ -625,5 +626,88 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
     assert :not_found == Ledger.resolve(source.session_id,
       "What was the bird doing?")
   end
+
+
+  test "read-only answer adapter describes the report without claiming an event" do
+    for {surface, description_fragment} <- [
+          {"sat", "a bird as sitting"},
+          {"slept", "a bird as sleeping"}
+        ] do
+      source = si(surface)
+      cleanup(source.session_id)
+      Ledger.record(source, finite_past_discourse_ledger?: true,
+        finite_past_lemma_lookup: &lookup/1)
+      before = Ledger.entries(source.session_id)
+
+      assert {:ok, action_text, action_meta} =
+        FinitePastDiscourseReadout.read(source.session_id,
+          "What was the bird doing?")
+      assert String.contains?(action_text, description_fragment)
+      assert String.contains?(action_text, "not an independently verified event")
+      assert action_meta.status == :speaker_description_candidate
+      assert action_meta.source_turn_seq == 1
+      assert action_meta.response_source == :symbolic_finite_past_report_readout
+      assert action_meta.verification == :conversation_context_only
+      refute action_meta.event_occurrence_verified?
+      refute action_meta.referent_identity_verified?
+      refute action_meta.factual_authority?
+      refute action_meta.llm_called?
+
+      assert {:ok, location_text, location_meta} =
+        FinitePastDiscourseReadout.read(source.session_id,
+          "Where was the bird?")
+      assert String.contains?(location_text, "a bird as being on a fence")
+      assert String.contains?(location_text, "not an independently verified event")
+      assert location_meta.source_turn_seq == 1
+      assert Ledger.entries(source.session_id) == before
+      assert Ledger.resolve(source.session_id, "Where was the bird?") == :not_found
+    end
+  end
+
+  test "read-only answer adapter preserves ambiguity instead of recency" do
+    first = si("sat")
+    second = %{si("slept") | session_id: first.session_id}
+    cleanup(first.session_id)
+    Ledger.record(first, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(second, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    before = Ledger.entries(first.session_id)
+
+    assert {:ambiguous, text, meta} = FinitePastDiscourseReadout.read(
+      first.session_id, "What was the bird doing?")
+    assert String.contains?(text, "multiple descriptions of a bird")
+    assert String.contains?(text, "cannot establish which one")
+    assert meta.source_turn_sequences == [2, 1]
+    assert meta.status == :referent_ambiguous
+    refute meta.factual_authority?
+    refute meta.referent_identity_verified?
+    refute meta.llm_called?
+    assert Ledger.entries(first.session_id) == before
+  end
+
+  test "read-only answer adapter never falls back past stale or irrelevant turns" do
+    source = si("slept")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    assert :not_applicable == FinitePastDiscourseReadout.read(
+      source.session_id, "Where is the bird?")
+    assert :not_applicable == FinitePastDiscourseReadout.read(
+      source.session_id, "What was it doing?")
+    assert :not_applicable == FinitePastDiscourseReadout.read(
+      "other-session", "Where was the bird?")
+    assert :not_applicable == FinitePastDiscourseReadout.read(
+      nil, "Where was the bird?")
+    assert :not_applicable == FinitePastDiscourseReadout.read(
+      source.session_id, "Where was the dog?")
+
+    Ledger.record(%{source | sentence: "Unrelated conversation.",
+                            finite_past_locative_derivation: nil})
+    assert :not_applicable == FinitePastDiscourseReadout.read(
+      source.session_id, "Where was the bird?")
+  end
+
 
 end
