@@ -46,7 +46,7 @@ defmodule Core.Discourse.Ledger do
          Map.get(si, :source) in [:user, :prod, :test] and
          is_binary(sentence) and sentence != "" do
       payload = semantic_record(si, opts)
-      case owner_append(session, payload) do
+      case owner_append(session, payload, si, opts) do
         {:ok, sequence} ->
           Trace.append(si, :discourse_ledger,
             decision: :recorded,
@@ -1115,7 +1115,19 @@ defmodule Core.Discourse.Ledger do
     |> Base.encode16(case: :lower)
   end
 
-  defp owner_append(session, payload) do
+  # Finite-past records require a *second* proof revalidation at the ETS
+  # owner's admission boundary. Raw Owner.append/2 refuses this record kind.
+  # Other existing Ledger kinds retain their previous admission behavior.
+  defp owner_append(session,
+         %{kind: :reported_finite_past_locative_candidate} = payload, si, opts) do
+    lookup = Keyword.get(opts, :finite_past_lemma_lookup, &Db.brain_cells_for_norm/1)
+
+    if is_pid(Process.whereis(Owner)),
+      do: Owner.append_verified_finite_past(session, si, payload, lookup),
+      else: {:error, :unavailable}
+  end
+
+  defp owner_append(session, payload, _si, _opts) do
     if is_pid(Process.whereis(Owner)),
       do: Owner.append(session, payload), else: {:error, :unavailable}
   end
