@@ -12,6 +12,7 @@ defmodule PhaseThreeShadowValidation do
   alias Core.Semantic.Composition.FinitePastLocative
   alias Core.Semantic.FinitePastDiscourse, as: Candidate
   alias Core.Semantic.FinitePastDiscourseQuestion, as: Question
+  alias Core.Response.FinitePastDiscourseReadout, as: Readout
 
   @positives [
     {"The bird sat on the fence.", :sit, "sat|noun|1"},
@@ -68,6 +69,14 @@ defmodule PhaseThreeShadowValidation do
                    Question.project(session, "Where was the bird?")),
           "location question failed: #{sentence}")
 
+        # A separate, explicitly called readout may describe the user's
+        # words, but does not feed them into the production response planner.
+        require!(match?({:ok, _, %{status: :speaker_description_candidate,
+                                    factual_authority?: false,
+                                    llm_called?: false}},
+                        Readout.read(session, "What was the bird doing?")),
+          "qualified read-only description failed: #{sentence}")
+
         # The legacy Ledger resolver must not gain authority or new answers.
         require!(Ledger.resolve(session, "Where was the bird?") == :not_found,
           "legacy Ledger.resolve unexpectedly consumed Phase 3 candidate")
@@ -122,6 +131,11 @@ defmodule PhaseThreeShadowValidation do
                  sleep.finite_past_locative_derivation != nil,
         "ambiguous production setup lacked proof")
       assert_ambiguous(ambiguous_id)
+      require!(match?({:ambiguous, _, %{status: :referent_ambiguous,
+                                          factual_authority?: false}},
+                      Readout.read(ambiguous_id, "Where was the bird?")),
+        "readout selected a source from ambiguous reports")
+
 
       # An unrelated next turn is a hard continuity barrier for this V1.
       Core.resolve_input("The bird slept on the fence.",
@@ -133,6 +147,8 @@ defmodule PhaseThreeShadowValidation do
         session_id: intervention_id, finite_past_discourse_ledger?: true)
       require!(Question.project(intervention_id, "Where was the bird?") ==
                  :not_applicable, "older source revived through unrelated turn")
+      require!(Readout.read(intervention_id, "Where was the bird?") ==
+                 :not_applicable, "readout revived older report through unrelated turn")
 
       require!(Question.project(sit_id, "Where was it?") == :not_applicable,
         "pronoun acquired unsupported identity")
@@ -150,6 +166,7 @@ defmodule PhaseThreeShadowValidation do
         repeated_actor_kind: :ambiguous,
         unrelated_turn: :abstained,
         cross_session: :isolated,
+        readout_observation_only?: true,
         live_answer_path_enabled?: false,
         complete_phase_three?: false,
         samples_per_question_timing_case: @samples,
