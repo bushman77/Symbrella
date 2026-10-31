@@ -172,9 +172,10 @@ defmodule Core.Semantic.CompositionFinitePastLocativeHardeningTest do
   test "form-of tag, scored candidate, or exact morphology cannot be fabricated" do
     for {surface, lemma} <- [{"sat", "sit"}, {"slept", "sleep"}] do
       original = input(surface, lemma)
+      form_id = "#{surface}|verb|1"
       changed_tag = %{original | active_cells:
         Enum.map(original.active_cells, fn
-          %{id: id} = cell when id == "#{surface}|verb|1" ->
+          %{id: id} = cell when id == form_id ->
             %{cell | semantic_atoms: ["tag:past", "tag:participle"]}
           cell -> cell
         end)} |> Signatures.attach()
@@ -193,7 +194,7 @@ defmodule Core.Semantic.CompositionFinitePastLocativeHardeningTest do
 
       participle_only = %{original | active_cells:
         Enum.map(original.active_cells, fn
-          %{id: id} = cell when id == "#{surface}|verb|1" ->
+          %{id: id} = cell when id == form_id ->
             %{cell | definition: "past participle of #{lemma}"}
           cell -> cell
         end)} |> Signatures.attach()
