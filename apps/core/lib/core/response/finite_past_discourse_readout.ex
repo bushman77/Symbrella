@@ -115,13 +115,14 @@ defmodule Core.Response.FinitePastDiscourseReadout do
   end
 
   defp ambiguous_source?(%{
-         actor_kind: actor,
+         actor_kind: candidate_actor,
          source_turn_seq: seq,
          source_turn_sha256: digest,
          factual_authority?: false,
          referent_identity_verified?: false
        }, actor)
-       when is_integer(seq) and seq > 0 and is_binary(digest), do: true
+       when candidate_actor == actor and is_integer(seq) and seq > 0 and
+              is_binary(digest), do: true
 
   defp ambiguous_source?(_, _), do: false
 end
