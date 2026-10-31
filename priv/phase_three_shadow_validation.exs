@@ -13,6 +13,7 @@ defmodule PhaseThreeShadowValidation do
   alias Core.Semantic.FinitePastDiscourse, as: Candidate
   alias Core.Semantic.FinitePastDiscourseQuestion, as: Question
   alias Core.Response.FinitePastDiscourseReadout, as: Readout
+  alias Core.Response.FinitePastDiscourseArbitration, as: Arbitration
 
   @positives [
     {"The bird sat on the fence.", :sit, "sat|noun|1"},
@@ -77,6 +78,18 @@ defmodule PhaseThreeShadowValidation do
                         Readout.read(session, "What was the bird doing?")),
           "qualified read-only description failed: #{sentence}")
 
+        # Arbitration is a separate opt-in. It may answer only as a
+        # speaker-attributed description and may NOT call older memory.
+        require!(Arbitration.decide(session, "What was the bird doing?") == :pass,
+          "arbitration unexpectedly enabled by default")
+
+        require!(match?({:answer, _, %{status: :speaker_description_candidate,
+                                      factual_authority?: false}},
+                   Arbitration.route(session, "What was the bird doing?",
+                     fn -> raise "unexpected old episodic fallback" end,
+                     finite_past_response_arbitration?: true)),
+          "same-session attributed arbitration answer failed")
+
         # The legacy Ledger resolver must not gain authority or new answers.
         require!(Ledger.resolve(session, "Where was the bird?") == :not_found,
           "legacy Ledger.resolve unexpectedly consumed Phase 3 candidate")
@@ -131,6 +144,13 @@ defmodule PhaseThreeShadowValidation do
                  sleep.finite_past_locative_derivation != nil,
         "ambiguous production setup lacked proof")
       assert_ambiguous(ambiguous_id)
+      require!(match?({:clarify, _, %{status: :referent_ambiguous,
+                                         factual_authority?: false}},
+                   Arbitration.route(ambiguous_id, "Where was the bird?",
+                     fn -> raise "ambiguous history fell through to old memory" end,
+                     finite_past_response_arbitration?: true)),
+        "arbitration did not preserve ambiguity")
+
       require!(match?({:ambiguous, _, %{status: :referent_ambiguous,
                                           factual_authority?: false}},
                       Readout.read(ambiguous_id, "Where was the bird?")),
@@ -149,6 +169,12 @@ defmodule PhaseThreeShadowValidation do
                  :not_applicable, "older source revived through unrelated turn")
       require!(Readout.read(intervention_id, "Where was the bird?") ==
                  :not_applicable, "readout revived older report through unrelated turn")
+      require!(match?({:abstain, _, %{status: :continuity_unresolved,
+                                         factual_authority?: false}},
+                   Arbitration.route(intervention_id, "Where was the bird?",
+                     fn -> raise "stale history fell through to old memory" end,
+                     finite_past_response_arbitration?: true)),
+        "arbitration did not block old memory on stale continuity")
 
       require!(Question.project(sit_id, "Where was it?") == :not_applicable,
         "pronoun acquired unsupported identity")
@@ -167,6 +193,8 @@ defmodule PhaseThreeShadowValidation do
         unrelated_turn: :abstained,
         cross_session: :isolated,
         readout_observation_only?: true,
+        arbitration_observation_only?: true,
+        legacy_fallback_blocked_on_ambiguity?: true,
         live_answer_path_enabled?: false,
         complete_phase_three?: false,
         samples_per_question_timing_case: @samples,
