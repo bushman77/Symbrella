@@ -192,6 +192,44 @@ mix test
 mix run priv/phase_three_shadow_validation.exs
 ```
 
+### Gate 6 — memory-response arbitration (implemented, tests pending)
+
+- Added `Core.Response.FinitePastDiscourseArbitration` as an **explicit,
+  default-off, read-only policy seam** for `What was the bird doing?` and
+  `Where was the bird?` (also closed actor kinds cat/dog).
+- `decide/3` must receive `finite_past_response_arbitration?: true`.
+  It returns `:pass` when disabled, when the question is unsupported, or
+  when the session contains no admitted finite-past record for that actor.
+- When a relevant same-session finite-past report exists:
+  - A unique, verified readout becomes `{:answer, text, meta}` with explicit
+    attribution, nonfactual status, and original proof fingerprints.
+  - Multiple reports become `{:clarify, text, meta}`, never a recency guess.
+  - A later unrelated turn, invalid eligible report, or unresolved continuity
+    becomes `{:abstain, text, meta}`, **not a request to use old episodic
+    memory**.
+- `route/4` tests the exact evaluation order: the fallback function is
+  called **only** on `:pass`. It is never called on an answer, ambiguity,
+  or stale evidence. This contract is tested without changing production
+  planner or memory code.
+- Six additional focused tests bring the Phase 3 test file to **32 tests**;
+  the shadow validation script also probes default-off behavior, successful
+  answer attribution, mandatory no-fallback for ambiguity, and stale-turn
+  abstention. **This new work has not yet been verified locally.**
+- This is still **not connected** to `Core.Response.Memory.reply_for/1`,
+  `Core.Response.plan/2`, or LiveView chat. Existing episodic behavior is
+  unchanged in production, and the feature is not default-on.
+- Next required gate: confirm precise response and side-effect ordering,
+  explicit speaker commitment, safe interleaving of unrelated turns, and
+  operator approval before considering a live optional feature switch.
+
+Run:
+
+```bash
+mix test apps/core/test/core/semantic/finite_past_discourse_test.exs apps/core/test/core/discourse/ledger_test.exs
+mix test
+mix run priv/phase_three_shadow_validation.exs
+```
+
 ## LIFG sense-resolution workstream
 
 LIFG dictionary-sense selection remains an independent, measurable issue.
