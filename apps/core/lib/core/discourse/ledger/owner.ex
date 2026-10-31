@@ -9,6 +9,8 @@ defmodule Core.Discourse.Ledger.Owner do
   """
   use GenServer
 
+  alias Core.Semantic.FinitePastDiscourse
+
   @table :core_discourse_ledger
   @default_keep 4096
   @maximum_keep 16_384
@@ -28,6 +30,23 @@ defmodule Core.Discourse.Ledger.Owner do
     GenServer.call(__MODULE__, {:append, session, record})
   end
 
+  @doc """
+  The sole finite-past admission boundary. Checks the original SI and the
+  exact projected record again inside the serialized owner before persistence.
+  A digest or a caller-made record alone cannot authorize admission.
+  """
+  @spec append_verified_finite_past(String.t(), map(), map(), function()) ::
+          {:ok, pos_integer()} | {:error, atom()}
+  def append_verified_finite_past(session, si, candidate, lookup)
+      when is_binary(session) and is_map(si) and is_map(candidate) and
+             is_function(lookup, 1) do
+    GenServer.call(__MODULE__,
+      {:append_verified_finite_past, session, si, candidate, lookup})
+  end
+
+  def append_verified_finite_past(_, _, _, _),
+    do: {:error, :invalid_finite_past_evidence}
+
   @spec entries(String.t()) :: [map()]
   def entries(session) when is_binary(session) do
     case :ets.lookup(@table, session) do
@@ -45,7 +64,37 @@ defmodule Core.Discourse.Ledger.Owner do
   end
 
   @impl true
-  def handle_call({:append, session, record}, _from, state) do
+  def handle_call({:append, _session,
+                   %{kind: :reported_finite_past_locative_candidate}},
+                  _from, state),
+    do: {:reply, {:error, :verified_finite_past_required}, state}
+
+  @impl true
+  def handle_call({:append, session, record}, _from, state)
+      when is_binary(session) and is_map(record) do
+    persist(session, record, state)
+  end
+
+  @impl true
+  def handle_call({:append_verified_finite_past, session, si, candidate, lookup},
+                  _from, state) do
+    valid_session? = is_binary(session) and byte_size(session) in 1..128
+
+    verified =
+      if valid_session? and is_map(si) and is_map(candidate) and
+           is_function(lookup, 1) and Map.get(si, :session_id) == session do
+        FinitePastDiscourse.project(si, lookup: lookup)
+      else
+        :not_applicable
+      end
+
+    case verified do
+      {:ok, ^candidate} -> persist(session, candidate, state)
+      _ -> {:reply, {:error, :invalid_finite_past_evidence}, state}
+    end
+  end
+
+  defp persist(session, record, state) do
     {sequence, previous} =
       case :ets.lookup(@table, session) do
         [{^session, last, existing}] -> {last + 1, existing}
