@@ -97,16 +97,11 @@ defmodule PhaseThreeShadowValidation do
 
       # Independently revalidated previously captured production SI, stored
       # into one fresh scope, must be ambiguous, not a recency-based answer.
-      [sit, sleep] = Enum.zip(@positives, [sit_id, sleep_id])
-        |> Enum.map(fn {_case, session} -> session end)
-        |> Enum.map(fn session ->
-          # Core produced and admitted this source in its original session;
-          # for a new synthetic scope, rebuild once from the production path.
-          # Do not copy a proof into a different sentence.
-          original = if session == sit_id,
-            do: "The bird sat on the fence.",
-            else: "The bird slept on the fence."
-          Core.resolve_input(original,
+      [sit, sleep] =
+        Enum.map(@positives, fn {sentence, _predicate, _lifg_id} ->
+          # Re-run normal production parsing on each source in the same
+          # isolated session. Do not copy a saved proof to a different turn.
+          Core.resolve_input(sentence,
             session_id: ambiguous_id, finite_past_discourse_ledger?: true)
         end)
 
