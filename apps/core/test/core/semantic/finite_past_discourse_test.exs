@@ -6,6 +6,8 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
   alias Core.Semantic.FinitePastDiscourseQuestion
   alias Core.Response.FinitePastDiscourseReadout
   alias Core.Response.FinitePastDiscourseArbitration, as: Arbitration
+  alias Core.Response.FinitePastResponseGate, as: ResponseGate
+  alias Core.Response.Attach, as: ResponseAttach
   alias Core.Discourse.Ledger.Owner
   alias Core.Semantic.Composition.FinitePastLocativeIntegration
   alias Core.SemanticInput
@@ -834,5 +836,156 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
       [42])
   end
 
+
+
+  test "opt-in response attachment uses same-session qualified finite-past answer" do
+    source = si("slept")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    before = Ledger.entries(source.session_id)
+    question = %SemanticInput{
+      session_id: source.session_id, source: :user, intent: :question,
+      confidence: 0.8, sentence: "What was the bird doing?"
+    }
+
+    result = ResponseAttach.maybe_build_response_plan(question,
+      finite_past_response_arbitration?: true)
+
+    assert String.contains?(result.response_text, "bird as sleeping")
+    assert String.contains?(result.response_text, "not an independently verified event")
+    assert result.response_meta.arbitration == :finite_past_report
+    assert result.response_meta.response_source == :symbolic_finite_past_report
+    assert result.response_meta.memory_source == :same_session_finite_past_report
+    assert result.response_meta.status == :speaker_description_candidate
+    assert result.response_meta.source_turn_seq == 1
+    refute result.response_meta.factual_authority?
+    refute result.response_meta.event_occurrence_verified?
+    refute result.response_meta.referent_identity_verified?
+    refute result.response_meta.llm_called?
+    assert Ledger.entries(source.session_id) == before
+    assert Enum.at(source.lifg_choices, 2).id == "slept|verb|1"
+  end
+
+  test "opt-in response attachment clarifies repeated actors without guessing" do
+    first = si("sat")
+    second = %{si("slept") | session_id: first.session_id}
+    cleanup(first.session_id)
+    Ledger.record(first, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(second, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    question = %SemanticInput{
+      source: :user, session_id: first.session_id,
+      intent: :question, sentence: "Where was the bird?"
+    }
+
+    result = ResponseAttach.maybe_build_response_plan(question,
+      finite_past_response_arbitration?: true)
+
+    assert String.contains?(result.response_text, "multiple descriptions")
+    assert result.response_meta.arbitration == :finite_past_report
+    assert result.response_meta.status == :referent_ambiguous
+    assert result.response_meta.source_turn_sequences == [2, 1]
+    refute result.response_meta.retrieval_found?
+    refute result.response_meta.referent_identity_verified?
+    refute result.response_meta.factual_authority?
+    assert Enum.map(Ledger.entries(first.session_id), & &1.seq) == [2, 1]
+  end
+
+  test "opt-in response attachment blocks stale episodic fallback" do
+    source = si("sat")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(%{source | sentence: "An unrelated comment.",
+                            finite_past_locative_derivation: nil})
+
+    result = ResponseAttach.maybe_build_response_plan(%SemanticInput{
+      source: :user, session_id: source.session_id,
+      intent: :question, sentence: "Where was the bird?"
+    }, finite_past_response_arbitration?: true)
+
+    assert String.contains?(result.response_text, "cannot safely connect")
+    assert result.response_meta.status == :continuity_unresolved
+    assert result.response_meta.arbitration == :finite_past_report
+    assert result.response_meta.response_source == :symbolic_finite_past_report
+    refute result.response_meta.factual_authority?
+    refute result.response_meta.retrieval_found?
+    refute result.response_meta.llm_called?
+  end
+
+  test "response gate is opt-in and defers to the original planner once" do
+    source = si("sat")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    si_like = %{source: :user, session_id: source.session_id,
+      sentence: "Where was the bird?", confidence: 0.0}
+
+    parent = self()
+    fallback = fn ->
+      send(parent, :old_planner)
+      {:warm, "Original planner.", %{response_source: :legacy}}
+    end
+
+    assert {:warm, "Original planner.", _} =
+      ResponseGate.route(si_like, [], fallback)
+    assert_receive :old_planner
+    refute_received :old_planner
+
+    assert {:warm, "Original planner.", _} =
+      ResponseGate.route(si_like,
+        [finite_past_response_arbitration?: false], fallback)
+    assert_receive :old_planner
+    refute_received :old_planner
+
+    assert {:warm, answer, %{status: :speaker_description_candidate}} =
+      ResponseGate.route(si_like, [finite_past_response_arbitration?: true],
+        fn -> flunk("qualified answer fell through to legacy planner") end)
+    assert String.contains?(answer, "bird as being on a fence")
+  end
+
+  test "response gate does not infer permission from a stored report or other session" do
+    source = si("slept")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    fallback = fn -> {:warm, "Original planner.", %{}} end
+
+    for si <- [
+          %{source: :assistant, session_id: source.session_id,
+            sentence: "Where was the bird?"},
+          %{source: :test, session_id: source.session_id,
+            sentence: "Where was the bird?"},
+          %{source: :user, session_id: "different",
+            sentence: "Where was the bird?"},
+          %{source: :user, session_id: source.session_id,
+            sentence: "Where is the bird?"},
+          %{source: :user, session_id: nil,
+            sentence: "Where was the bird?"}
+        ] do
+      assert {:warm, "Original planner.", _} =
+        ResponseGate.route(si, [finite_past_response_arbitration?: true],
+          fallback)
+    end
+  end
+
+  test "response attachment explicit off disables all reply paths even if opted in" do
+    source = si("sat")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    question = %SemanticInput{source: :user, session_id: source.session_id,
+      sentence: "Where was the bird?"}
+
+    assert ResponseAttach.maybe_build_response_plan(question,
+      response: :off, finite_past_response_arbitration?: true) == question
+  end
 
 end
