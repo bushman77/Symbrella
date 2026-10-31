@@ -12,6 +12,20 @@ defmodule Core.Response.FinitePastResponseGate do
   alias Core.Response.FinitePastDiscourseArbitration, as: Arbitration
   alias Core.Response.SideEffects
 
+  @doc """
+  The LiveView's independent memory fast path must defer to Core whenever
+  opted-in arbitration has a terminal answer, ambiguity or abstention.
+  Merely finding a past-tense question is insufficient: the decision must
+  be backed by relevant same-session admitted evidence.
+  """
+  @spec skip_legacy_fast_path?(term(), term(), boolean()) :: boolean()
+  def skip_legacy_fast_path?(session, question, true) do
+    Arbitration.decide(session, question,
+      finite_past_response_arbitration?: true) != :pass
+  end
+
+  def skip_legacy_fast_path?(_, _, _), do: false
+
   @spec route(map(), keyword(), (() -> term())) :: term()
   def route(si, opts, original_plan)
       when is_map(si) and is_list(opts) and is_function(original_plan, 0) do
@@ -33,7 +47,7 @@ defmodule Core.Response.FinitePastResponseGate do
           |> Map.put(:memory_source, :same_session_finite_past_report)
           |> Map.put(:retrieval_found?, outcome == :answer)
           |> Map.put(:response_source, :symbolic_finite_past_report)
-          |> Map.put(:semantic_verified?, outcome == :answer)
+          |> Map.put(:semantic_verified?, false)
           |> Map.put(:confidence, Map.get(si, :confidence, 0.0))
 
         # Match the memory-reply bookkeeping while preserving the existing
