@@ -23,6 +23,7 @@ defmodule Core.Response.Attach do
   alias Core.SemanticInput
   alias Core.Response.Context
   alias Core.Response.RuntimeContext
+  alias Core.Response.FinitePastResponseGate
 
   @type opts :: keyword()
 
@@ -88,7 +89,11 @@ defmodule Core.Response.Attach do
       si_like = build_response_si_like(si)
       mood_like = build_response_mood_like(si, opts)
 
-      case Core.Response.plan(si_like, mood_like) do
+      # Feature is explicitly per-call and never read from user text.
+      # Run before the regular planner's eager memory and episodic lookups.
+      case FinitePastResponseGate.route(si_like, opts, fn ->
+             Core.Response.plan(si_like, mood_like)
+           end) do
         {tone, text, meta} ->
           {si2, meta} = reconcile_action_selection(si, meta, mood_like)
 
