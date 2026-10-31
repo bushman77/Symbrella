@@ -21,6 +21,15 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
   # validated predicate evidence; a morphological form alone is insufficient.
   @predicate_features %{"sit" => :seated_posture, "sleep" => :sleep_state}
 
+  @doc """
+  Whether a lemma has a closed, feature-backed finite-past admission policy.
+  The input must still pass independent form, syntax and dictionary checks.
+  """
+  @spec supported_lemma?(term()) :: boolean()
+  def supported_lemma?(lemma) when is_binary(lemma),
+    do: Map.has_key?(@predicate_features, lemma)
+  def supported_lemma?(_), do: false
+
   @spec compose(map()) :: {:ok, map()} | :unsupported
   def compose(%{signature: signature, grounding: grounding, actor: actor,
                 preposition: prep, landmark: landmark} = input) do
@@ -78,20 +87,21 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
 
   @doc "Replay the mathematical proof and recompute the expected normal form."
   @spec verify(map()) :: :ok | {:error, :invalid_derivation}
-  def verify(%{kind: :finite_past_locative_property, premises: premises} = proof) do
+  def verify(%{kind: :finite_past_locative_property, premises: premises} = proof)
+      when is_map(premises) do
     input = %{
       signature: Map.get(premises, :signature),
       grounding: %{
         status: :predicate_feature_candidates,
-        surface: get_in(premises, [:form_witness, :surface]),
+        surface: nested(premises, [:form_witness, :surface]),
         selected_lifg_id: Map.get(premises, :selected_lifg_id),
         forms: [Map.get(premises, :form_witness)],
         feature_hypotheses: [Map.get(premises, :lemma_feature_candidate)]
       },
       predicate_surface: get_in(premises, [:form_witness, :surface]),
-      actor: get_in(proof, [:event_semantics, :actor, :kind]) |> symbol_word(),
-      preposition: get_in(proof, [:event_semantics, :spatial, :relation]) |> symbol_word(),
-      landmark: get_in(proof, [:event_semantics, :spatial, :landmark_kind]) |> symbol_word()
+      actor: nested(proof, [:event_semantics, :actor, :kind]) |> symbol_word(),
+      preposition: nested(proof, [:event_semantics, :spatial, :relation]) |> symbol_word(),
+      landmark: nested(proof, [:event_semantics, :spatial, :landmark_kind]) |> symbol_word()
     }
 
     case compose(input) do
@@ -128,7 +138,7 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
         when is_binary(lemma) and
              inflection in ["simple past", "simple past and past participle"] and
              is_binary(id) and is_number(score) and score >= 0 ->
-        Map.has_key?(@predicate_features, lemma) and
+        supported_lemma?(lemma) and
           String.starts_with?(id, surface <> "|verb|")
       _ -> false
     end)
@@ -172,6 +182,12 @@ defmodule Core.Semantic.Composition.FinitePastLocative do
             event == e3 and event == e4, do: true
 
   defp normal_form?(_, _, _, _, _), do: false
+
+  # Treat corrupt or partial persisted proofs as invalid data, never as
+  # crashes. Formal verification cannot trust nested caller-supplied shapes.
+  defp nested(%{} = map, [key | rest]), do: nested(Map.get(map, key), rest)
+  defp nested(value, []), do: value
+  defp nested(_, _), do: nil
 
   defp symbol_word(value) when is_atom(value), do: Atom.to_string(value)
   defp symbol_word(_), do: nil
