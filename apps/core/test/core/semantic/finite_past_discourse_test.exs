@@ -3,6 +3,8 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
 
   alias Core.Discourse.Ledger
   alias Core.Semantic.FinitePastDiscourse
+  alias Core.Semantic.FinitePastDiscourseQuestion
+  alias Core.Discourse.Ledger.Owner
   alias Core.Semantic.Composition.FinitePastLocativeIntegration
   alias Core.SemanticInput
   alias Core.Syntax.Signatures
@@ -381,6 +383,196 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
       lookup: &lookup/1)
     assert :not_applicable = FinitePastDiscourse.project(%{source | intent: :command},
       lookup: &lookup/1)
+  end
+
+
+  test "past question reads admitted report as an attributed role, never world truth" do
+    for {surface, lemma, selected} <- [
+          {"sat", :sit, "sat|noun|1"},
+          {"slept", :sleep, "slept|verb|1"}
+        ] do
+      source = si(surface)
+      cleanup(source.session_id)
+
+      Ledger.record(source, finite_past_discourse_ledger?: true,
+        finite_past_lemma_lookup: &lookup/1)
+      before = Ledger.entries(source.session_id)
+
+      assert {:ok, action} =
+        FinitePastDiscourseQuestion.project(source.session_id,
+          "What was the bird doing?")
+
+      assert action.status == :speaker_description_candidate
+      assert action.requested_role == :predicate
+      assert action.actor_kind == :bird
+      assert action.description == %{
+        kind: :reported_predicate, lemma: lemma, tense: :past}
+      assert action.source_turn_seq == 1
+      assert action.source_turn_sha256 == hd(before).source_turn_sha256
+      assert action.typed_proof_sha256 == hd(before).typed_proof_sha256
+      assert action.evidence == :admitted_revalidated_finite_past_report
+      assert action.verification == :conversation_context_only
+      refute action.referent_identity_verified?
+      refute action.event_occurrence_verified?
+      refute action.factual_authority?
+
+      assert {:ok, location} =
+        FinitePastDiscourseQuestion.project(source.session_id,
+          "Where was the bird?")
+
+      assert location.description == %{
+        kind: :reported_location, relation: :on,
+        landmark_kind: :fence, tense: :past}
+      assert location.source_turn_seq == action.source_turn_seq
+      assert location.requested_role == :location
+
+      # No writes, output text or selection changes occur on projection.
+      assert Ledger.entries(source.session_id) == before
+      assert Enum.at(source.lifg_choices, 2).id == selected
+      refute Map.has_key?(action, :answer_text)
+      refute Map.has_key?(action, :sentence)
+      refute Map.has_key?(action, :session_id)
+    end
+  end
+
+  test "repeated actor-kind reports produce ambiguity, never a recency winner" do
+    earlier = si("sat")
+    later = %{si("slept") | session_id: earlier.session_id}
+    cleanup(earlier.session_id)
+
+    Ledger.record(earlier, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(later, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    for question <- ["What was the bird doing?", "Where was the bird?"] do
+      assert {:ambiguous, [newer, older]} =
+        FinitePastDiscourseQuestion.project(earlier.session_id, question)
+      assert newer.source_turn_seq == 2
+      assert older.source_turn_seq == 1
+      assert newer.actor_kind == :bird
+      assert older.actor_kind == :bird
+      refute newer.factual_authority?
+      refute older.referent_identity_verified?
+      refute Map.has_key?(newer, :predicate)
+      refute Map.has_key?(newer, :sentence)
+    end
+  end
+
+  test "unrelated or intervening turn prevents stale report revival" do
+    source = si("sat")
+    cleanup(source.session_id)
+
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    assert {:ok, _} = FinitePastDiscourseQuestion.project(
+      source.session_id, "Where was the bird?")
+
+    Ledger.record(%{source | sentence: "An unrelated question?",
+                            finite_past_locative_derivation: nil})
+
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      source.session_id, "Where was the bird?")
+    assert Enum.map(Ledger.entries(source.session_id), & &1.kind) ==
+      [:uninterpreted, :reported_finite_past_locative_candidate]
+  end
+
+  test "other mentions of the same actor kind block unsupported identity joins" do
+    source = si("slept")
+    cleanup(source.session_id)
+
+    # Another mention of a bird has no independent same-individual proof.
+    assert {:ok, 1} = Owner.append(source.session_id,
+      %{kind: :nominal_description, head: "bird",
+        status: :provisional, factual_authority?: false})
+
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      source.session_id, "What was the bird doing?")
+  end
+
+  test "forged or invalid newest record blocks fallback to an older valid report" do
+    source = si("sat")
+    cleanup(source.session_id)
+
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    good = hd(Ledger.entries(source.session_id))
+
+    assert {:ok, 2} = Owner.append(source.session_id,
+      %{good | source_turn_sha256: "invalid", seq: 2})
+
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      source.session_id, "Where was the bird?")
+  end
+
+  test "closed past-question grammar rejects present, pronouns, and malformed input" do
+    source = si("slept")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    for question <- [
+          "What is the bird doing?",
+          "Where is the bird?",
+          "Where was it?",
+          "What was it doing?",
+          "What was a bird doing?",
+          "What was the bird doing",
+          "What was the bird doing? And where?",
+          "What was the tree doing?",
+          "Did the bird sleep on the fence?",
+          "\"Where was the bird?\"",
+          String.duplicate("?", 129)
+        ] do
+      assert :not_applicable = FinitePastDiscourseQuestion.project(
+        source.session_id, question)
+    end
+
+    assert {:ok, :bird, :predicate} =
+      FinitePastDiscourseQuestion.parse_question("What was the bird doing?")
+    assert {:ok, :bird, :location} =
+      FinitePastDiscourseQuestion.parse_question("Where was the bird?")
+    assert :not_applicable = FinitePastDiscourseQuestion.parse_question(nil)
+  end
+
+  test "sessions never cross and unsupported actor kinds cannot be inferred" do
+    source = si("sat")
+    other = si("slept")
+    cleanup(source.session_id)
+    cleanup(other.session_id)
+
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      other.session_id, "What was the bird doing?")
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      source.session_id, "Where was the cat?")
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      nil, "Where was the bird?")
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      "", "Where was the bird?")
+    assert :not_applicable = FinitePastDiscourseQuestion.project(
+      String.duplicate("s", 129), "Where was the bird?")
+  end
+
+  test "question projection remains separate from legacy Ledger.resolve and the planner" do
+    source = si("sat")
+    cleanup(source.session_id)
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    assert {:ok, %{description: %{lemma: :sit}}} =
+      FinitePastDiscourseQuestion.project(source.session_id,
+        "What was the bird doing?")
+
+    assert :not_found == Ledger.resolve(source.session_id,
+      "Where was the bird?")
+    assert :not_found == Ledger.resolve(source.session_id,
+      "What was the bird doing?")
   end
 
 end
