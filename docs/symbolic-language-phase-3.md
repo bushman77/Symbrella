@@ -74,7 +74,7 @@ mix test apps/core/test/core/semantic/finite_past_discourse_test.exs
   Targeted tests and the pre-existing Ledger regression suite passed in the
   user's local environment. Full umbrella regression remains a separate gate.
 
-### Gate 3 — opt-in read-only past-question projection (implemented, testing pending)
+### Gate 3 — opt-in read-only past-question projection (verified in targeted tests)
 
 - `Core.Semantic.FinitePastDiscourseQuestion.project/2` is a **separate,
   explicitly invoked read-only API**, not a planner hook, Ledger.resolve
@@ -99,24 +99,46 @@ mix test apps/core/test/core/semantic/finite_past_discourse_test.exs
   proof of trustworthy writes.** Readback depends on the trusted Ledger
   admission path; no original SI/proof is retained to replay at read time.
   This is why the module remains unconnected to live responses.
-- Run the Phase 3 tests and prior Ledger regressions:
-
-```bash
-mix test apps/core/test/core/semantic/finite_past_discourse_test.exs apps/core/test/core/discourse/ledger_test.exs
-```
+- The user confirmed the Phase 3 targeted tests and prior Ledger
+  regression suite passed locally (22 tests in the Phase 3 file, plus the
+  existing Ledger tests). The umbrella-wide regression remains a separate gate.
 
 - Before enabling user-visible answers, audit stable speaker-commitment evidence,
   correction/negation barriers, repeated mentions, safe reference identity,
   and whether ledger admissions can be trusted by all internal callers.
 
-### Gate 4 — production and regression gate (not implemented)
+### Gate 4 — full acceptance and performance gate (in progress)
 
-- Compare the new path against current progressive and nominal recall.
-- Verify no altered event/fact authority or LIFG sense winners.
-- Run targeted tests, the full umbrella suite, cold/warm-session tests, and
-  representative production probes with negative and ambiguous cases.
-- Record attachment, ledger and retrieval latency separately.
-- Promote the path only after every admission and abstention invariant passes.
+- Added `priv/phase_three_shadow_validation.exs` as a **production** probe.
+  It uses normal `Core.resolve_input/2` with explicit opt-in only in probe
+  sessions and reads the resulting ledger via the read-only question projector.
+- Requires both `sat/sit` and `slept/sleep` production proofs, the
+  unchanged predicate LIFG choice, nonfactual admitted record, question-role
+  projection, no legacy `Ledger.resolve/2` promotion, default-off behavior,
+  ambiguity for multiple same-kind mentions, unrelated-turn abstention,
+  and strict session isolation.
+- Separately reports production pipeline wall-clock, single sample pure
+  candidate and question projection time, and 25-sample question-read median.
+  **These are not isolated end-to-end latency causality measurements.**
+- Clears probe Ledger sessions afterward, but the production pipeline can
+  still update its ordinary ephemeral memory/learning machinery and should be
+  run in a disposable/local environment. The script does not roll back those
+  unrelated side effects.
+- Before claiming this gate passed, run:
+
+```bash
+mix test apps/core/test/core/semantic/finite_past_discourse_test.exs apps/core/test/core/discourse/ledger_test.exs
+mix test
+mix run priv/phase_three_shadow_validation.exs
+```
+
+- Gate 4 remains open even after a passing probe until a provenance-trust
+  review establishes whether every write into the Ledger is admitted through
+  the verified Core path. `Ledger.Owner.append/2` can receive arbitrary maps
+  from internal callers; a structurally valid digest alone does **not**
+  authenticate re-derivation of the original proof.
+- No live response planning, speaker-commitment claim, real-world event
+  assertion, or automatic LIFG/learning change is authorized by the probe.
 
 ## LIFG sense-resolution workstream
 
