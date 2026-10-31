@@ -97,6 +97,7 @@ defmodule Core.Response.FinitePastDiscourseArbitration do
 
   def route(_, _, _, _), do: :pass
 
-  defp admitted_kind?(%{kind: @kind, actor_kind: actor}, actor), do: true
+  defp admitted_kind?(%{kind: @kind, actor_kind: candidate}, actor)
+       when candidate == actor, do: true
   defp admitted_kind?(_, _), do: false
 end
