@@ -46,17 +46,33 @@ Gate 1 exit test:
 mix test apps/core/test/core/semantic/finite_past_discourse_test.exs
 ```
 
-### Gate 2 — review memory admission rules (not implemented)
+### Gate 2 — explicit opt-in provisional Ledger admission (implemented, testing pending)
 
-- Audit `Core.Discourse.Ledger` and `Core.Brain.WM.Comprehension` for the
-  smallest revalidation-preserving handoff.
-- Require explicit session isolation, source sequence, speech-act confidence,
-  provenance fingerprints, and bounded retention.
-- Distinguish **speaker reported X** from **X happened** and from **speaker
-  asserted X** when intent is not proven.
-- Evaluate corrections, negation, conditionals, quotations, and contradictory
-  statements before admitting any new ledger kind.
-- Keep no transcript leakage, silent LIFG revisions, or automatic learning.
+- `Core.Discourse.Ledger.record/2` accepts
+  `finite_past_discourse_ledger?: true` to *explicitly* opt in. Existing
+  production behavior stays unchanged by default.
+- Under the opt-in, normal fuzzy, temporal, progressive, nominal and
+  cross-turn composition priorities run before finite-past admission.
+- `Core.Semantic.FinitePastDiscourse.project/2` must independently revalidate
+  the attached proof against this turn's evidence and a canonical lemma
+  dictionary lookup. For deterministic tests only, the record call accepts
+  `finite_past_lemma_lookup: fun`.
+- Reject missing session, invalid origin, contradictory question/command intent,
+  stale or tampered proofs, unsupported or ambiguous structure, and unavailable
+  dictionary evidence. Such user turns remain ordinary `:uninterpreted` records.
+- An admitted record carries `:provisional`, `:declarative_candidate`,
+  `:conversation_context_only`, `:not_asserted` event existence and
+  `factual_authority?: false`. This is a **speaker-attributed description**,
+  not proof of speaker commitment or that an event occurred.
+- Existing Ledger Owner supplies strictly same-session, bounded ETS retention,
+  sequential turn IDs, and reset. No sentence text, session identifier, full
+  lambda AST or LIFG slate is stored inside this new record.
+- **No new recall or answer path is enabled.** `Ledger.resolve/2` continues
+  to ignore finite-past candidates; Gate 3 must establish identity ambiguity,
+  corrective turns and tense-aligned question binding before any retrieval.
+- Tests: `apps/core/test/core/semantic/finite_past_discourse_test.exs`.
+  Gate 2 is not considered verified until this and the pre-existing Ledger
+  regression suite both pass.
 
 ### Gate 3 — constrained cross-turn question projection (not implemented)
 
