@@ -89,8 +89,8 @@ defmodule Core.Semantic.FinitePastDiscourse do
       speaker: :user,
       speech_act: :declarative_candidate,
       session_scope: :current_session_only,
-      source_turn_sha256: hash(sentence),
-      typed_proof_sha256: hash(proof.result),
+      source_turn_sha256: source_hash(sentence),
+      typed_proof_sha256: proof_hash(proof.result),
       provenance: :revalidated_current_turn_finite_past_composition,
       verification: :conversation_context_only,
       event_existence: :not_asserted,
@@ -103,7 +103,11 @@ defmodule Core.Semantic.FinitePastDiscourse do
 
   defp describe(_, _), do: :not_applicable
 
-  defp hash(term),
+  # Match the existing Ledger digest conventions for later, explicit joins.
+  defp source_hash(sentence),
+    do: :crypto.hash(:sha256, sentence) |> Base.encode16(case: :lower)
+
+  defp proof_hash(term),
     do: :crypto.hash(:sha256, :erlang.term_to_binary(term))
         |> Base.encode16(case: :lower)
 
