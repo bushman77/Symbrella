@@ -230,6 +230,56 @@ mix test
 mix run priv/phase_three_shadow_validation.exs
 ```
 
+### Gate 7 — opt-in production response and LiveView fast-path wiring (implemented, tests pending)
+
+- `Core.Response.FinitePastResponseGate.route/3` is now called by
+  `Core.Response.Attach` **before** its normal `Core.Response.plan/2` callback.
+  The existing planner is invoked exactly once only on arbitration `:pass`.
+  On `:answer`, `:clarify`, or `:abstain`, the response is explicitly
+  speaker-attributed, nonfactual, no-LLM, and terminal. Existing response
+  guardrails, tone, SI attachment, and turn recording are retained.
+- `Core.Response.Attach` requires the **per-call** option
+  `finite_past_response_arbitration?: true`. It is disabled by default;
+  no user wording, HTTP parameter, or dictionary sense can enable it.
+- The live chat page (`SymbrellaWeb.HomeLive`) has an independent
+  `Response.memory_reply/1` fast path **before** the Core pipeline.
+  Under explicit server configuration, relevant same-session finite-past
+  arbitration now bypasses this old memory fast path and routes through
+  `Core.resolve_input/2` with both finite-past options. If the Core
+  response attachment is unavailable, the UI's fallback `Response.plan/2`
+  is guarded by the same arbitration gate.
+- For UI experiments, **both** options must be true in the server-owned
+  configuration (keep them false in normal operation):
+
+```elixir
+config :symbrella_web, SymbrellaWeb.HomeLive,
+  finite_past_discourse_ledger?: true,
+  finite_past_response_arbitration?: true
+```
+
+- This changes only the closed past-tense actor-kind question path when
+  qualifying evidence exists. Other input and legacy retrieval remain
+  unchanged. Any existing `HomeLive` application config values (such as
+  `:memory_continuity?`) should be preserved when opting in; do not replace
+  the entire existing keyword configuration.
+- Added six direct response-attachment tests plus a LiveView fast-path
+  arbitration policy test. The Phase 3 test module now contains **39 tests**.
+- Extended `priv/phase_three_shadow_validation.exs` with three separate,
+  isolated full-pipeline reply probes for a unique report, multiple actors
+  and intervening unrelated turns; original shadow tests remain.
+- **This newest integration has not yet been run in the user's environment.**
+  Phase 3 cannot be marked complete until the targeted tests, full umbrella
+  tests, the extended production probe, and controlled LiveView behavior pass.
+  There is no implicit production default-on promotion.
+
+Verification:
+
+```bash
+mix test apps/core/test/core/semantic/finite_past_discourse_test.exs apps/core/test/core/discourse/ledger_test.exs
+mix test
+mix run priv/phase_three_shadow_validation.exs
+```
+
 ## LIFG sense-resolution workstream
 
 LIFG dictionary-sense selection remains an independent, measurable issue.
