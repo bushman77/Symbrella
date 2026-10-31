@@ -58,6 +58,46 @@ defmodule Core.Semantic.CompositionFinitePastLocativeTest do
     refute proof.semantic_compatibility_proven?
   end
 
+  test "slept composes a separate replayable sleep-state past property" do
+    original = input()
+    sleep = %{original |
+      predicate_surface: "slept",
+      grounding: %{original.grounding |
+        surface: "slept",
+        selected_lifg_id: "slept|verb|1",
+        forms: [%{
+          surface: "slept", lemma: "sleep",
+          inflection: "simple past and past participle",
+          source: :attested_scored_form_of_dictionary_sense,
+          morphological_only?: true,
+          inflected_sense_id: "slept|verb|1", score: 0.4
+        }],
+        feature_hypotheses: [%{
+          feature: :sleep_state, source_lemma: "sleep",
+          source_lemma_sense_id: "sleep|verb|1",
+          source: :lemma_dictionary_definition,
+          epistemic_status: :candidate_only
+        }]
+      }
+    }
+
+    assert {:ok, proof} = FinitePastLocative.compose(sleep)
+    assert :ok = FinitePastLocative.verify(proof)
+    assert proof.event_semantics.predicate == :sleep
+    assert proof.event_semantics.tense == :past
+    assert proof.event_semantics.actor == %{kind: :bird, referent: :unresolved}
+    assert proof.event_semantics.event_existence == :not_asserted
+    assert proof.premises.selected_lifg_id == "slept|verb|1"
+    refute proof.factual_authority?
+    refute proof.semantic_compatibility_proven?
+
+    unrelated_feature = put_in(sleep, [:grounding, :feature_hypotheses, Access.at(0), :feature],
+      :seated_posture)
+    assert :unsupported = FinitePastLocative.compose(unrelated_feature)
+    altered_proof = put_in(proof, [:event_semantics, :predicate], :sit)
+    assert {:error, :invalid_derivation} = FinitePastLocative.verify(altered_proof)
+  end
+
   test "abstains without independent morphological or dictionary feature evidence" do
     base = input()
     assert :unsupported = FinitePastLocative.compose(
