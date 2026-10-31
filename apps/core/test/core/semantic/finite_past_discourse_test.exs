@@ -1,6 +1,7 @@
 defmodule Core.Semantic.FinitePastDiscourseTest do
   use ExUnit.Case, async: true
 
+  alias Core.Discourse.Ledger
   alias Core.Semantic.FinitePastDiscourse
   alias Core.Semantic.Composition.FinitePastLocativeIntegration
   alias Core.SemanticInput
@@ -64,7 +65,7 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
     %SemanticInput{
       sentence: "The bird #{surface} on the fence.",
       source: :user,
-      session_id: "phase3-observation-only",
+      session_id: "phase3-observation-only-#{System.unique_integer([:positive])}",
       active_cells: cells
     }
     |> TokenFilters.rebuild_word_ngrams(3)
@@ -228,4 +229,158 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
     assert :not_applicable = FinitePastDiscourse.project(si("sat"), :invalid)
     assert :not_applicable = FinitePastDiscourse.project(si("sat"), [42])
   end
+
+  defp cleanup(session) do
+    on_exit(fn -> Ledger.clear(session) end)
+  end
+
+  test "default production ledger semantics are unchanged until explicit Phase 3 opt-in" do
+    source = si("sat")
+    cleanup(source.session_id)
+
+    recorded = Ledger.record(source,
+      finite_past_lemma_lookup: fn _ -> flunk("disabled Phase 3 touched dictionary") end)
+
+    assert recorded.lifg_choices == source.lifg_choices
+    assert [%{kind: :uninterpreted, seq: 1, factual_authority?: false}] =
+      Ledger.entries(source.session_id)
+  end
+
+  test "opt-in Ledger records a finite-past report, never a verified event or answer" do
+    for {surface, predicate, selected} <- [
+          {"sat", :sit, "sat|noun|1"},
+          {"slept", :sleep, "slept|verb|1"}
+        ] do
+      source = si(surface)
+      cleanup(source.session_id)
+      assert is_map(source.finite_past_locative_derivation)
+
+      result = Ledger.record(source, finite_past_discourse_ledger?: true,
+        finite_past_lemma_lookup: &lookup/1)
+
+      assert result.lifg_choices == source.lifg_choices
+      assert result.active_cells == source.active_cells
+      assert result.sentence == source.sentence
+      assert Enum.at(result.lifg_choices, 2).id == selected
+
+      assert [%{seq: 1, kind: :reported_finite_past_locative_candidate,
+                status: :provisional, predicate: ^predicate,
+                actor_kind: :bird, relation: :on, landmark_kind: :fence,
+                tense: :past, event_existence: :not_asserted,
+                event_occurrence_verified?: false, referent_identity_verified?: false,
+                factual_authority?: false, verification: :conversation_context_only,
+                speech_act: :declarative_candidate, speaker: :user} = entry] =
+        Ledger.entries(source.session_id)
+
+      assert entry.typed_proof_sha256 ==
+        (:crypto.hash(:sha256,
+          :erlang.term_to_binary(source.finite_past_locative_derivation.result))
+          |> Base.encode16(case: :lower))
+      assert entry.source_turn_sha256 ==
+        (:crypto.hash(:sha256, source.sentence) |> Base.encode16(case: :lower))
+
+      assert map_size(entry) <= 21
+      refute Map.has_key?(entry, :sentence)
+      refute Map.has_key?(entry, :session_id)
+      refute Map.has_key?(entry, :lifg_choices)
+      refute Map.has_key?(entry, :active_cells)
+
+      # Gate 3 is not enabled: no automatic retrieval of this kind is legal.
+      assert :not_found == Ledger.resolve(source.session_id, "Where was the bird?")
+      assert :not_found == Ledger.resolve(source.session_id, "that bird")
+      assert Enum.any?(result.trace, fn
+        %{stage: :discourse_ledger, decision: :recorded,
+          meta: %{sequence: 1, kind: :reported_finite_past_locative_candidate,
+                  factual_authority?: false}} -> true
+        _ -> false
+      end)
+    end
+  end
+
+  test "opt-in records never admit a tampered or stale attached proof" do
+    source = si("slept")
+    former = si("sat")
+    cleanup(source.session_id)
+
+    bad_event = put_in(source.finite_past_locative_derivation,
+      [:event_semantics, :event_existence], :asserted)
+
+    invalid = [
+      %{source | finite_past_locative_derivation: nil},
+      %{source | finite_past_locative_derivation: bad_event},
+      %{source | finite_past_locative_derivation: former.finite_past_locative_derivation},
+      %{source | sentence: "The bird slept on the fence?"},
+      %{source | intent: :ask}
+    ]
+
+    for altered <- invalid do
+      assert is_map(altered)
+      Ledger.record(altered, finite_past_discourse_ledger?: true,
+        finite_past_lemma_lookup: &lookup/1)
+    end
+
+    records = Ledger.entries(source.session_id)
+    assert length(records) == length(invalid)
+    assert Enum.all?(records, &(&1.kind == :uninterpreted))
+    assert Enum.map(records, & &1.seq) == Enum.to_list(length(invalid)..1//-1)
+  end
+
+  test "opt-in Ledger rejects unsupported dictionary, morphology and origin evidence" do
+    source = si("slept")
+    cleanup(source.session_id)
+
+    Ledger.record(source, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: fn "sleep" -> [] end)
+
+    without_scores = %{source | lifg_choices:
+      Enum.map(source.lifg_choices, fn
+        %{token_index: 2} = choice -> %{choice | candidate_probs: %{}}
+        choice -> choice
+      end)}
+
+    Ledger.record(without_scores, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(%{source | source: :assistant}, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(%{source | session_id: nil}, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+
+    assert Enum.map(Ledger.entries(source.session_id), & &1.kind) ==
+      [:uninterpreted, :uninterpreted]
+  end
+
+  test "session boundaries and evidence-only records preserve bounded sequence" do
+    first = si("sat")
+    another = si("slept")
+    cleanup(first.session_id)
+    cleanup(another.session_id)
+
+    Ledger.record(first, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(another, finite_past_discourse_ledger?: true,
+      finite_past_lemma_lookup: &lookup/1)
+    Ledger.record(%{first | sentence: "Not a supported construction."})
+
+    assert Enum.map(Ledger.entries(first.session_id), & &1.seq) == [2, 1]
+    assert Enum.map(Ledger.entries(another.session_id), & &1.seq) == [1]
+    assert Enum.map(Ledger.entries(first.session_id), & &1.kind) ==
+      [:uninterpreted, :reported_finite_past_locative_candidate]
+    assert Enum.map(Ledger.entries(another.session_id), & &1.kind) ==
+      [:reported_finite_past_locative_candidate]
+
+    assert :not_found = Ledger.resolve(first.session_id, "Where was the bird?")
+    assert :not_found = Ledger.resolve(another.session_id, "Where was the bird?")
+    assert :ok = Ledger.clear(first.session_id)
+    assert Ledger.entries(first.session_id) == []
+    assert length(Ledger.entries(another.session_id)) == 1
+  end
+
+  test "question-intent mismatch never becomes speaker-asserted discourse" do
+    source = si("sat")
+    assert :not_applicable = FinitePastDiscourse.project(%{source | intent: :ask},
+      lookup: &lookup/1)
+    assert :not_applicable = FinitePastDiscourse.project(%{source | intent: :command},
+      lookup: &lookup/1)
+  end
+
 end
