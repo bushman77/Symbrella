@@ -69,13 +69,11 @@ defmodule Core.Discourse.Ledger.Owner do
                   _from, state),
     do: {:reply, {:error, :verified_finite_past_required}, state}
 
-  @impl true
   def handle_call({:append, session, record}, _from, state)
       when is_binary(session) and is_map(record) do
     persist(session, record, state)
   end
 
-  @impl true
   def handle_call({:append_verified_finite_past, session, si, candidate, lookup},
                   _from, state) do
     valid_session? = is_binary(session) and byte_size(session) in 1..128
@@ -94,6 +92,11 @@ defmodule Core.Discourse.Ledger.Owner do
     end
   end
 
+  def handle_call({:clear, session}, _from, state) do
+    :ets.delete(@table, session)
+    {:reply, :ok, state}
+  end
+
   defp persist(session, record, state) do
     {sequence, previous} =
       case :ets.lookup(@table, session) do
@@ -109,11 +112,6 @@ defmodule Core.Discourse.Ledger.Owner do
     {:reply, {:ok, sequence}, state}
   end
 
-  @impl true
-  def handle_call({:clear, session}, _from, state) do
-    :ets.delete(@table, session)
-    {:reply, :ok, state}
-  end
 
   defp retention do
     case Application.get_env(:core, Core.Discourse.Ledger, []) do
