@@ -226,5 +226,6 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
     assert :not_applicable = FinitePastDiscourse.project(nil)
     assert :not_applicable = FinitePastDiscourse.project(%{}, [])
     assert :not_applicable = FinitePastDiscourse.project(si("sat"), :invalid)
+    assert :not_applicable = FinitePastDiscourse.project(si("sat"), [42])
   end
 end
