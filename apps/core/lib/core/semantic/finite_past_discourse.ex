@@ -31,6 +31,8 @@ defmodule Core.Semantic.FinitePastDiscourse do
   def project(%{} = si, opts) when is_list(opts) do
     with true <- Keyword.keyword?(opts),
          true <- Map.get(si, :source) in [:user, :prod],
+         true <- Map.get(si, :intent) not in [:ask, :ask_info, :question,
+                                              :command, :define, :imperative],
          true <- valid_session?(Map.get(si, :session_id)),
          sentence when is_binary(sentence) <- Map.get(si, :sentence),
          true <- declarative_surface?(sentence),
