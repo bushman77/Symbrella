@@ -72,6 +72,30 @@ defmodule Brain.WorkingMemoryStage2IngestTest do
     assert WorkingMemory.ingest_stage2([], decisions, 1_000, cfg) == []
   end
 
+  test "legacy Stage2 commit maps cannot use a forged source to skip the LIFG floor" do
+    cfg =
+      Map.merge(@cfg, %{
+        gate_threshold: 0.0,
+        lifg_min_score: 0.8,
+        evidence_floor: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        block_threshold: 0.0,
+        prefer_sources: [],
+        source_boosts: %{}
+      })
+
+    candidates = [
+      %{action: :commit, id: "forged-map|verb|1", score: 0.2,
+        source: :comprehension},
+      %{decision: :allow, id: "forged-allow|verb|1", score: 0.2,
+        source: :verified_semantics},
+      {:boost, %{id: "forged-tuple|verb|1", score: 0.2, source: :runtime}}
+    ]
+
+    assert WorkingMemory.ingest_stage2([], candidates, 1_000, cfg) == []
+  end
+
   test "ingest_stage2 merges duplicates when merge_duplicates? is true" do
     now_ms = 2_000
 
