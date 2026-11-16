@@ -4,6 +4,33 @@
 
 The ML track calibrates bounded self-state signals. It does not replace the symbolic self-model.
 
+## Operational Self-Awareness V1 — Scope Frozen
+
+**Release contract:** docs/operational_self_awareness_v1.md
+**Phase 9A ingress inventory:** docs/operational_v1_wm_ingress_inventory.md
+
+V1 is a finite engineering demonstration, **not** a claim of sentience.
+Every release criterion must have independent, reproducible evidence before
+sign-off. Unit-test success alone is insufficient.
+
+- [x] Freeze eight V1 acceptance criteria and non-goals.
+- [x] Add a fail-closed evidence-register audit that cannot approve its own claims.
+- [x] Record the initial Phase 9A Working Memory ingress inventory and adversarial test plan.
+- [ ] Reconfirm complete green baseline after latest semantic-review hash fix.
+- [ ] Prove universal canonical BasalGanglia WM admission with bypass controls.
+- [ ] Collect independently reviewed, truly held-out semantic evidence.
+- [ ] Demonstrate bounded, reversible learning with regression and rollback gates.
+- [ ] Demonstrate verified continuity and improvements after restart.
+- [ ] Add read-only, grounded code/host introspection with unknown-state handling.
+- [ ] Reproduce a longitudinal self-correction experiment and obtain independent sign-off.
+
+Readiness command (no application startup):
+
+    mix run --no-start scripts/audit_operational_awareness_v1.exs
+
+A complete declared evidence register can be *ready for external audit*,
+never automatically release-approved.
+
 ---
 
 ## 0) Architectural Constraints
@@ -59,6 +86,8 @@ Current status:
 - [x] `Brain.SelfCalibration.Evaluator` compares predictions against labels.
 - [x] Axon-backed calibration model, training artifact path, and advisory predictor exist.
 - [x] Baseline/Axon comparison and explicit blend telemetry exist.
+- [x] Document the initial ingress/path inventory and required bypass regression cases
+  (docs/operational_v1_wm_ingress_inventory.md). This does not establish full coverage.
 - [x] Initial SelfModel -> WM admission coupling exists for vigilance, uncertainty, inhibition, and cognitive load.
 - [x] Explicit bounded self-state bias function exists.
 - [x] Self-state gate contribution is telemetry-visible.
