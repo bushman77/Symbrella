@@ -158,7 +158,8 @@ defmodule Core.Agency.SemanticHoldout do
       not bounded_id?(id) -> {:error, :invalid_case_id}
       not is_binary(sentence) or byte_size(sentence) not in 1..@max_sentence_bytes ->
         {:error, :invalid_sentence}
-      is_nil(utterance_digest(sentence)) -> {:error, :invalid_sentence}
+      String.trim(sentence) == "" or is_nil(utterance_digest(sentence)) ->
+        {:error, :invalid_sentence}
       not is_integer(index) or index < 0 or index >= 128 ->
         {:error, :invalid_token_index}
       not is_binary(gold) or byte_size(gold) not in 1..160 ->
@@ -197,6 +198,7 @@ defmodule Core.Agency.SemanticHoldout do
       }
 
       Evaluator.compare(si, reference)
+      |> Map.put(:case_id, item["case_id"])
     else
       _ ->
         %{
