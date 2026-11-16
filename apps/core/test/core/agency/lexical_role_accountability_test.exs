@@ -1,7 +1,11 @@
 defmodule Core.Agency.LexicalRoleAccountabilityTest do
   use ExUnit.Case, async: false
 
-  alias Core.Agency.{LexicalRoleAccountability, LexicalRoleShadow}
+  alias Core.Agency.{
+    LexicalRoleAccountability,
+    LexicalRoleShadow,
+    SemanticCorrectionEvaluator
+  }
   alias Core.Response.AgencyMemory.Source
   alias Db.AgencyEvents
 
@@ -99,6 +103,23 @@ defmodule Core.Agency.LexicalRoleAccountabilityTest do
       include_sources: ["lexical_role_accountability"]
     )
     assert same.id == id
+  end
+
+  test "durable role receipt carries only the live label-free semantic evaluation" do
+    si = audited_input("semantic-audit-attrs")
+    |> SemanticCorrectionEvaluator.attach()
+
+    assert {:ok, attrs} = LexicalRoleAccountability.attrs(si)
+
+    evaluation = attrs.decision.semantic_evaluation
+    assert evaluation.status == :not_evaluable
+    assert evaluation.reference_status == :not_provided
+    refute evaluation.independently_verified?
+    refute evaluation.learning_applied?
+    refute evaluation.policy_change_authorized?
+    refute Map.has_key?(evaluation, :supplied_gold_sense_id)
+
+    assert si.lifg_choices == audited_input("semantic-audit-attrs").lifg_choices
   end
 
   test "changes after the original audit are visible but not promoted to verified corrections" do
