@@ -11,7 +11,13 @@ defmodule Core.Response.AgencyMemory.Source do
     limit = Keyword.get(opts, :limit)
 
     if Code.ensure_loaded?(Db.AgencyEvents) and function_exported?(Db.AgencyEvents, :recent, 1) do
-      Db.AgencyEvents.recent(session_id: session_id, limit: limit)
+      # Diagnostic accountability receipts are not behavioral outcomes.
+      # Keep them out of the bounded self-state learning-pressure window.
+      Db.AgencyEvents.recent(
+        session_id: session_id,
+        limit: limit,
+        exclude_sources: ["lexical_role_accountability"]
+      )
     else
       []
     end
