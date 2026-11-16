@@ -69,10 +69,14 @@ defmodule Core.Agency.SemanticHoldout do
       if summary.status == :benchmark_summary do
         %{
           v: @version,
-          status: :evaluated_against_supplied_reviews,
+          status:
+            if(summary.compared == 0,
+              do: :no_comparable_corrections,
+              else: :evaluated_against_supplied_reviews),
           dataset_id: manifest["dataset_id"],
           manifest_sha256: expected_sha256,
-          report: summary,
+          cohort_baseline: cohort_baseline(reports),
+          correction_subset: summary,
           cases: Enum.map(reports, &public_result/1),
           external_reviewer_identity_verified?: false,
           actual_training_isolation_verified?: false,
@@ -199,15 +203,72 @@ defmodule Core.Agency.SemanticHoldout do
 
       Evaluator.compare(si, reference)
       |> Map.put(:case_id, item["case_id"])
+      |> Map.put(:baseline_label_status, baseline_label_status(si, item))
     else
       _ ->
         %{
           v: @version, status: :abstained,
           reason: :resolver_failed_or_sentence_changed,
           case_id: item["case_id"],
-          outcome: :not_scored
+          outcome: :not_scored,
+          baseline_label_status: :unavailable
         }
     end
+  end
+
+  defp baseline_label_status(si, item) do
+    index = item["target_index"]
+    gold = item["gold_sense_id"]
+
+    choices =
+      si |> Map.get(:lifg_choices, []) |> List.wrap()
+      |> Enum.filter(&(is_map(&1) and Map.get(&1, :token_index) == index))
+
+    tokens =
+      si |> Map.get(:tokens, []) |> List.wrap()
+      |> Enum.filter(&(is_map(&1) and Map.get(&1, :index) == index and
+        Map.get(&1, :n, 1) == 1))
+
+    case {choices, tokens} do
+      {[%{} = choice], [%{phrase: phrase}]} when is_binary(phrase) ->
+        selected = Map.get(choice, :id) || Map.get(choice, :chosen_id)
+        norm =
+          phrase |> String.downcase() |> String.trim()
+          |> String.replace(~r/^\p{P}+|\p{P}+$/u, "")
+
+        ids =
+          si |> Map.get(:active_cells, []) |> List.wrap()
+          |> Enum.flat_map(fn
+            %{id: id, norm: ^norm} when is_binary(id) -> [id]
+            _ -> []
+          end)
+
+        if is_binary(selected) and selected in ids and gold in ids do
+          if selected == gold, do: :matches_supplied_label,
+            else: :differs_from_supplied_label
+        else
+          :unavailable
+        end
+
+      _ ->
+        :unavailable
+    end
+  end
+
+  defp cohort_baseline(reports) do
+    matched = Enum.count(reports,
+      &(Map.get(&1, :baseline_label_status) == :matches_supplied_label))
+    differed = Enum.count(reports,
+      &(Map.get(&1, :baseline_label_status) == :differs_from_supplied_label))
+
+    %{
+      total_cases: length(reports),
+      baseline_label_comparable: matched + differed,
+      baseline_matches_supplied_labels: matched,
+      baseline_differs_from_supplied_labels: differed,
+      baseline_unavailable: length(reports) - matched - differed,
+      label_authentication: :not_established
+    }
   end
 
   defp safe_resolve(resolver, sentence) do
@@ -226,12 +287,13 @@ defmodule Core.Agency.SemanticHoldout do
   defp public_result(%{status: :compared_to_supplied_label} = result) do
     Map.take(result, [
       :case_id, :status, :outcome, :baseline_matches_label?,
-      :candidate_matches_label?, :reason
+      :candidate_matches_label?, :baseline_label_status, :reason
     ])
   end
 
   defp public_result(%{status: :abstained} = result),
-    do: Map.take(result, [:case_id, :status, :outcome, :reason])
+    do: Map.take(result, [:case_id, :status, :outcome,
+      :baseline_label_status, :reason])
 
   defp bounded_id?(value),
     do: is_binary(value) and byte_size(value) in 1..@max_id_bytes and
