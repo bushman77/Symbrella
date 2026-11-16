@@ -27,18 +27,23 @@ defmodule Core.Agency.SemanticReviewTest do
     [
       %{id: "flying|verb|1", norm: "flying", pos: "verb",
         definition: "moving through the air", example: "The bird was flying",
+        gram_function: [], semantic_atoms: ["tag:form-of", "tag:present", "tag:participle"],
         status: "inactive"},
       %{id: "flying|adjective|1", norm: "flying", pos: "adjective",
-        definition: "moving quickly", example: nil, status: "inactive"}
+        definition: "moving quickly", example: nil,
+        gram_function: [], semantic_atoms: [], status: "inactive"}
     ]
   end
 
   defp senses("sleeping") do
     [
       %{id: "sleeping|verb|1", norm: "sleeping", pos: "verb",
-        definition: "being asleep", example: nil, status: "inactive"},
+        definition: "being asleep", example: nil,
+        gram_function: [], semantic_atoms: ["tag:form-of", "tag:present", "tag:participle"],
+        status: "inactive"},
       %{id: "sleeping|adjective|1", norm: "sleeping", pos: "adjective",
-        definition: "asleep", example: nil, status: "inactive"}
+        definition: "asleep", example: nil,
+        gram_function: [], semantic_atoms: [], status: "inactive"}
     ]
   end
 
@@ -230,6 +235,24 @@ defmodule Core.Agency.SemanticReviewTest do
     hash = SemanticHoldout.utterance_digest("The bird is flying into the tree.")
     assert SemanticReview.finalize(p, a, b, [hash]) ==
              {:error, :development_overlap_detected}
+  end
+
+  test "incomplete synthetic dictionary rows cannot bypass the required semantic inventory" do
+    missing = fn word ->
+      senses(word)
+      |> Enum.map(&Map.delete(&1, :semantic_atoms))
+    end
+
+    assert SemanticReview.prepare(input_cases(), missing) ==
+             {:error, :invalid_dictionary_inventory}
+
+    missing_grammar = fn word ->
+      senses(word)
+      |> Enum.map(&Map.delete(&1, :gram_function))
+    end
+
+    assert SemanticReview.prepare(input_cases(), missing_grammar) ==
+             {:error, :invalid_dictionary_inventory}
   end
 
   test "bad token indexes, mismatched words and insufficient inventories are refused" do
