@@ -239,8 +239,8 @@ defmodule Core do
     si
     # Pure typed semantic composition with replayable non-factual proof records.
     |> Core.Semantic.Composition.attach()
-    # Opt-in shadow audit of LIFG role conflicts. No winner replacement, learning,
-    # or additional authority over semantic composition.
+    # Always record the original LIFG role decision and its evidence boundaries.
+    # This observer cannot change lexical winners, memory, or response policy.
     |> Core.Agency.LexicalRoleShadow.attach(opts)
     |> StateDump.capture(:semantic_composition)
     # On by default (explicit false opt-out): independent finite-past proof, never a
@@ -323,6 +323,10 @@ defmodule Core do
     # candidates come from proof-revalidated SI, never user or LLM prose.
     |> Core.Discourse.Ledger.record(opts)
     |> StateDump.capture(:discourse_ledger)
+    # Persist a bounded accountability receipt once the turn's downstream
+    # lexical state is known. Storage errors cannot interrupt comprehension.
+    |> Core.Agency.LexicalRoleAccountability.record(opts)
+    |> StateDump.capture(:reflective_accountability)
   end
 
   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
