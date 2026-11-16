@@ -781,8 +781,14 @@ Notes:
   agency_events ledger with fail-closed unavailable/skipped statuses and
   explicit isolation from behavioral agency-memory signals
   (docs/reflective_lexical_role_shadow.md).
-- [ ] Independently adjudicate lexical sense correctness on held-out utterances;
-  the role shadow can establish only provisional grammatical compatibility.
+- [x] Add a default-on, read-only semantic-correction evaluation trace to
+  the production Core pipeline and its existing accountability ledger.
+- [x] Implement bounded *synthetic fixture* reference comparisons that track
+  wrong-to-right, right-to-wrong, both-wrong, abstentions and duplicate cases
+  (docs/reflective_semantic_correction_evaluator.md). Supplied labels are
+  explicitly unauthenticated and cannot authorize a policy change.
+- [ ] Independently adjudicate lexical sense correctness on held-out utterances
+  with separately authenticated labels; a scored fixture is not gold truth.
 - [ ] Add a separately implemented or external oracle for semantic correction;
   formal replay currently shares the existing reducer.
 - [ ] Persist independently corroborated outcome receipts with typed evidence IDs.
