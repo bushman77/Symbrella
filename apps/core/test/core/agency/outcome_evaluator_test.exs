@@ -97,7 +97,7 @@ defmodule Core.Agency.OutcomeEvaluatorTest do
   end
 
   test "explicit command failure is recorded, not classified as success" do
-    failed = %{executed() | status: :failed, reason: :runtime_error}
+    failed = executed() |> Map.put(:status, :failed) |> Map.put(:reason, :runtime_error)
 
     evaluation =
       OutcomeEvaluator.evaluate(decision(), [command()], [failed],
