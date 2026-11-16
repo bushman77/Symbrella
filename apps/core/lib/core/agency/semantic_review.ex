@@ -89,8 +89,10 @@ defmodule Core.Agency.SemanticReview do
       when is_list(cases) and is_list(inventory) and is_function(fetch, 1) do
     with {:ok, _} <- SemanticHoldout.validate_manifest(manifest),
          true <- length(cases) == length(inventory),
-         true <- Enum.map(cases, & &1["case_id"]) ==
-                   Enum.map(inventory, & &1["case_id"]) do
+         true <- Enum.zip(cases, inventory) |> Enum.all?(fn {item, entry} ->
+           is_map(entry) and item["case_id"] == entry["case_id"] and
+             validate_case_input(Map.put(item, "target_word", entry["target_word"])) == :ok
+         end) do
       Enum.reduce_while(inventory, :ok, fn entry, _ ->
         word = entry["target_word"]
 
@@ -209,7 +211,8 @@ defmodule Core.Agency.SemanticReview do
                     "definition" => definition, "example" => example}, word) do
     is_binary(id) and byte_size(id) in 1..160 and
       norm == word and is_binary(pos) and pos != "" and
-      String.starts_with?(id, word <> "|" <> pos <> "|") and
+      (id == word <> "|" <> pos or
+         String.starts_with?(id, word <> "|" <> pos <> "|")) and
       (is_nil(definition) or
          (is_binary(definition) and byte_size(definition) <= @max_definition_bytes)) and
       (is_nil(example) or
