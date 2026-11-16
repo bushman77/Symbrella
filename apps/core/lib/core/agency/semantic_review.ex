@@ -89,7 +89,7 @@ defmodule Core.Agency.SemanticReview do
       when is_list(cases) and is_list(inventory) and is_function(fetch, 1) do
     with {:ok, _} <- SemanticHoldout.validate_manifest(manifest),
          true <- length(cases) == length(inventory),
-         true <- Enum.zip(cases, inventory) |> Enum.all?(fn {item, entry} ->
+         true <- Enum.all?(Enum.zip(cases, inventory), fn {item, entry} ->
            is_map(entry) and item["case_id"] == entry["case_id"] and
              validate_case_input(Map.put(item, "target_word", entry["target_word"])) == :ok
          end) do
