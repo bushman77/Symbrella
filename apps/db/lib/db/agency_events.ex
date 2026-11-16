@@ -50,12 +50,29 @@ defmodule Db.AgencyEvents do
     session_id = opts |> Keyword.get(:session_id, "global") |> to_string()
     limit = opts |> Keyword.get(:limit, 20) |> normalize_limit()
 
-    query =
-      from(e in AgencyEvent,
-        where: e.session_id == ^session_id,
-        order_by: [desc: e.inserted_at, desc: e.id],
-        limit: ^limit
-      )
+    included = source_filter(Keyword.get(opts, :include_sources, []))
+    excluded = source_filter(Keyword.get(opts, :exclude_sources, []))
+
+    base = from(e in AgencyEvent, where: e.session_id == ^session_id)
+
+    base =
+      if included == [] do
+        base
+      else
+        from(e in base, where: e.source in ^included)
+      end
+
+    base =
+      if excluded == [] do
+        base
+      else
+        from(e in base, where: e.source not in ^excluded)
+      end
+
+    query = from(e in base,
+      order_by: [desc: e.inserted_at, desc: e.id],
+      limit: ^limit
+    )
 
     Db.all(query)
   end
@@ -88,6 +105,14 @@ defmodule Db.AgencyEvents do
       true -> Map.put(attrs, key, %{"value" => value})
     end
   end
+
+  defp source_filter(values) when is_list(values) do
+    values
+    |> Enum.filter(&(is_binary(&1) and byte_size(&1) > 0 and byte_size(&1) <= 128))
+    |> Enum.take(16)
+  end
+
+  defp source_filter(_), do: []
 
   defp normalize_limit(limit) when is_integer(limit) and limit > 0, do: min(limit, 100)
   defp normalize_limit(_), do: 20
