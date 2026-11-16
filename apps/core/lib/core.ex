@@ -239,6 +239,9 @@ defmodule Core do
     si
     # Pure typed semantic composition with replayable non-factual proof records.
     |> Core.Semantic.Composition.attach()
+    # Opt-in shadow audit of LIFG role conflicts. No winner replacement, learning,
+    # or additional authority over semantic composition.
+    |> Core.Agency.LexicalRoleShadow.attach(opts)
     |> StateDump.capture(:semantic_composition)
     # On by default (explicit false opt-out): independent finite-past proof, never a
     # replacement for the existing compositional derivation.
