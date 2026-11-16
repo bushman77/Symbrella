@@ -775,6 +775,10 @@ Notes:
   treating an execution receipt as proof of success.
 - [x] Add a shadow-only formal derivation error -> recompute -> proof replay
   experiment; see docs/reflective_formal_correction_shadow.md.
+- [x] Add opt-in, read-only LIFG role conflict diagnosis against independently
+  scored dictionary/POS witnesses (docs/reflective_lexical_role_shadow.md).
+- [ ] Independently adjudicate lexical sense correctness on held-out utterances;
+  the role shadow can establish only provisional grammatical compatibility.
 - [ ] Add a separately implemented or external oracle for semantic correction;
   formal replay currently shares the existing reducer.
 - [ ] Persist independently corroborated outcome receipts with typed evidence IDs.
