@@ -790,6 +790,9 @@ Notes:
 - [x] Build a bounded sealed holdout runner with declared two-reviewer
   agreement, current-sentence label binding, exact/case-insensitive development
   overlap checks, and fail-closed scoring (docs/semantic_holdout_benchmark.md).
+- [x] Add real-dictionary blind review packet generation, two separate review
+  sheets, strict consensus and dictionary-inventory freeze checks
+  (docs/semantic_human_review_protocol.md); no gold labels fabricated.
 - [ ] Collect a genuinely independent, human-reviewed, frozen sense-ID holdout
   dataset and externally validate reviewer and training-corpus provenance.
 - [ ] Independently adjudicate lexical sense correctness on held-out utterances
