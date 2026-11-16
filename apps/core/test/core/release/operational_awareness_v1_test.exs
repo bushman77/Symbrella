@@ -56,6 +56,25 @@ defmodule Core.Release.OperationalAwarenessV1Test do
     assert Enum.all?(summary.criteria, &(&1.status == :missing))
   end
 
+  test "omitted --strict is non-fatal, while explicit strict requires full receipts" do
+    blocked = Readiness.assess([])
+
+    refute Readiness.strict_failure?(nil, blocked)
+    refute Readiness.strict_failure?(false, blocked)
+    assert Readiness.strict_failure?(true, blocked)
+    assert Readiness.strict_failure?(true, Readiness.assess(:invalid))
+
+    receipts =
+      Readiness.criteria()
+      |> Enum.with_index(1)
+      |> Enum.map(fn {criterion, index} -> receipt(criterion, index) end)
+
+    ready_for_audit = Readiness.assess(receipts)
+    assert ready_for_audit.status == :ready_for_external_audit
+    refute Readiness.strict_failure?(true, ready_for_audit)
+    refute ready_for_audit.release_approved?
+  end
+
   test "partial evidence remains blocked with explicit missing criteria" do
     [first | _] = Readiness.criteria()
     summary = Readiness.assess([receipt(first, 1)])
