@@ -224,6 +224,8 @@ defmodule Core.Agency.LexicalRoleShadowTest do
     refute meta.learning_applied?
     refute meta.lexical_sense_verified?
     refute Map.has_key?(meta, :candidate_sense_id)
+  end
+
   test "default trace records structural abstention rather than inventing a decision" do
     si = input()
     changed = %{si | structural_competition: %{status: :preferred}}
@@ -236,7 +238,5 @@ defmodule Core.Agency.LexicalRoleShadowTest do
 
     assert result.lifg_choices == si.lifg_choices
     refute result == changed
-  end
-
   end
 end
