@@ -128,6 +128,45 @@ defmodule Core.PipelineContractTest do
     refute Enum.any?(disabled.trace, &match?(%{stage: :semantic_sense_shadow}, &1))
   end
 
+  test "real production pipeline records default lexical accountability and persists a session receipt" do
+    session_id = "pipeline-audit-#{System.unique_integer([:positive])}"
+
+    opts = [
+      mode: :prod,
+      session_id: session_id,
+      experience_origin: :user_turn,
+      fuzzy: false,
+      response: :off,
+      episodes: false,
+      persist_episodes: false,
+      hippocampus_encode?: false,
+      self_model: :off,
+      comprehension_wm?: false,
+      notify_brain?: false,
+      synapse_shadow?: false,
+      reflective_role_shadow?: false
+    ]
+
+    si = Core.resolve_input("The artist draws a picture.", opts)
+
+    role_audit = Enum.find(si.trace, &match?(%{stage: :reflective_role_shadow}, &1))
+    assert_trace_contract!(role_audit)
+    assert role_audit.meta.learning_applied? == false
+    assert role_audit.meta.lexical_sense_verified? == false
+    assert is_binary(role_audit.meta.selected_choices_sha256)
+    assert byte_size(role_audit.meta.selected_choices_sha256) == 64
+
+    assert %{decision: :persisted, meta: %{ledger_id: record_id}} =
+      Enum.find(si.trace, &match?(%{stage: :reflective_accountability}, &1))
+
+    assert [record] = Core.Agency.LexicalRoleAccountability.recent(session_id, limit: 1)
+    assert record.id == record_id
+    assert record.source == "lexical_role_accountability"
+    assert record.outcome["learning_applied?"] == false
+    assert record.outcome["lexical_sense_verified?"] == false
+    assert :ok == SemanticInput.validate_contract(si)
+  end
+
   defp assert_trace_contract!(%{} = event) do
     for key <- [:stage, :input_summary, :decision, :reason, :scores, :meta, :ts_ms] do
       assert Map.has_key?(event, key), "missing trace key #{inspect(key)} in #{inspect(event)}"
