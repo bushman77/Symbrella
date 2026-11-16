@@ -215,7 +215,9 @@ defmodule Core.Release.OperationalAwarenessV1 do
 
   defp pick_atom(_, _), do: nil
 
-  defp get(%{} = map, key, default \\ nil) do
+  defp get(map, key, default \\ nil)
+
+  defp get(%{} = map, key, default) do
     Map.get(map, key, Map.get(map, Atom.to_string(key), default))
   end
 
