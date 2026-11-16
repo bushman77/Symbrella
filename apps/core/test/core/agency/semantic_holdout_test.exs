@@ -110,7 +110,6 @@ defmodule Core.Agency.SemanticHoldoutTest do
     assert result.correction_subset.compared == 2
     assert result.correction_subset.abstentions == 0
     assert result.correction_subset.wrong_to_right == 1
-    assert result.cohort_baseline.baseline_unavailable == 1
     assert result.correction_subset.right_to_wrong == 1
     assert result.correction_subset.net_label_agreement_gain == 0
     assert result.cohort_baseline.total_cases == 2
@@ -197,6 +196,7 @@ defmodule Core.Agency.SemanticHoldoutTest do
     assert result.correction_subset.compared == 1
     assert result.correction_subset.abstentions == 1
     assert result.correction_subset.wrong_to_right == 1
+    assert result.cohort_baseline.baseline_unavailable == 1
     assert Enum.at(result.cases, 1).reason == :resolver_failed_or_sentence_changed
     refute result.learning_applied?
   end
