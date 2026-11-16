@@ -258,15 +258,28 @@ defmodule Core.Agency.SemanticCorrectionEvaluator do
   end
 
   defp valid_comparison_report?(report) do
+    baseline = Map.get(report, :baseline_sense_id)
+    candidate = Map.get(report, :candidate_sense_id)
+    gold = Map.get(report, :supplied_gold_sense_id)
+
+    expected =
+      cond do
+        baseline == gold -> :right_to_wrong
+        candidate == gold -> :wrong_to_right
+        true -> :both_wrong
+      end
+
     is_binary(Map.get(report, :case_id)) and
       is_binary(Map.get(report, :utterance_sha256)) and
       is_integer(Map.get(report, :token_index)) and
-      Map.get(report, :outcome) in [:wrong_to_right, :right_to_wrong, :both_wrong] and
+      is_binary(baseline) and is_binary(candidate) and is_binary(gold) and
+      baseline != candidate and
+      Map.get(report, :outcome) == expected and
+      Map.get(report, :baseline_matches_label?) == (baseline == gold) and
+      Map.get(report, :candidate_matches_label?) == (candidate == gold) and
       Map.get(report, :label_authenticated?) == false and
       Map.get(report, :learning_applied?) == false and
-      Map.get(report, :policy_change_authorized?) == false and
-      Map.get(report, :baseline_matches_label?) in [true, false] and
-      Map.get(report, :candidate_matches_label?) in [true, false]
+      Map.get(report, :policy_change_authorized?) == false
   end
 
   defp abstain(reason) do
