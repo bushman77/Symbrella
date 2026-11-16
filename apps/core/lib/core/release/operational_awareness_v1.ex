@@ -112,6 +112,15 @@ defmodule Core.Release.OperationalAwarenessV1 do
 
   def assess(_), do: rejected(:invalid_receipt_batch)
 
+  @doc """
+  CLI strict-mode exit decision. An omitted flag is false, and incomplete or
+  malformed evidence makes strict mode fail with a nonzero exit status.
+  """
+  @spec strict_failure?(term(), term()) :: boolean()
+  def strict_failure?(true, %{ready_for_external_audit?: true}), do: false
+  def strict_failure?(true, _assessment), do: true
+  def strict_failure?(_flag, _assessment), do: false
+
   defp assessment(prepared, now_ms) do
     rows =
       Enum.map(@criteria, fn criterion ->
