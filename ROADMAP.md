@@ -773,6 +773,10 @@ Notes:
 - [x] Attach a bounded evaluation and reflection to the Core autonomy trace.
 - [x] Reject stale, missing, invalid, mismatched, or deferred evidence without
   treating an execution receipt as proof of success.
+- [x] Add a shadow-only formal derivation error -> recompute -> proof replay
+  experiment; see docs/reflective_formal_correction_shadow.md.
+- [ ] Add a separately implemented or external oracle for semantic correction;
+  formal replay currently shares the existing reducer.
 - [ ] Persist independently corroborated outcome receipts with typed evidence IDs.
 - [ ] Add held-out symbolic error-detection and alternate-strategy comparisons.
 - [ ] Permit bounded policy adaptation only after repeated verified improvements.
