@@ -129,7 +129,10 @@ defmodule Core.Agency.SemanticCorrectionEvaluator do
     ids = Enum.map(comparable, &Map.get(&1, :case_id))
     spans = Enum.map(comparable, &{Map.get(&1, :utterance_sha256), Map.get(&1, :token_index)})
 
-    if Enum.all?(reports, &is_map/1) and
+    if Enum.all?(reports, fn
+         %{status: status} when status in [:compared_to_supplied_label, :abstained] -> true
+         _ -> false
+       end) and
          Enum.all?(comparable, &valid_comparison_report?/1) and
          length(ids) == length(Enum.uniq(ids)) and
          length(spans) == length(Enum.uniq(spans)) do
