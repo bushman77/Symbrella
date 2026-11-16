@@ -13,6 +13,7 @@ defmodule Core.Agency.OutcomeEvaluator do
   alias Core.Agency.Decision
 
   @version 1
+  @max_snapshot_age_ms 5_000
 
   @spec evaluate(Decision.t() | map(), [map()], [map()], keyword()) :: map()
   def evaluate(decision, commands, results, opts \\ [])
@@ -175,7 +176,11 @@ defmodule Core.Agency.OutcomeEvaluator do
   end
 
   defp valid_snapshot?(%Brain.SelfModel{} = model) do
-    model.v == 1 and is_integer(model.updated_at_ms) and model.updated_at_ms > 0 and
+    now_ms = System.system_time(:millisecond)
+
+    model.v == 1 and is_integer(model.updated_at_ms) and
+      model.updated_at_ms > 0 and model.updated_at_ms <= now_ms and
+      now_ms - model.updated_at_ms <= @max_snapshot_age_ms and
       Enum.all?(
         [model.confidence, model.uncertainty, model.stability, model.cognitive_load],
         fn value -> is_number(value) and value >= 0.0 and value <= 1.0 end
