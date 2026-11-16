@@ -16,6 +16,7 @@ defmodule Core.Agency.SemanticReview do
   @max_id 128
   @max_sentence_bytes 2_048
   @max_definition_bytes 10_000
+  @max_tags 128
   @max_development_hashes 4_096
 
   @spec prepare(map(), (String.t() -> list())) :: {:ok, map()} | {:error, atom()}
@@ -201,14 +202,18 @@ defmodule Core.Agency.SemanticReview do
       "pos" => Map.get(row, :pos) || Map.get(row, "pos"),
       "definition" => Map.get(row, :definition) || Map.get(row, "definition"),
       "example" => Map.get(row, :example) || Map.get(row, "example"),
-      "status" => Map.get(row, :status) || Map.get(row, "status")
+      "gram_function" => normalize_tags(Map.get(row, :gram_function) ||
+        Map.get(row, "gram_function")),
+      "semantic_atoms" => normalize_tags(Map.get(row, :semantic_atoms) ||
+        Map.get(row, "semantic_atoms"))
     }
   end
 
   defp snapshot_row(_), do: nil
 
   defp valid_row?(%{"id" => id, "norm" => norm, "pos" => pos,
-                    "definition" => definition, "example" => example}, word) do
+                    "definition" => definition, "example" => example,
+                    "gram_function" => grammar, "semantic_atoms" => atoms}, word) do
     is_binary(id) and byte_size(id) in 1..160 and
       norm == word and is_binary(pos) and pos != "" and
       (id == word <> "|" <> pos or
@@ -216,10 +221,19 @@ defmodule Core.Agency.SemanticReview do
       (is_nil(definition) or
          (is_binary(definition) and byte_size(definition) <= @max_definition_bytes)) and
       (is_nil(example) or
-         (is_binary(example) and byte_size(example) <= @max_definition_bytes))
+         (is_binary(example) and byte_size(example) <= @max_definition_bytes)) and
+      valid_tags?(grammar) and valid_tags?(atoms)
   end
 
   defp valid_row?(_, _), do: false
+
+  defp normalize_tags(tags) when is_list(tags), do: Enum.sort(tags)
+  defp normalize_tags(other), do: other
+
+  defp valid_tags?(tags) do
+    is_list(tags) and length(tags) <= @max_tags and
+      Enum.all?(tags, &(is_binary(&1) and byte_size(&1) <= 512))
+  end
 
   defp validate_packet(%{"version" => @version, "dataset_id" => dataset,
                           "cases" => cases}) when is_list(cases) do
