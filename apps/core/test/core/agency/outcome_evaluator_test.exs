@@ -137,6 +137,23 @@ defmodule Core.Agency.OutcomeEvaluatorTest do
     assert evaluation.reason == :invalid_live_snapshot
   end
 
+  test "stale or future-dated self-model observations cannot verify an outcome" do
+    now_ms = System.system_time(:millisecond)
+
+    for timestamp <- [now_ms - 60_000, now_ms + 60_000] do
+      snapshot = %Brain.SelfModel{updated_at_ms: timestamp}
+
+      evaluation =
+        OutcomeEvaluator.evaluate(decision(), [command()], [executed()],
+          snapshot_reader: fn -> snapshot end
+        )
+
+      assert evaluation.status == :unverified
+      assert evaluation.reason == :invalid_live_snapshot
+      refute evaluation.verified?
+    end
+  end
+
   test "unsupported outcomes cannot be marked verified by an unrelated snapshot" do
     unsupported = %{decision() | expected_outcome: %{kind: :user_clarifies}}
 
