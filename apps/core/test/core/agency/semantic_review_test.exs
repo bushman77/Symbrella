@@ -185,10 +185,39 @@ defmodule Core.Agency.SemanticReviewTest do
 
     assert SemanticReview.verify_current_dictionary(manifest, changed) ==
              {:error, :dictionary_inventory_changed}
+
+    changed_morphology = fn word ->
+      if word == "flying" do
+        Enum.map(senses(word), fn
+          %{id: "flying|verb|1"} = row ->
+            Map.put(row, :semantic_atoms, ["tag:present", "tag:participle"])
+          row -> row
+        end)
+      else
+        senses(word)
+      end
+    end
+
+    assert SemanticReview.verify_current_dictionary(manifest, changed_morphology) ==
+             {:error, :dictionary_inventory_changed}
     assert SemanticReview.verify_current_dictionary(manifest, fn _ -> [] end) ==
              {:error, :dictionary_inventory_changed}
     assert SemanticReview.verify_current_dictionary(Map.delete(manifest, "review_inventory"),
              &senses/1) == {:error, :missing_review_inventory}
+  end
+
+  test "review inventory must remain bound to its original word and token" do
+    p = packet()
+    a = fill(p, "reviewer-a", approved())
+    b = fill(p, "reviewer-b", approved())
+    assert {:ok, manifest} = SemanticReview.finalize(p, a, b, development())
+
+    [first | tail] = manifest["review_inventory"]
+    wrong = %{first | "target_word" => "sleeping"}
+    tampered = %{manifest | "review_inventory" => [wrong | tail]}
+
+    assert SemanticReview.verify_current_dictionary(tampered, &senses/1) ==
+             {:error, :invalid_review_inventory}
   end
 
   test "development overlap and missing development provenance fail validation" do
