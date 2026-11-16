@@ -65,6 +65,6 @@ cond do
     IO.puts("Consciousness: NOT TESTED")
     IO.puts("No runtime cognition or policy was modified.")
 
-    if opts[:strict] and not assessment.ready_for_external_audit?,
+    if ReleaseGate.strict_failure?(opts[:strict], assessment),
       do: System.halt(1)
 end
