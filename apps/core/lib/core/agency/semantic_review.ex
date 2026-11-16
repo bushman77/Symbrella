@@ -99,7 +99,7 @@ defmodule Core.Agency.SemanticReview do
 
         with true <- is_binary(word),
              {:ok, senses} <- fetch_snapshot(fetch, word),
-             true <- entry["sha256"] == SemanticHoldout.seal(senses) do
+             true <- entry["sha256"] == inventory_sha256(senses) do
           {:cont, :ok}
         else
           _ -> {:halt, {:error, :dictionary_inventory_changed}}
@@ -355,7 +355,7 @@ defmodule Core.Agency.SemanticReview do
         %{
           "case_id" => item["case_id"],
           "target_word" => item["target_word"],
-          "sha256" => SemanticHoldout.seal(item["senses"])
+          "sha256" => inventory_sha256(item["senses"])
         }
       end)
 
@@ -370,6 +370,13 @@ defmodule Core.Agency.SemanticReview do
     else
       {:error, :reviewer_disagreement}
     end
+  end
+
+  # The manifest sealer accepts maps, not bare lists. Wrap the sorted
+  # inventory consistently at both freeze and revalidation boundaries.
+  # This also gives inventory digests their own typed, domain-separated shape.
+  defp inventory_sha256(senses) when is_list(senses) do
+    SemanticHoldout.seal(%{"senses" => senses})
   end
 
   defp valid_id?(value),
