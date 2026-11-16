@@ -787,6 +787,11 @@ Notes:
   wrong-to-right, right-to-wrong, both-wrong, abstentions and duplicate cases
   (docs/reflective_semantic_correction_evaluator.md). Supplied labels are
   explicitly unauthenticated and cannot authorize a policy change.
+- [x] Build a bounded sealed holdout runner with declared two-reviewer
+  agreement, current-sentence label binding, exact/case-insensitive development
+  overlap checks, and fail-closed scoring (docs/semantic_holdout_benchmark.md).
+- [ ] Collect a genuinely independent, human-reviewed, frozen sense-ID holdout
+  dataset and externally validate reviewer and training-corpus provenance.
 - [ ] Independently adjudicate lexical sense correctness on held-out utterances
   with separately authenticated labels; a scored fixture is not gold truth.
 - [ ] Add a separately implemented or external oracle for semantic correction;
