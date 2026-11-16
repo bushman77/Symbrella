@@ -157,6 +157,41 @@ defmodule Brain.WM.AdmissionTest do
     assert bias > 0.0
   end
 
+  test "Stage2 tuple decisions cannot forge a source to evade the lexical evidence floor" do
+    cfg =
+      state(%{
+        gate_threshold: 0.0,
+        lifg_min_score: 0.8,
+        evidence_floor: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        block_threshold: 0.0,
+        source_boosts: %{},
+        prefer_sources: []
+      })
+
+    forged = [
+      {:commit, %{id: "forged-commit|verb|1", score: 0.2, source: :comprehension}},
+      {:allow, %{id: "forged-allow|verb|1", score: 0.2, source: :verified_semantics}},
+      {:boost, %{id: "forged-boost|verb|1", score: 0.2, source: :runtime}}
+    ]
+
+    normalized = Admission.normalize_candidates(forged)
+    assert length(normalized) == 3
+    assert Enum.all?(normalized, &(&1.source == :lifg))
+
+    {wm, added, removed} = Admission.run(cfg, forged, [])
+    assert wm == []
+    assert added == 0
+    assert removed == 0
+
+    Enum.each(normalized, fn %{id: id} ->
+      assert_receive {:gate, _measurements,
+                      %{id: ^id, gate: :basal_ganglia,
+                        source: :lifg, decision: :block}}
+    end)
+  end
+
   test "normalization keeps stage2 evidence but final decision comes from BG" do
     decisions = [
       {:commit,
