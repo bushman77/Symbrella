@@ -8,7 +8,7 @@ database. Existing ExUnit fixtures remain synthetic. This workflow does not
 turn those fixture results into real accuracy estimates.
 
 Use the **current** dictionary, not guessed numerical suffixes. The
-pre-existing \`scripts/benchmark_lifg_senses.exs\` examples (bank, bat,
+pre-existing `scripts/benchmark_lifg_senses.exs` examples (bank, bat,
 draw, light) have already been used for development and must NOT be
 represented as unseen test cases.
 
@@ -52,11 +52,11 @@ sentences to the git repository or any development/training/test fixture.
       --cases tmp/semantic_cases.json \
       --out tmp/semantic_review_packet.json
 
-This reads \`Db.brain_cells_for_norm/1\` for each target word and creates:
-- \`tmp/semantic_review_packet.json\` — exact current sense IDs, POS,
-  dictionary definitions, examples and status, sorted deterministically;
-- \`tmp/semantic_review_packet.reviewer_a.blank.json\` — first empty sheet;
-- \`tmp/semantic_review_packet.reviewer_b.blank.json\` — second empty sheet.
+This reads `Db.brain_cells_for_norm/1` for each target word and creates:
+- `tmp/semantic_review_packet.json` — exact current sense IDs, POS,
+  dictionary definitions, examples, grammar functions and semantic atoms, sorted deterministically;
+- `tmp/semantic_review_packet.reviewer_a.blank.json` — first empty sheet;
+- `tmp/semantic_review_packet.reviewer_b.blank.json` — second empty sheet.
 
 Output files are created with restricted permissions (0600) and are never
 overwritten by these scripts. The packet includes no LIFG decisions,
@@ -84,8 +84,8 @@ A filled sheet looks like:
 
 The two reviewers should not see each other's votes or Symbrella's answers
 before both submit. Save them locally as:
-- \`tmp/reviewer_a.completed.json\`
-- \`tmp/reviewer_b.completed.json\`
+- `tmp/reviewer_a.completed.json`
+- `tmp/reviewer_b.completed.json`
 
 A reviewer must not invent a sense ID. If the sentence is truly ambiguous
 or no sense fits, flag that issue for revision **before freezing**.
@@ -99,7 +99,7 @@ independent humans. That requires an external review process.
 
 ## 4. Declare previously used development utterances
 
-Create \`tmp/semantic_development_hashes.json\` with the normalized SHA-256
+Create `tmp/semantic_development_hashes.json` with the normalized SHA-256
 digests of ALL known development/training utterances in scope. For each
 one, calculate the digest in IEx or using:
 
@@ -148,8 +148,10 @@ signatures, and cannot establish dataset authenticity.
       --seal YOUR_PREVIOUSLY_SAVED_MANIFEST_SHA256
 
 The production benchmark script now **requires a frozen review_inventory**
-and checks it against Db.BrainCell data *before* invoking the resolver. Any
-definition/sense change aborts the run. The resolver gets only the sentence.
+and checks it against Db.BrainCell data *before* invoking the resolver. Any change to
+reviewed sense IDs, definitions, examples, grammar functions or semantic
+atoms aborts the run. Volatile cell activation/status is not part of the
+frozen inventory. The resolver gets only the sentence.
 
 Read the two different denominators carefully:
 
@@ -162,7 +164,7 @@ Read the two different denominators carefully:
 
 Most ordinary same-POS word-sense cases may have no supported alternative
 and will therefore count as correction abstentions. The script explicitly
-reports \`:no_comparable_corrections\` when appropriate, while retaining
+reports `:no_comparable_corrections` when appropriate, while retaining
 the whole-cohort baseline metrics.
 
 The process never trains from reviewer votes, changes LIFG selections,
