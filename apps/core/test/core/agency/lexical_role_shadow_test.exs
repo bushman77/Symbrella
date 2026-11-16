@@ -193,12 +193,16 @@ defmodule Core.Agency.LexicalRoleShadowTest do
     assert report.alternatives == []
   end
 
-  test "the opt-in trace adds bounded diagnostics without changing cognitive fields" do
+  test "default-on trace records evidence despite a caller's disable flag" do
     si = input()
-    assert LexicalRoleShadow.attach(si) == si
-    assert LexicalRoleShadow.attach(si, reflective_role_shadow?: false) == si
 
-    attached = LexicalRoleShadow.attach(si, reflective_role_shadow?: true)
+    default_trace = LexicalRoleShadow.attach(si)
+    disabled_attempt = LexicalRoleShadow.attach(si, reflective_role_shadow?: false)
+
+    assert Enum.any?(default_trace.trace, &match?(%{stage: :reflective_role_shadow}, &1))
+    assert Enum.any?(disabled_attempt.trace, &match?(%{stage: :reflective_role_shadow}, &1))
+
+    attached = default_trace
 
     assert attached.lifg_choices == si.lifg_choices
     assert attached.active_cells == si.active_cells
@@ -211,9 +215,28 @@ defmodule Core.Agency.LexicalRoleShadowTest do
 
     assert meta.alternative_count == 1
     assert [%{role: :predicate, token_index: 3}] = meta.roles
+    assert [%{role: :predicate, token_index: 3,
+              reason: :selected_pos_conflict}] = meta.blocked_roles
+    assert meta.selected_choices_sha256 ==
+             LexicalRoleShadow.selected_choices_sha256(si)
+    assert byte_size(meta.selected_choices_sha256) == 64
     refute meta.lifg_modified?
     refute meta.learning_applied?
     refute meta.lexical_sense_verified?
     refute Map.has_key?(meta, :candidate_sense_id)
+  test "default trace records structural abstention rather than inventing a decision" do
+    si = input()
+    changed = %{si | structural_competition: %{status: :preferred}}
+
+    result = LexicalRoleShadow.attach(changed)
+    assert %{decision: :abstained,
+             reason: :structure_not_independently_verified,
+             meta: %{alternative_count: 0, blocked_roles: []}} =
+             Enum.find(result.trace, &match?(%{stage: :reflective_role_shadow}, &1))
+
+    assert result.lifg_choices == si.lifg_choices
+    refute result == changed
+  end
+
   end
 end
