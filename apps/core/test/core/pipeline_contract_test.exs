@@ -129,6 +129,16 @@ defmodule Core.PipelineContractTest do
   end
 
   test "real production pipeline records default lexical accountability and persists a session receipt" do
+    previous = Application.fetch_env(:core, :agency_ledger_enabled?)
+    Application.put_env(:core, :agency_ledger_enabled?, true)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:core, :agency_ledger_enabled?, value)
+        :error -> Application.delete_env(:core, :agency_ledger_enabled?)
+      end
+    end)
+
     session_id = "pipeline-audit-#{System.unique_integer([:positive])}"
 
     opts = [
