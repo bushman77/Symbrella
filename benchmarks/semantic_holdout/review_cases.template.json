@@ -1,0 +1,11 @@
+{
+  "dataset_id": "REPLACE_WITH_NEW_UNSEEN_EVALUATION_BATCH",
+  "cases": [
+    {
+      "case_id": "REPLACE_WITH_UNIQUE_CASE_ID",
+      "sentence": "REPLACE_WITH_A_NEW_HUMAN_AUTHORED_SENTENCE",
+      "target_index": 0,
+      "target_word": "replace"
+    }
+  ]
+}
