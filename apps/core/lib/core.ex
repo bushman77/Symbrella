@@ -242,6 +242,9 @@ defmodule Core do
     # Always record the original LIFG role decision and its evidence boundaries.
     # This observer cannot change lexical winners, memory, or response policy.
     |> Core.Agency.LexicalRoleShadow.attach(opts)
+    # Always record whether an exact-sense correction can be evaluated.
+    # Live turns have no independent gold label and cannot self-certify.
+    |> Core.Agency.SemanticCorrectionEvaluator.attach(opts)
     |> StateDump.capture(:semantic_composition)
     # On by default (explicit false opt-out): independent finite-past proof, never a
     # replacement for the existing compositional derivation.
