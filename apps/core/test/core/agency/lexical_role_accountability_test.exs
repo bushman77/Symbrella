@@ -5,6 +5,22 @@ defmodule Core.Agency.LexicalRoleAccountabilityTest do
   alias Core.Response.AgencyMemory.Source
   alias Db.AgencyEvents
 
+  setup do
+    # Test config normally disables the agency ledger. Enable it only for
+    # these synchronous storage tests and restore it after each case.
+    previous = Application.fetch_env(:core, :agency_ledger_enabled?)
+    Application.put_env(:core, :agency_ledger_enabled?, true)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:core, :agency_ledger_enabled?, value)
+        :error -> Application.delete_env(:core, :agency_ledger_enabled?)
+      end
+    end)
+
+    :ok
+  end
+
   defp audited_input(session_id) do
     %Core.SemanticInput{
       source: :prod,
