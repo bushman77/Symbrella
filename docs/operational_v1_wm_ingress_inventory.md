@@ -68,6 +68,40 @@ The gate remains **open** in the V1 release checklist until these tests are
 implemented, passing and reviewed. Do not convert existing green unit tests
 alone into a full-bypass-coverage claim.
 
+## First bypass hardening: Stage2 source spoofing
+
+**Change implemented; runtime tests still need to pass.**
+
+The canonical admission normalizer accepted Stage2
+{:commit, choice} / {:allow, choice} / {:boost, choice} tuples, but previously
+used Map.put_new(:source, :lifg). An embedded :source could therefore
+override the wrapper's lexical origin. BasalGanglia distinguishes
+:lifg_min_score from the general :evidence_floor, so a malicious/buggy
+Stage2 candidate labeled :comprehension or :runtime could take the weaker
+generic threshold.
+
+Now the Stage2 tuple handlers force :source to :lifg before normalization.
+This affects both direct Brain.WM.Admission.run/3 and the legacy
+Brain.WorkingMemory.ingest_stage2/4 translator.
+
+New adversarial regressions:
+
+    mix test \
+      apps/brain/test/brain/wm/admission_test.exs \
+      apps/brain/test/brain/wm/working_memory_stage2_ingest_test.exs \
+      --trace
+
+The tests explicitly attempt a scored, under-floor Stage2 candidate
+with an embedded :comprehension / :verified_semantics / :runtime source,
+including the legacy map-based commit encodings. All must be blocked
+under the higher LIFG evidence floor.
+
+**Remaining scope:** source annotations in arbitrary, direct Brain.focus/2
+candidate maps are not authenticated by this change. Future V1 work must
+audit source-specific authorization at that boundary and all other
+entry points. A single spoofing fix does not establish full canonical
+gate coverage or independent factual verification.
+
 ## First implementation slice
 
 Prefer negative-control tests around Brain.focus/2, the legacy Stage2
