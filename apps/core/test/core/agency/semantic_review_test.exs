@@ -113,7 +113,12 @@ defmodule Core.Agency.SemanticReviewTest do
     assert {:ok, _} = SemanticHoldout.validate_manifest(manifest)
     assert manifest["review_packet_sha256"] == SemanticReview.packet_sha256(p)
     assert length(manifest["review_inventory"]) == 2
+    assert hd(manifest["review_inventory"])["sha256"] ==
+             SemanticHoldout.seal(%{"senses" => hd(p["cases"])["senses"]})
     assert :ok == SemanticReview.verify_current_dictionary(manifest, &senses/1)
+    assert :ok == SemanticReview.verify_current_dictionary(manifest, fn word ->
+      senses(word) |> Enum.reverse()
+    end)
 
     [first, second] = manifest["cases"]
     assert first["gold_sense_id"] == "flying|verb|1"
