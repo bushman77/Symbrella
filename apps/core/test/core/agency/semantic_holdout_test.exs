@@ -105,13 +105,19 @@ defmodule Core.Agency.SemanticHoldoutTest do
     assert result.status == :evaluated_against_supplied_reviews
     assert result.dataset_id == "synthetic-holdout-fixture-v1"
     assert result.manifest_sha256 == seal
-    assert result.report.status == :benchmark_summary
-    assert result.report.total == 2
-    assert result.report.compared == 2
-    assert result.report.abstentions == 0
-    assert result.report.wrong_to_right == 1
-    assert result.report.right_to_wrong == 1
-    assert result.report.net_label_agreement_gain == 0
+    assert result.correction_subset.status == :benchmark_summary
+    assert result.correction_subset.total == 2
+    assert result.correction_subset.compared == 2
+    assert result.correction_subset.abstentions == 0
+    assert result.correction_subset.wrong_to_right == 1
+    assert result.cohort_baseline.baseline_unavailable == 1
+    assert result.correction_subset.right_to_wrong == 1
+    assert result.correction_subset.net_label_agreement_gain == 0
+    assert result.cohort_baseline.total_cases == 2
+    assert result.cohort_baseline.baseline_label_comparable == 2
+    assert result.cohort_baseline.baseline_matches_supplied_labels == 1
+    assert result.cohort_baseline.baseline_differs_from_supplied_labels == 1
+    assert result.cohort_baseline.baseline_unavailable == 0
     assert Enum.map(result.cases, & &1.outcome) == [:wrong_to_right, :right_to_wrong]
     refute result.external_reviewer_identity_verified?
     refute result.actual_training_isolation_verified?
@@ -187,11 +193,32 @@ defmodule Core.Agency.SemanticHoldoutTest do
     end)
 
     assert result.status == :evaluated_against_supplied_reviews
-    assert result.report.total == 2
-    assert result.report.compared == 1
-    assert result.report.abstentions == 1
-    assert result.report.wrong_to_right == 1
+    assert result.correction_subset.total == 2
+    assert result.correction_subset.compared == 1
+    assert result.correction_subset.abstentions == 1
+    assert result.correction_subset.wrong_to_right == 1
     assert Enum.at(result.cases, 1).reason == :resolver_failed_or_sentence_changed
+    refute result.learning_applied?
+  end
+
+  test "whole-cohort baseline remains visible when no correction is admissible" do
+    data = manifest()
+    resolver = fn sentence ->
+      si = fixture(sentence)
+      %{si | lifg_choices: Enum.map(si.lifg_choices, fn
+        %{token_index: 3} = choice -> Map.delete(choice, :candidate_probs)
+        choice -> choice
+      end)}
+    end
+
+    result = Holdout.run(data, Holdout.seal(data), resolver)
+
+    assert result.status == :no_comparable_corrections
+    assert result.correction_subset.compared == 0
+    assert result.correction_subset.abstentions == 2
+    assert result.cohort_baseline.total_cases == 2
+    assert result.cohort_baseline.baseline_label_comparable == 2
+    assert result.cohort_baseline.baseline_matches_supplied_labels == 1
     refute result.learning_applied?
   end
 
@@ -201,8 +228,8 @@ defmodule Core.Agency.SemanticHoldoutTest do
       fixture("The bird is flying into the tree.")
     end)
 
-    assert result.report.compared == 1
-    assert result.report.abstentions == 1
+    assert result.correction_subset.compared == 1
+    assert result.correction_subset.abstentions == 1
     assert Enum.at(result.cases, 1).status == :abstained
   end
 
