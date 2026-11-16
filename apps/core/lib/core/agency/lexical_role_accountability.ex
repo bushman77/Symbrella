@@ -77,7 +77,8 @@ defmodule Core.Agency.LexicalRoleAccountability do
              blocked_role_count: Map.get(meta, :blocked_role_count, 0),
              blocked_roles: List.wrap(Map.get(meta, :blocked_roles, [])) |> Enum.take(7),
              alternatives: List.wrap(Map.get(meta, :roles, [])) |> Enum.take(7),
-             unresolved_role_count: Map.get(meta, :unresolved_role_count, 0)
+             unresolved_role_count: Map.get(meta, :unresolved_role_count, 0),
+             semantic_evaluation: semantic_evaluation(si)
            },
            reasons: %{
              diagnostic_reason: reason,
@@ -146,6 +147,41 @@ defmodule Core.Agency.LexicalRoleAccountability do
   end
 
   def recent(_, _), do: []
+
+  # No reference labels or sense IDs are ever persisted by this evaluation.
+  # A "compared" benchmark result cannot be injected into live receipts.
+  defp semantic_evaluation(si) do
+    si
+    |> Map.get(:trace, [])
+    |> List.wrap()
+    |> Enum.find(fn
+      %{stage: :semantic_correction_evaluation} -> true
+      _ -> false
+    end)
+    |> case do
+      %{decision: status, reason: reason, meta: meta} when is_map(meta) ->
+        %{
+          status: status,
+          reason: reason,
+          scope: Map.get(meta, :scope),
+          candidate_count: Map.get(meta, :candidate_count, 0),
+          reference_status: :not_provided,
+          independently_verified?: false,
+          learning_applied?: false,
+          policy_change_authorized?: false
+        }
+
+      _ ->
+        %{
+          status: :not_observed,
+          reason: :missing_semantic_evaluation,
+          reference_status: :not_provided,
+          independently_verified?: false,
+          learning_applied?: false,
+          policy_change_authorized?: false
+        }
+    end
+  end
 
   defp role_event(si) do
     si
