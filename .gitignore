@@ -69,13 +69,23 @@ config/llm.local.exs
 # ───────── Umbrella-root private runtime data ─────────
 # Corpus files, training data, checkpoints, snapshots, receipts and local
 # evaluation records belong inside the existing umbrella-root priv/.
-# The whole directory is private and must never be committed.
-/priv/
+#
+# Only the top level and the data subdirectories are private. Hand-written
+# probe scripts (*.exs) and small JSON fixtures in priv/ are source and must
+# stay trackable, so the ignore is per-file rather than the whole directory.
+# (A negated pattern cannot re-include anything inside an ignored directory,
+# so "/priv/" followed by "!/priv/*.exs" would not have worked.)
+/priv/*
+!/priv/*.exs
+!/priv/*.json
 
 # ───────── Training data and model artifacts ─────────
 # Runtime self-calibration samples, including numbered rotations/backups.
-# Keep deliberately checked-in synthetic fixtures separate.
-/apps/*
+# Keep deliberately checked-in synthetic fixtures separate: this matches
+# samples.jsonl, samples.jsonl.1, samples.jsonl.2, ... but not the committed
+# symbrella_synthetic_bootstrap_*.jsonl fixtures. The trailing * is what
+# catches the numbered rotations.
+/apps/*/priv/self_calibration/samples.jsonl*
 # Downloaded or generated model weights/checkpoints.
 *.gguf
 *.safetensors
