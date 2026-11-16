@@ -43,6 +43,11 @@ defmodule Core.Agency.AutonomyLoopTest do
     assert %Decision{selected_action: :self_check, trace_id: ^trace_id} = result.decision
     assert [%Command{type: :run_self_check}] = result.commands
     assert [%{type: :run_self_check, status: :executed}] = result.command_results
+    assert result.outcome_evaluation.v == 1
+    assert result.outcome_evaluation.expected_outcome.kind == :self_state_reviewed
+    assert result.outcome_evaluation.status in [:verified, :unverified]
+    assert result.decision.actual_outcome == result.outcome_evaluation
+    assert result.decision.reflection.outcome_status == result.outcome_evaluation.status
     assert %{status: :executed, reason: :goal_completed} = result.complete_result
     assert [] = Brain.GoalStack.active_goals()
 
@@ -50,6 +55,11 @@ defmodule Core.Agency.AutonomyLoopTest do
     assert_receive {:autonomy_transition, _, %{trace_id: ^trace_id, step: :goal_created}}
     assert_receive {:autonomy_transition, _, %{trace_id: ^trace_id, step: :action_selected}}
     assert_receive {:autonomy_transition, _, %{trace_id: ^trace_id, step: :command_executed}}
+
+    assert_receive {:autonomy_transition, _, %{trace_id: ^trace_id, step: :outcome_evaluated,
+                                               status: outcome_status}}
+
+    assert outcome_status == result.outcome_evaluation.status
     assert_receive {:autonomy_transition, _, %{trace_id: ^trace_id, step: :goal_completed}}
   end
 end
