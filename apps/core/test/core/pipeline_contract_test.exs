@@ -166,6 +166,15 @@ defmodule Core.PipelineContractTest do
     assert is_binary(role_audit.meta.selected_choices_sha256)
     assert byte_size(role_audit.meta.selected_choices_sha256) == 64
 
+    semantic_evaluation =
+      Enum.find(si.trace, &match?(%{stage: :semantic_correction_evaluation}, &1))
+
+    assert_trace_contract!(semantic_evaluation)
+    assert semantic_evaluation.decision in [:awaiting_reference, :not_evaluable]
+    assert semantic_evaluation.meta.reference_status == :not_provided
+    assert semantic_evaluation.meta.independently_verified? == false
+    assert semantic_evaluation.meta.learning_applied? == false
+
     assert %{decision: :persisted, meta: %{ledger_id: record_id}} =
       Enum.find(si.trace, &match?(%{stage: :reflective_accountability}, &1))
 
@@ -174,6 +183,10 @@ defmodule Core.PipelineContractTest do
     assert record.source == "lexical_role_accountability"
     assert record.outcome["learning_applied?"] == false
     assert record.outcome["lexical_sense_verified?"] == false
+    assert record.decision["semantic_evaluation"]["status"] in
+             ["awaiting_reference", "not_evaluable"]
+    assert record.decision["semantic_evaluation"]["reference_status"] == "not_provided"
+    assert record.decision["semantic_evaluation"]["learning_applied?"] == false
     assert :ok == SemanticInput.validate_contract(si)
   end
 
