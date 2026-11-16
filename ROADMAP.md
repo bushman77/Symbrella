@@ -775,8 +775,12 @@ Notes:
   treating an execution receipt as proof of success.
 - [x] Add a shadow-only formal derivation error -> recompute -> proof replay
   experiment; see docs/reflective_formal_correction_shadow.md.
-- [x] Add opt-in, read-only LIFG role conflict diagnosis against independently
-  scored dictionary/POS witnesses (docs/reflective_lexical_role_shadow.md).
+- [x] Record default-on, read-only LIFG role diagnostics on every real
+  production pass with independently checked dictionary/POS witnesses.
+- [x] Persist session-scoped lexical accountability receipts in the existing
+  agency_events ledger with fail-closed unavailable/skipped statuses and
+  explicit isolation from behavioral agency-memory signals
+  (docs/reflective_lexical_role_shadow.md).
 - [ ] Independently adjudicate lexical sense correctness on held-out utterances;
   the role shadow can establish only provisional grammatical compatibility.
 - [ ] Add a separately implemented or external oracle for semantic correction;
