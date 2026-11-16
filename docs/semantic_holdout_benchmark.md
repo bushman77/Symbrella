@@ -42,6 +42,33 @@ A useful published result would additionally require independent reviewer
 records, a frozen dictionary inventory, release/version provenance, an
 externally maintained development corpus, and no benchmark-based tuning.
 
+## New automated human-review workflow
+
+Use docs/semantic_human_review_protocol.md for the **current** review process.
+It now includes these scripts:
+
+    mix run scripts/prepare_semantic_reviews.exs \
+      --cases tmp/semantic_cases.json \
+      --out tmp/semantic_review_packet.json
+
+    mix run scripts/finalize_semantic_reviews.exs \
+      --packet tmp/semantic_review_packet.json \
+      --review-a tmp/reviewer_a.completed.json \
+      --review-b tmp/reviewer_b.completed.json \
+      --development tmp/semantic_development_hashes.json \
+      --out tmp/semantic_holdout.json
+
+The packet uses complete current Db.BrainCell inventories and has no LIFG
+predictions or selected labels. The finalization step rejects mismatched
+review sheets, disagreements, undeclared senses, and changes to current
+dictionary sense IDs, definitions, examples, grammar functions or semantic
+atoms. It freezes exact per-case inventory fingerprints for evaluation.
+
+The production CLI now requires and revalidates this reviewed inventory
+before running Core.resolve_input. Synthetic unit-test manifests may still
+exercise the lower-level harness without human reviews, but they are NOT a
+substitute for the CLI's real-dictionary evaluation path.
+
 ## Preparing the first real dataset
 
 1. Review current live dictionary inventories; never assume numbered IDs.
