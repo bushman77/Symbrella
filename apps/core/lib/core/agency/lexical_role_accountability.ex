@@ -35,6 +35,9 @@ defmodule Core.Agency.LexicalRoleAccountability do
 
           {:error, _reason} ->
             trace_record(si, :unavailable, :storage_unavailable)
+
+          _ ->
+            trace_record(si, :unavailable, :storage_unavailable)
         end
 
       {:skip, reason} ->
@@ -78,13 +81,19 @@ defmodule Core.Agency.LexicalRoleAccountability do
            },
            reasons: %{
              diagnostic_reason: reason,
-             structural_evidence: :independently_revalidated,
-             alternative_evidence: :scored_attested_role_witness_only
+             structural_evidence:
+               if(is_nil(Map.get(meta, :construction)),
+                 do: :not_established, else: :independently_revalidated),
+             alternative_evidence:
+               if(Map.get(meta, :alternative_count, 0) > 0,
+                 do: :scored_attested_role_witness_only, else: :none)
            },
            self_model: %{},
            self_state: %{},
            outcome: %{
              final_lifg_sha256: final_fingerprint,
+             choice_fingerprints_comparable?:
+               is_binary(original_fingerprint) and is_binary(final_fingerprint),
              selected_choices_changed_after_audit?:
                is_binary(original_fingerprint) and
                  is_binary(final_fingerprint) and
