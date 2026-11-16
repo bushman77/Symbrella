@@ -157,7 +157,22 @@ defmodule Core.Agency.LexicalRoleShadowTest do
       c -> c
     end)
 
-    si = %{si | lifg_choices: choices}
+    # The previous structural result was computed for different LIFG choices.
+    # A changed winner must invalidate the old result rather than bypassing
+    # structural verification.
+    stale = %{si | lifg_choices: choices}
+    stale_report = LexicalRoleShadow.evaluate(stale)
+    assert stale_report.status == :abstained
+    assert stale_report.reason == :structure_not_independently_verified
+
+    # Rebuild the evidence for this exact two-conflict state, as the live
+    # pipeline does after LIFG chooses its winners.
+    si =
+      stale
+      |> StructuralCompetition.attach()
+      |> Composition.attach()
+
+    assert {:ok, _} = StructuralCompetition.verified(si)
     report = LexicalRoleShadow.evaluate(si)
 
     assert report.status == :partial_role_alternatives
