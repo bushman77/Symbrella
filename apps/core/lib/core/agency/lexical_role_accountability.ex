@@ -123,6 +123,8 @@ defmodule Core.Agency.LexicalRoleAccountability do
   @doc "Retrieve audit receipts independently of behavioral agency memory."
   @spec recent(String.t(), keyword()) :: [map()]
   def recent(session_id, opts \\ [])
+
+  def recent(session_id, opts)
       when is_binary(session_id) and is_list(opts) do
     limit = Keyword.get(opts, :limit, @default_limit)
 
