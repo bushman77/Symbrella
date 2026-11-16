@@ -132,6 +132,21 @@ defmodule Core.Agency.LexicalRoleAccountabilityTest do
     assert [] == LexicalRoleAccountability.recent("", limit: 10)
   end
 
+  test "disabled durable ledger still preserves a visible in-memory audit" do
+    session = "audit-disabled-#{System.unique_integer([:positive])}"
+    si = audited_input(session)
+    Application.put_env(:core, :agency_ledger_enabled?, false)
+
+    result = LexicalRoleAccountability.record(si)
+
+    assert %{decision: :skipped, reason: :agency_ledger_disabled} =
+      Enum.find(result.trace, &match?(%{stage: :reflective_accountability}, &1))
+
+    assert Enum.any?(result.trace, &match?(%{stage: :reflective_role_shadow}, &1))
+    assert [] == LexicalRoleAccountability.recent(session)
+    assert result.lifg_choices == si.lifg_choices
+  end
+
   test "source-filtered agency recall keeps audit rows separate from response outcomes" do
     session = "audit-filter-#{System.unique_integer([:positive])}"
     si = audited_input(session)
