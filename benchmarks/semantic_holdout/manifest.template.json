@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "dataset_id": "REPLACE_WITH_FROZEN_DATASET_ID",
+  "development_utterance_sha256": [
+    "REPLACE_WITH_SHA256_OF_A_REAL_NORMALIZED_DEVELOPMENT_UTTERANCE"
+  ],
+  "cases": [
+    {
+      "case_id": "REPLACE_WITH_UNIQUE_CASE_ID",
+      "sentence": "REPLACE_WITH_REVIEWED_SENTENCE",
+      "target_index": 0,
+      "gold_sense_id": "REPLACE_WITH_REAL_REVIEWED_DICTIONARY_ID",
+      "split": "holdout",
+      "reviewers": [
+        {
+          "reviewer_id": "REPLACE_WITH_REVIEWER_A",
+          "sense_id": "REPLACE_WITH_REAL_REVIEWED_DICTIONARY_ID"
+        },
+        {
+          "reviewer_id": "REPLACE_WITH_REVIEWER_B",
+          "sense_id": "REPLACE_WITH_REAL_REVIEWED_DICTIONARY_ID"
+        }
+      ]
+    }
+  ]
+}
