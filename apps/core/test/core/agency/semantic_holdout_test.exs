@@ -11,7 +11,7 @@ defmodule Core.Agency.SemanticHoldoutTest do
       |> String.trim_trailing(".")
       |> String.split(" ", trim: true)
 
-    ["The", actor, "is", predicate, _prep, "the", _landmark] = words
+    ["The", _actor, "is", predicate, _prep, "the", _landmark] = words
     positions = ~w(determiner noun verb verb preposition determiner noun)
 
     cells =
