@@ -1,6 +1,6 @@
 defmodule Core.Agency.LexicalRoleShadow do
   @moduledoc """
-  Read-only, opt-in diagnosis of LIFG role conflicts.
+  Read-only, default-on accountability for LIFG role conflicts.
 
   This consumes the current SemanticInput after structural competition and
   composition. It never swaps a lexical winner. An alternative is eligible
@@ -38,43 +38,69 @@ defmodule Core.Agency.LexicalRoleShadow do
   def evaluate(_), do: abstain(:invalid_input)
 
   @doc """
-  Add a bounded trace to the actual Core pipeline only when explicitly enabled.
+  Add a bounded accountability trace on every real Core pipeline pass.
 
-  No full sentence, definition, sense ID, or candidate distribution is placed
-  in the trace. All live LIFG choices, memory, policy and response state remain
-  unchanged.
+  Caller options cannot disable the evidence record. No full sentence,
+  definition, sense ID, or candidate distribution is placed in the trace.
+  All live LIFG choices, memory, policy and response state remain unchanged.
   """
   @spec attach(map(), keyword()) :: map()
   def attach(si, opts \\ [])
 
-  def attach(%{} = si, opts) when is_list(opts) do
-    if Keyword.get(opts, :reflective_role_shadow?, false) == true do
-      report = evaluate(si)
+  def attach(%{} = si, _opts) do
+    report = evaluate(si)
 
-      Trace.append(si, :reflective_role_shadow,
-        decision: report.status,
-        reason: report.reason,
-        meta: %{
-          v: report.v,
-          construction: report.construction,
-          blocked_role_count: report.blocked_role_count,
-          alternative_count: length(report.alternatives),
-          unresolved_role_count: report.unresolved_role_count,
-          roles: Enum.map(report.alternatives, &Map.take(&1,
-            [:role, :token_index, :selected_pos, :candidate_pos, :selection_basis])),
-          formal_derivation_verified?: report.formal_derivation_verified?,
-          lexical_sense_verified?: false,
-          lifg_modified?: false,
-          learning_applied?: false,
-          factual_authority?: false
-        }
-      )
-    else
-      si
-    end
+    Trace.append(si, :reflective_role_shadow,
+      decision: report.status,
+      reason: report.reason,
+      meta: %{
+        v: report.v,
+        construction: report.construction,
+        frame_run_id: Map.get(si, :frame_run_id),
+        selected_choices_sha256: selected_choices_sha256(si),
+        blocked_role_count: report.blocked_role_count,
+        blocked_roles: report.blocked_roles,
+        alternative_count: length(report.alternatives),
+        unresolved_role_count: report.unresolved_role_count,
+        roles: Enum.map(report.alternatives, &Map.take(&1,
+          [:role, :token_index, :selected_pos, :candidate_pos,
+           :selection_basis, :candidate_score])),
+        formal_derivation_verified?: report.formal_derivation_verified?,
+        lexical_sense_verified?: false,
+        lifg_modified?: false,
+        learning_applied?: false,
+        factual_authority?: false
+      }
+    )
   end
 
   def attach(other, _), do: other
+
+  @doc "Diagnostic SHA-256 fingerprint of the bounded original LIFG winner slate."
+  @spec selected_choices_sha256(map()) :: String.t() | nil
+  def selected_choices_sha256(%{} = si) do
+    choices = Map.get(si, :lifg_choices, [])
+
+    if is_list(choices) and length(choices) <= 128 and
+         Enum.all?(choices, fn choice ->
+           is_map(choice) and is_integer(Map.get(choice, :token_index)) and
+             is_binary(Map.get(choice, :id) || Map.get(choice, :chosen_id))
+         end) do
+      canonical =
+        choices
+        |> Enum.map(fn choice ->
+          {Map.get(choice, :token_index), Map.get(choice, :id) || Map.get(choice, :chosen_id)}
+        end)
+        |> Enum.sort()
+
+      :crypto.hash(:sha256, :erlang.term_to_binary(canonical))
+      |> Base.encode16(case: :lower)
+    else
+      nil
+    end
+  end
+
+  def selected_choices_sha256(_), do: nil
 
   defp evaluate_verified_structure(si, kind) do
     blocked = Diagnosis.blocked_roles(si) |> Enum.take(@max_roles)
@@ -87,6 +113,10 @@ defmodule Core.Agency.LexicalRoleShadow do
     {supported, unsupported} = candidates
 
     alternatives = Enum.map(supported, fn {:ok, candidate} -> candidate end)
+
+    blocked_roles = Enum.map(blocked, &Map.take(&1,
+      [:role, :token_index, :reason, :selected_pos,
+       :expected_pos, :compatible_dictionary_pos?]))
 
     formal_proof? = match?({:ok, _}, Composition.verified(si))
 
@@ -111,6 +141,7 @@ defmodule Core.Agency.LexicalRoleShadow do
       reason: reason,
       construction: kind,
       blocked_role_count: length(blocked),
+      blocked_roles: blocked_roles,
       unresolved_role_count: length(unsupported),
       alternatives: alternatives,
       formal_derivation_verified?: formal_proof?,
@@ -162,6 +193,7 @@ defmodule Core.Agency.LexicalRoleShadow do
       reason: reason,
       construction: nil,
       blocked_role_count: 0,
+      blocked_roles: [],
       unresolved_role_count: 0,
       alternatives: [],
       formal_derivation_verified?: false,
