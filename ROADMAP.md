@@ -763,6 +763,28 @@ Notes:
   implementation-specific. A future cleanup may generalize it to a concept such
   as `evidence_floor` or `min_input_score`.
 
+### Phase 9B - Reflective Agency Outcome Verification
+
+**Advisory v1 implementation** (see docs/reflective_agency_v1.md):
+
+- [x] Separate command-executed receipts from independently verified outcomes.
+- [x] Require matching decision trace, command ID, and current live Brain snapshot
+  before verifying an endogenous self-state observation.
+- [x] Attach a bounded evaluation and reflection to the Core autonomy trace.
+- [x] Reject stale, missing, invalid, mismatched, or deferred evidence without
+  treating an execution receipt as proof of success.
+- [ ] Persist independently corroborated outcome receipts with typed evidence IDs.
+- [ ] Add held-out symbolic error-detection and alternate-strategy comparisons.
+- [ ] Permit bounded policy adaptation only after repeated verified improvements.
+- [ ] Revisit legacy goal-completion rules after independent verification is proven.
+
+The initial verification is about **observability** of the self-model, not
+consciousness, reasoning-quality improvement, or completed reflective learning.
+Phase 9A's existing code and regression tests still require local runtime
+validation before checking off all remaining gating-consolidation deliverables.
+
+---
+
 ### Phase 10 - Goal Stack And Motivational Layer
 
 **Goal:** move from passive introspection to directed self-regulation.
