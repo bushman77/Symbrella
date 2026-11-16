@@ -15,6 +15,7 @@ defmodule Core.Agency.AutonomyLoop do
   alias Core.Agency.Command
   alias Core.Agency.Decision
   alias Core.Agency.Executor
+  alias Core.Agency.OutcomeEvaluator
 
   @handler_id "core-agency-autonomy-loop"
   @event [:core, :agency, :autonomy, :transition]
@@ -118,6 +119,25 @@ defmodule Core.Agency.AutonomyLoop do
       results: command_results
     })
 
+    # Advisory only: a command receipt is not itself evidence of success.
+    # No learning weights, permissions, or goal-completion policy change here.
+    outcome_evaluation = OutcomeEvaluator.evaluate(decision, commands, command_results)
+
+    decision = %{
+      decision
+      | actual_outcome: outcome_evaluation,
+        reflection: OutcomeEvaluator.reflection(decision, outcome_evaluation)
+    }
+
+    emit_transition(trace_id, :outcome_evaluated,
+      %{count: 1, verified: if(outcome_evaluation.verified?, do: 1, else: 0)},
+      %{
+        status: outcome_evaluation.status,
+        reason: outcome_evaluation.reason,
+        evidence_source: Map.get(outcome_evaluation.observation, :source)
+      }
+    )
+
     complete_result =
       maybe_complete_goal(goal.id, seed_decision, command_results, opts, session_id)
 
@@ -129,6 +149,7 @@ defmodule Core.Agency.AutonomyLoop do
       decision: decision,
       commands: commands,
       command_results: command_results,
+      outcome_evaluation: outcome_evaluation,
       complete_result: complete_result
     }
   end
