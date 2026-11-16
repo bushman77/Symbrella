@@ -149,9 +149,12 @@ defmodule Brain.WM.Admission do
 
   defp extract_candidates(_), do: []
 
+  # Stage2 tuple wrappers represent lexical evidence, never a caller-chosen
+  # trusted source. Force :lifg so an embedded :source cannot escape the
+  # LIFG-specific minimum evidence floor inside BasalGanglia.decide/4.
   defp normalize_candidate({:commit, %{} = choice}, opts) do
     choice
-    |> Map.put_new(:source, :lifg)
+    |> Map.put(:source, :lifg)
     |> Map.put_new(:stage2_action, :commit)
     |> normalize_candidate(opts)
   end
@@ -159,7 +162,7 @@ defmodule Brain.WM.Admission do
   defp normalize_candidate({decision, %{} = choice}, opts)
        when decision in [:allow, :boost] do
     choice
-    |> Map.put_new(:source, :lifg)
+    |> Map.put(:source, :lifg)
     |> Map.put(:stage2_decision, decision)
     |> normalize_candidate(opts)
   end
