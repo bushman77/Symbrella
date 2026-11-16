@@ -25,7 +25,9 @@ Core.Agency.SemanticHoldout adds a *separate* bounded benchmark runner that:
   whitespace/case-normalized overlap with the declared development set;
 - supplies the **sentence only** to the resolver, never the gold label;
 - reuses SemanticCorrectionEvaluator.compare/2 and its live RoleWitness gates;
-- counts improvements, regressions, incorrect alternatives, and abstentions;
+- reports **whole-cohort original LIFG baseline agreement** separately from
+  correction-subset improvement/regression/abstention metrics, avoiding
+  selection bias from scoring only examples with eligible alternatives;
 - never trains, modifies LIFG winners, authorizes policy adjustments, or
   supplies "verified" success to working memory or autonomy.
 
@@ -102,9 +104,17 @@ label is still rejected if it is not attested in that turn's current
 dictionary cells. Grammar support without a uniquely attested alternative
 does not count as a correction and is scored as abstention.
 
-The initial benchmark evaluates only the narrow progressive constructions
-already recognized by LexicalRoleShadow. Most general word-sense cases will
-abstain; that is an honest coverage limitation.
+The baseline cohort counts label agreement whenever both the original LIFG
+winner and the reviewed label are attested for that token in the current
+dictionary. The separate correction-subset report uses only examples with
+an eligible exact-sense alternative; all other cases count as abstentions
+there. If no correction is comparable, status is :no_comparable_corrections,
+not a success claim. The two denominators must never be conflated.
+
+The initial correction benchmark evaluates only the narrow progressive
+constructions already recognized by LexicalRoleShadow. Most general
+word-sense cases will abstain on correction comparison; that is an honest
+coverage limitation.
 
 ## Tests
 
