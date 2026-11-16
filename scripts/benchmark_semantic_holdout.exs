@@ -11,7 +11,7 @@
 # No model policy updates or explicit episode writes are requested. The normal
 # Core production stack can still emit telemetry and transient process state.
 
-alias Core.Agency.SemanticHoldout
+alias Core.Agency.{SemanticHoldout, SemanticReview}
 
 {opts, rest, errors} =
   OptionParser.parse(System.argv(),
@@ -58,11 +58,24 @@ cond do
       IO.puts("Manifest content digest (not an independent reviewer signature):")
       IO.puts(SemanticHoldout.seal(manifest))
     else
+      # Real benchmark runs require independently filled reviewer sheets and
+      # a frozen inventory record. The dictionary must still be identical.
+      case SemanticReview.verify_current_dictionary(
+        manifest, &Db.brain_cells_for_norm/1
+      ) do
+        :ok -> :ok
+        {:error, reason} ->
+          IO.puts(:stderr, "Real holdout inventory check failed: #{inspect(reason)}")
+          System.halt(2)
+      end
+
       # Evidence-gated runtime LIFG comparison. Only the sentence enters the
       # resolver; labels and reviewer declarations remain in the harness.
       resolver = fn sentence ->
         Core.resolve_input(sentence,
           mode: :prod,
+          enrich_lexicon?: true,
+          lexicon_stage?: true,
           response: :off,
           session_id: nil,
           experience_origin: nil,
@@ -87,7 +100,8 @@ cond do
         limit: :infinity, printable_limit: :infinity
       )
 
-      if result.status != :evaluated_against_supplied_reviews,
-        do: System.halt(2)
+      if result.status not in [
+           :evaluated_against_supplied_reviews, :no_comparable_corrections
+         ], do: System.halt(2)
     end
 end
