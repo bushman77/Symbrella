@@ -214,8 +214,27 @@ defmodule Core.Agency.SemanticCorrectionEvaluatorTest do
 
     forged = %{report | outcome: :right_to_wrong}
     assert Evaluator.aggregate([forged]).status == :invalid_reports
+    assert Evaluator.aggregate([%{status: :unverified_success}]).status == :invalid_reports
 
     assert Evaluator.aggregate(List.duplicate(report, 129)).status == :invalid_reports
+  end
+
+  test "an unevaluable live case remains an explicit abstention rather than a correction" do
+    si = input()
+    unscored = %{si | lifg_choices: Enum.map(si.lifg_choices, fn
+      %{token_index: 3} = choice -> Map.delete(choice, :candidate_probs)
+      choice -> choice
+    end)}
+
+    live = Evaluator.attach(unscored)
+
+    assert %{decision: :not_evaluable, meta: meta} =
+      Enum.find(live.trace, &match?(%{stage: :semantic_correction_evaluation}, &1))
+
+    assert meta.candidate_count == 0
+    refute meta.independently_verified?
+    refute meta.learning_applied?
+    assert live.lifg_choices == unscored.lifg_choices
   end
 
   test "unsupported inputs and missing structure abstain without activating learning" do
