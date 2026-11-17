@@ -192,6 +192,113 @@ defmodule Brain.WM.AdmissionTest do
     end)
   end
 
+  test "direct lexical sense IDs cannot evade the LIFG floor by claiming another source" do
+    cfg =
+      state(%{
+        gate_threshold: 0.0,
+        lifg_min_score: 0.8,
+        evidence_floor: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        block_threshold: 0.0,
+        source_boosts: %{},
+        prefer_sources: []
+      })
+
+    Enum.each([:runtime, :intent, :ltm, :curiosity], fn source ->
+      id = "underfloor-#{source}|verb|1"
+      candidate = %{id: id, lemma: "underfloor", score: 0.2, source: source}
+      assert {[], 0, 0} = Admission.run(cfg, [candidate], [])
+
+      assert_receive {:gate, _meas, %{id: ^id, source: ^source,
+                                      gate: :basal_ganglia, decision: :block}}
+    end)
+  end
+
+  test "a generic floor cannot be bypassed by a LIFG-specific lower floor" do
+    cfg =
+      state(%{
+        gate_threshold: 0.0,
+        lifg_min_score: 0.1,
+        evidence_floor: 0.8,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        prefer_sources: []
+      })
+
+    assert {[], 0, 0} =
+      Admission.run(cfg, [%{id: "underfloor|verb|1",
+                            source: :lifg, score: 0.2}], [])
+
+    assert_receive {:gate, _meas,
+                    %{id: "underfloor|verb|1", decision: :block,
+                      gate: :basal_ganglia}}
+  end
+
+  test "unscoped privileged source labels are rejected even with zero thresholds" do
+    cfg =
+      state(%{
+        gate_threshold: 0.0,
+        lifg_min_score: 0.0,
+        evidence_floor: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        block_threshold: 0.0,
+        prefer_sources: []
+      })
+
+    candidates = [
+      %{id: "comprehension:" <> String.duplicate("a", 32),
+        source: :comprehension, score: 1.0},
+      %{id: "verified_semantics:" <> String.duplicate("b", 32),
+        source: :verified_semantics, score: 1.0},
+      %{id: "verified_semantics:" <> String.duplicate("c", 32),
+        source: "verified_semantics", score: 1.0,
+        kind: :verified_semantic_frame,
+        context: %{schema: 1, verification: :source_supported,
+                   factual_authority?: true}}
+    ]
+
+    Enum.each(candidates, fn candidate ->
+      assert {[], 0, 0} = Admission.run(cfg, [candidate], [])
+
+      assert_receive {:gate, %{score: 0.0},
+                      %{id: id, decision: :block, gate: :basal_ganglia,
+                        reason: :invalid_scoped_source_evidence}}
+      assert id == candidate.id
+    end)
+  end
+
+  test "scoped candidate fingerprints cannot be stale or assigned an unrelated frame ID" do
+    cfg =
+      state(%{
+        gate_threshold: 0.0,
+        lifg_min_score: 0.0,
+        evidence_floor: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        prefer_sources: []
+      })
+
+    stale = System.system_time(:millisecond) - 120_000
+    context = %{schema: 1, verification: :conversation_context_only,
+                updated_at_ms: stale,
+                attention: %{scope: :session,
+                             verification: :conversation_context_only}}
+
+    for {id, context} <- [
+      {"comprehension:" <> String.duplicate("a", 32), context},
+      {"comprehension:unverified", %{context | updated_at_ms: System.system_time(:millisecond)}}
+    ] do
+      assert {[], 0, 0} = Admission.run(cfg, [
+        %{id: id, source: :comprehension, kind: :comprehension_frame,
+          context: context, score: 1.0}
+      ], [])
+      assert_receive {:gate, _meas, %{id: ^id, decision: :block,
+                                      reason: :invalid_scoped_source_evidence}}
+    end
+  end
+
   test "normalization keeps stage2 evidence but final decision comes from BG" do
     decisions = [
       {:commit,
