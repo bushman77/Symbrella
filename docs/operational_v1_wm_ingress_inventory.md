@@ -102,6 +102,58 @@ audit source-specific authorization at that boundary and all other
 entry points. A single spoofing fix does not establish full canonical
 gate coverage or independent factual verification.
 
+## Second bypass hardening: direct source claims and scoped context frames
+
+**Change committed; regression tests still require local execution.**
+
+Direct Brain.focus/2 candidates may carry a caller-supplied source. Without
+careful validation, a dictionary-shaped lexical winner could declare a
+generic source and use :evidence_floor instead of :lifg_min_score.
+Brain.BasalGanglia.evidence_floor_for/2 now enforces the maximum of
+the generic and lexical floors for LIFG or dictionary-shaped
+\`word|part_of_speech|sense_number\` IDs, regardless of a claimed source.
+Nonlexical sources retain the generic floor.
+
+Brain.WM.Admission.run/3 now rejects malformed source-scoped
+:comprehension and :verified_semantics frames **before gate scoring**, emits
+a :block canonical gate receipt with
+reason: :invalid_scoped_source_evidence, and performs no WM insertion.
+The required structure includes the typed frame identity and kind,
+current version, an unexpired context timestamp, and non-factual-authority
+metadata. Verified-semantic pointers additionally require a nonempty,
+well-shaped source-proof ID list and the specific source-revalidated marker.
+The existing Core comprehension and verified-semantics paths already
+construct these shapes and still perform their own separate checks.
+
+New cases cover:
+- lexically shaped IDs disguised as :runtime, :intent, :ltm or :curiosity;
+- generic hard evidence floor stronger than the LIFG floor;
+- source labels without valid scoped frame metadata, including string labels;
+- stale comprehension context, malformed frame identity and false factual
+  authority;
+- well-formed scoped frames still accepted by BasalGanglia;
+- runtime Brain.focus/2 refusing an invented verified-semantics pointer.
+
+**Important:** structural shape is not proof authentication. A malicious
+in-process caller could reproduce the expected shape and claim arbitrary
+proof IDs. The independent, persisted-source proof checks remain Core-owned;
+this change is a defensive WM normalization layer, NOT a security boundary
+against arbitrary BEAM code. No V1 criterion can be signed off until the
+upstream proof, source authorization and bypass tests are comprehensive.
+
+Test commands:
+
+    mix test \
+      apps/brain/test/brain/wm/admission_test.exs \
+      apps/brain/test/brain/wm/runtime_admission_integrity_test.exs \
+      apps/brain/test/brain/wm/working_memory_stage2_ingest_test.exs \
+      --trace
+
+    mix test \
+      apps/core/test/core/brain/comprehension_wm_test.exs \
+      apps/core/test/core/brain/wm/verified_semantics_contract_test.exs \
+      --trace
+
 ## First implementation slice
 
 Prefer negative-control tests around Brain.focus/2, the legacy Stage2
