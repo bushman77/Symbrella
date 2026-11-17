@@ -299,6 +299,88 @@ defmodule Brain.WM.AdmissionTest do
     end
   end
 
+  test "legitimate scoped frame shapes still reach BasalGanglia without claiming factual authority" do
+    cfg =
+      state(%{
+        gate_threshold: 0.0,
+        evidence_floor: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        prefer_sources: []
+      })
+
+    now = System.system_time(:millisecond)
+
+    comprehension = %{
+      id: "comprehension:" <> String.duplicate("a", 32),
+      source: :comprehension,
+      kind: :comprehension_frame,
+      score: 0.6,
+      context: %{
+        schema: 1,
+        verification: :conversation_context_only,
+        factual_authority?: false,
+        updated_at_ms: now,
+        attention: %{scope: :session,
+                     verification: :conversation_context_only}
+      }
+    }
+
+    verified_pointer = %{
+      id: "verified_semantics:" <> String.duplicate("b", 32),
+      source: :verified_semantics,
+      kind: :verified_semantic_frame,
+      reason: :source_revalidated_symbolic_comparison,
+      score: 0.85,
+      context: %{
+        schema: 1,
+        kind: :verified_semantic_frame,
+        verification: :source_supported,
+        proof_source: :consolidated_conclusions,
+        parent_proof_ids: [101],
+        factual_authority?: false,
+        updated_at_ms: now
+      }
+    }
+
+    Enum.each([comprehension, verified_pointer], fn candidate ->
+      {wm, 1, 0} = Admission.run(cfg, [candidate], [])
+      assert [%{id: id, source: source}] = wm
+      assert id == candidate.id
+      assert source == candidate.source
+      assert hd(wm).payload.context.factual_authority? == false
+
+      assert_receive {:gate, _meas, %{id: ^id, gate: :basal_ganglia,
+                                      source: ^source, decision: decision}}
+      assert decision in [:allow, :boost]
+    end)
+
+    # This unit test proves only structural eligibility at the WM boundary.
+    # Independent proof lineage is checked by Core before using this route.
+  end
+
+  test "a comprehension frame claiming factual authority fails closed" do
+    now = System.system_time(:millisecond)
+    candidate = %{
+      id: "comprehension:" <> String.duplicate("c", 32),
+      source: :comprehension,
+      kind: :comprehension_frame,
+      score: 1.0,
+      context: %{
+        schema: 1,
+        verification: :conversation_context_only,
+        factual_authority?: true,
+        updated_at_ms: now,
+        attention: %{scope: :session,
+                     verification: :conversation_context_only}
+      }
+    }
+
+    assert {[], 0, 0} = Admission.run(state(), [candidate], [])
+    assert_receive {:gate, %{score: 0.0},
+                    %{decision: :block, reason: :invalid_scoped_source_evidence}}
+  end
+
   test "normalization keeps stage2 evidence but final decision comes from BG" do
     decisions = [
       {:commit,
