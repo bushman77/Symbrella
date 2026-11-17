@@ -92,6 +92,48 @@ the operation count while altering its meaning. Do not mark all WM writes
 proven safe based on this result alone. Runtime callback and ingress tests,
 source provenance checks, and independent code review remain required.
 
+## Runtime mutation-path follow-up (pending local test run)
+
+The static inventory was confirmed on the development machine:
+
+- 10 recognized Brain WM source-write operations
+- 1 separately reviewed web-display default
+- 6 reviewed source modules; no extra known-pattern writer
+
+Next, the **real Brain GenServer** is tested with telemetry listeners
+attached to both \`[:brain, :gate, :decision]\` and
+\`[:brain, :wm, :update]\`.
+
+New scenarios in
+\`apps/brain/test/brain/wm/runtime_admission_integrity_test.exs\`:
+
+1. Two independently gated high-confidence candidates are admitted.
+   Reducing WM capacity using \`Brain.configure_wm(capacity: 1)\` may
+   remove an item but must never introduce a new item or gate decision.
+2. The capacity-eviction path now emits
+   \`[:brain, :wm, :update]\` with \`reason: :configure_wm\`,
+   \`added: 0\`, and an exact removed count. It did not previously
+   report that retention mutation.
+3. \`Brain.defocus/1\` removes an admitted item and emits removal-only
+   telemetry without a second gate decision.
+4. \`Brain.lifg_stage1/3\` with \`gate_into_wm: false\` must leave
+   memory unchanged and emit no admission. The corresponding enabled
+   experiment must create canonical BasalGanglia telemetry **before**
+   a new memory item is observed.
+
+Run these after pulling:
+
+    mix test apps/brain/test/brain/wm/runtime_admission_integrity_test.exs \
+      apps/brain/test/brain/wm/writer_audit_test.exs --trace
+    mix run --no-start scripts/audit_wm_writers.exs
+
+This is stronger than source inspection alone but **not** runtime
+instrumentation of every possible BEAM state replacement. A source writer
+can be valid yet have missing or incorrect evidence, and direct
+\`:sys.replace_state\` by arbitrary trusted code can bypass ordinary
+GenServer callbacks. Additional negative controls and independent
+validation remain mandatory before V1 gate sign-off.
+
 ## Required tests before closing :unified_control_gate
 
 1. Enumerate all reachable WM insertion/mutation callers across Brain,
