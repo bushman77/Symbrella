@@ -92,6 +92,10 @@ Current status:
 - [x] Explicit bounded self-state bias function exists.
 - [x] Self-state gate contribution is telemetry-visible.
 - [x] Neutral/default self-state preserves previous gate behavior.
+- [x] Implement source-shape checks for privileged conversation/verified-semantics
+  WM frames and protect dictionary-shaped lexical senses from source-spoofed
+  evidence floors (new regression tests require local execution; see
+  docs/operational_v1_wm_ingress_inventory.md).
 - **Active frontier:** Phase 9 cognitive gating consolidation and behavior coupling.
 
 ---
