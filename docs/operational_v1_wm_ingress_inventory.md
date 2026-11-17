@@ -41,6 +41,48 @@ evidence admission. Proof must come from the *preceding typed evidence
 requirements* and boundary tests. A candidate may never gain factual
 authority merely by being in Working Memory.
 
+## Static production-writer inventory tripwire
+
+**Implemented, not yet executed locally.** To reduce the chance of silently
+introducing an admission bypass, the following read-only tooling scans all
+\`apps/*/lib/**/*.ex\` production Elixir source:
+
+- \`Brain.WM.WriterAudit.inventory/1\` parses the source syntax tree and
+  discovers recognized \`Map.put\` / \`Map.update\`-style writes to \`:wm\`,
+  immutable map-update expressions affecting \`:wm\`, and direct
+  \`WorkingMemory.upsert/3\` calls.
+- \`Brain.WM.WriterAudit.verify/1\` compares the entire discovered inventory
+  against an explicit, reviewed, source-path-and-operation-count allowlist.
+  A new writer, a missing known writer or a parse error causes failure.
+- \`apps/brain/test/brain/wm/writer_audit_test.exs\` exercises both the
+  real repository inventory and synthetic bypass attempts.
+- \`scripts/audit_wm_writers.exs\` prints discovered file/line references
+  and fails nonzero on a changed inventory.
+
+Run:
+
+    mix test apps/brain/test/brain/wm/writer_audit_test.exs --trace
+    mix run --no-start scripts/audit_wm_writers.exs
+
+Initial reviewed operations (pending local test confirmation):
+
+| Production source | Recognized operation | Expected count | Role |
+| --- | --- | --- | --- |
+| apps/brain/lib/brain.ex | immutable WM map update | 4 | Brain GenServer's focus, Stage2, trim and defocus handlers |
+| apps/brain/lib/brain/pipeline/lifg_stage1.ex | map put | 1 | State update after WMFocus / canonical admission |
+| apps/brain/lib/brain/wm/gate.ex | map put | 1 | Legacy adapter after Admission.run |
+| apps/brain/lib/brain/wm/policy.ex | map put | 2 | Retention-only decay and capacity eviction |
+| apps/brain/lib/brain/wm/admission.ex | direct WorkingMemory.upsert | 2 | The allowed canonical insertion points |
+
+**Limitations:** This is a regression tripwire for *recognized syntax forms*,
+not an exhaustive semantic/static analysis or a security sandbox.
+\`put_in\`/\`update_in\`, dynamically generated source, macros, reflective
+process-state replacement (\`:sys.replace_state\`), alternative aliases, and
+runtime BEAM interventions are not fully covered. A code change can preserve
+the operation count while altering its meaning. Do not mark all WM writes
+proven safe based on this result alone. Runtime callback and ingress tests,
+source provenance checks, and independent code review remain required.
+
 ## Required tests before closing :unified_control_gate
 
 1. Enumerate all reachable WM insertion/mutation callers across Brain,
