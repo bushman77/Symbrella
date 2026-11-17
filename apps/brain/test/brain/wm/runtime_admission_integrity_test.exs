@@ -79,6 +79,51 @@ defmodule Brain.WM.RuntimeAdmissionIntegrityTest do
     assert Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
   end
 
+  test "direct Brain.focus cannot lower a lexical sense floor by claiming runtime origin" do
+    id = "source-spoof-#{System.unique_integer([:positive])}|verb|1"
+
+    wm =
+      Brain.focus(
+        [%{id: id, lemma: "source-spoof", score: 0.2, source: :runtime}],
+        lifg_min_score: 0.8,
+        evidence_floor: 0.0,
+        gate_threshold: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0,
+        prefer_sources: [],
+        source_boosts: %{}
+      )
+
+    refute Enum.any?(wm, &(&1.id == id))
+
+    assert_receive {:admission_event, [:brain, :gate, :decision], _,
+                    %{id: ^id, source: :runtime,
+                      gate: :basal_ganglia, decision: :block}}
+    refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
+  end
+
+  test "direct Brain.focus cannot invent a verified-semantics evidence frame" do
+    id = "verified_semantics:" <> String.duplicate("d", 32)
+
+    wm =
+      Brain.focus(
+        [%{id: id, lemma: "invented proof", score: 1.0,
+           source: :verified_semantics}],
+        gate_threshold: 0.0,
+        evidence_floor: 0.0,
+        boost_threshold: 0.0,
+        boost_threshold_pref: 0.0
+      )
+
+    refute Enum.any?(wm, &(&1.id == id))
+
+    assert_receive {:admission_event, [:brain, :gate, :decision], %{score: 0.0},
+                    %{id: ^id, source: :verified_semantics,
+                      gate: :basal_ganglia, decision: :block,
+                      reason: :invalid_scoped_source_evidence}}
+    refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
+  end
+
   test "Stage2 linguistic commitment cannot bypass a stricter BG admission gate" do
     id = "stage2-block-#{System.unique_integer([:positive])}|noun|0"
 
