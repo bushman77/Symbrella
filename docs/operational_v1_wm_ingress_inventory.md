@@ -73,6 +73,15 @@ Initial reviewed operations (pending local test confirmation):
 | apps/brain/lib/brain/wm/gate.ex | map put | 1 | Legacy adapter after Admission.run |
 | apps/brain/lib/brain/wm/policy.ex | map put | 2 | Retention-only decay and capacity eviction |
 | apps/brain/lib/brain/wm/admission.ex | direct WorkingMemory.upsert | 2 | The allowed canonical insertion points |
+| apps/symbrella_web/lib/symbrella_web/components/brain/brain_panels.ex | literal `Map.put_new(:wm, %{})` | 1 | LiveView component-assign default; **not** Brain WM state |
+
+The reviewed static inventory includes **10 recognized Brain WM state-write
+operations** and **1 separately classified, non-runtime UI default** across
+six files. The UI default is included in the reviewed list, not silently
+ignored. An identical AST operation added to an unreviewed module still
+fails the check, and non-default `Map.put` updates are classified as writes.
+The UI classification depends on the inspected source context, not on a
+claim that every `Map.put_new(:wm, %{})` is harmless.
 
 **Limitations:** This is a regression tripwire for *recognized syntax forms*,
 not an exhaustive semantic/static analysis or a security sandbox.
