@@ -75,7 +75,7 @@ config/llm.local.exs
 # ───────── Training data and model artifacts ─────────
 # Runtime self-calibration samples, including numbered rotations/backups.
 # Keep deliberately checked-in synthetic fixtures separate.
-/apps/*
+/apps/*/priv/samples.jsonl*
 # Downloaded or generated model weights/checkpoints.
 *.gguf
 *.safetensors
