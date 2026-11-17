@@ -15,8 +15,18 @@ defmodule Core.Syntax.PredicateEvidence do
   @modifiers MapSet.new(~w(please not))
   @count_words MapSet.new(~w(one two three four five six seven eight nine ten
                               eleven twelve thirteen))
-  @required_present [:contiguous_surface, :attested_nominal_subject,
-                     :attested_nominal_object, :attested_finite_present_verb]
+  @required_present [
+    :contiguous_surface,
+    :attested_nominal_subject,
+    :attested_nominal_object,
+    :attested_finite_present_verb
+  ]
+  @required_past [
+    :contiguous_surface,
+    :attested_nominal_subject,
+    :attested_nominal_object,
+    :attested_simple_past_verb
+  ]
   @max_tokens 64
   @max_proposals 32
 
@@ -36,7 +46,8 @@ defmodule Core.Syntax.PredicateEvidence do
          imperatives(tokens, cells, max_idx) ++
          plural_present(tokens, cells, max_idx) ++
          counted_present(si, tokens, cells, max_idx) ++
-         attested_present(si, tokens, cells, max_idx))
+         attested_present(si, tokens, cells, max_idx) ++
+         attested_past(si, tokens, cells, max_idx))
       |> Enum.uniq_by(&{&1.token_index, &1.basis, &1.span})
       |> Enum.take(@max_proposals)
     else
@@ -49,24 +60,37 @@ defmodule Core.Syntax.PredicateEvidence do
   defp modal_questions(tokens, cells, last) do
     starts =
       cond do
-        MapSet.member?(@modals, Map.get(tokens, 0)) -> [0]
+        MapSet.member?(@modals, Map.get(tokens, 0)) ->
+          [0]
+
         MapSet.member?(@wh, Map.get(tokens, 0)) and
-            MapSet.member?(@modals, Map.get(tokens, 1)) -> [1]
-        true -> []
+            MapSet.member?(@modals, Map.get(tokens, 1)) ->
+          [1]
+
+        true ->
+          []
       end
 
     Enum.flat_map(starts, fn aux ->
       subject = aux + 1
+
       candidates =
-        [{subject + 1, pronoun?(tokens, cells, subject)},
-         {subject + 2, determined_noun?(tokens, cells, subject)}]
+        [
+          {subject + 1, pronoun?(tokens, cells, subject)},
+          {subject + 2, determined_noun?(tokens, cells, subject)}
+        ]
 
       Enum.flat_map(candidates, fn {start, subject_ok?} ->
         predicate = skip_modifiers(tokens, start, last)
 
         if subject_ok? and predicate <= last and verb?(tokens, cells, predicate) do
-          [proposal(predicate, :modal_question_predicate, {0, last},
-             [:auxiliary_subject_order, :dictionary_pos_witness, :bounded_predicate_slot])]
+          [
+            proposal(predicate, :modal_question_predicate, {0, last}, [
+              :auxiliary_subject_order,
+              :dictionary_pos_witness,
+              :bounded_predicate_slot
+            ])
+          ]
         else
           []
         end
@@ -80,11 +104,17 @@ defmodule Core.Syntax.PredicateEvidence do
         subject_ok? =
           (aux >= 1 and pronoun?(tokens, cells, aux - 1)) or
             (aux >= 2 and determined_noun?(tokens, cells, aux - 2))
+
         predicate = skip_modifiers(tokens, aux + 1, last)
 
         if subject_ok? and predicate <= last and verb?(tokens, cells, predicate) do
-          [proposal(predicate, :modal_declarative_predicate, {0, last},
-             [:subject_auxiliary_order, :dictionary_pos_witness, :bounded_predicate_slot])]
+          [
+            proposal(predicate, :modal_declarative_predicate, {0, last}, [
+              :subject_auxiliary_order,
+              :dictionary_pos_witness,
+              :bounded_predicate_slot
+            ])
+          ]
         else
           []
         end
@@ -100,6 +130,7 @@ defmodule Core.Syntax.PredicateEvidence do
   # the result is POS support, not semantic admission or a selected sense.
   defp counted_negative_transitives(tokens, cells, 6) do
     count = Map.get(tokens, 0)
+
     count? =
       MapSet.member?(@count_words, count) or
         case Integer.parse(count || "") do
@@ -117,10 +148,15 @@ defmodule Core.Syntax.PredicateEvidence do
          witnessed?(tokens, cells, 4, "verb") and
          witnessed?(tokens, cells, 5, "determiner") and
          witnessed?(tokens, cells, 6, "noun") do
-      [proposal(4, :counted_negative_transitive_predicate, {0, 6},
-         [:attested_counted_subject, :explicit_did_not_negation,
-          :attested_nominal_object, :dictionary_pos_witness,
-          :bounded_predicate_slot])]
+      [
+        proposal(4, :counted_negative_transitive_predicate, {0, 6}, [
+          :attested_counted_subject,
+          :explicit_did_not_negation,
+          :attested_nominal_object,
+          :dictionary_pos_witness,
+          :bounded_predicate_slot
+        ])
+      ]
     else
       []
     end
@@ -137,8 +173,13 @@ defmodule Core.Syntax.PredicateEvidence do
          verb?(tokens, cells, start) and
          (MapSet.member?(@determiners, after_verb) or
             after_verb in ~w(me him her us them it)) do
-      [proposal(start, :imperative_predicate, {0, last},
-         [:initial_predicate, :dictionary_pos_witness, :bounded_predicate_slot])]
+      [
+        proposal(start, :imperative_predicate, {0, last}, [
+          :initial_predicate,
+          :dictionary_pos_witness,
+          :bounded_predicate_slot
+        ])
+      ]
     else
       []
     end
@@ -152,13 +193,19 @@ defmodule Core.Syntax.PredicateEvidence do
          true <- witnessed?(tokens, cells, 0, "determiner"),
          true <- plural_noun?(tokens, cells, 1),
          true <- present_base_verb?(tokens, cells, 2),
-         true <- (last == 3 and witnessed?(tokens, cells, 3, "noun")) or
-           (last == 4 and MapSet.member?(@determiners, Map.get(tokens, 3)) and
-             witnessed?(tokens, cells, 3, "determiner") and
-             witnessed?(tokens, cells, 4, "noun")) do
-      [proposal(2, :plural_present_predicate, {0, last},
-         [:attested_plural_subject, :present_base_verb_witness,
-          :dictionary_pos_witness, :bounded_predicate_slot])]
+         true <-
+           (last == 3 and witnessed?(tokens, cells, 3, "noun")) or
+             (last == 4 and MapSet.member?(@determiners, Map.get(tokens, 3)) and
+                witnessed?(tokens, cells, 3, "determiner") and
+                witnessed?(tokens, cells, 4, "noun")) do
+      [
+        proposal(2, :plural_present_predicate, {0, last}, [
+          :attested_plural_subject,
+          :present_base_verb_witness,
+          :dictionary_pos_witness,
+          :bounded_predicate_slot
+        ])
+      ]
     else
       _ -> []
     end
@@ -169,28 +216,41 @@ defmodule Core.Syntax.PredicateEvidence do
     |> Map.get(:sentence_signatures, [])
     |> List.wrap()
     |> Enum.flat_map(fn
-      %{id: :counted_finite_present_svo_candidate, source: :core_syntax,
+      %{
+        id: :counted_finite_present_svo_candidate,
+        source: :core_syntax,
         span: {0, 4},
-        roles: %{count: 0, subject_head: 1, predicate: 2,
-                 object_determiner: 3, object_head: 4},
-        evidence: evidence} when is_list(evidence) ->
-        needed = [:contiguous_surface, :attested_counted_plural_subject,
-                  :attested_base_present_verb, :attested_nominal_object]
+        roles: %{count: 0, subject_head: 1, predicate: 2, object_determiner: 3, object_head: 4},
+        evidence: evidence
+      }
+      when is_list(evidence) ->
+        needed = [
+          :contiguous_surface,
+          :attested_counted_plural_subject,
+          :attested_base_present_verb,
+          :attested_nominal_object
+        ]
 
         if Enum.all?(needed, &(&1 in evidence)) and
              plural_noun?(tokens, cells, 1) and
              present_base_verb?(tokens, cells, 2) and
              witnessed?(tokens, cells, 3, "determiner") and
              witnessed?(tokens, cells, 4, "noun") do
-          [proposal(2, :counted_present_transitive_predicate, {0, 4},
-             [:attested_counted_plural_subject, :attested_base_present_verb,
-              :attested_nominal_object, :dictionary_pos_witness,
-              :bounded_predicate_slot])]
+          [
+            proposal(2, :counted_present_transitive_predicate, {0, 4}, [
+              :attested_counted_plural_subject,
+              :attested_base_present_verb,
+              :attested_nominal_object,
+              :dictionary_pos_witness,
+              :bounded_predicate_slot
+            ])
+          ]
         else
           []
         end
 
-      _ -> []
+      _ ->
+        []
     end)
   end
 
@@ -201,35 +261,97 @@ defmodule Core.Syntax.PredicateEvidence do
     |> Map.get(:sentence_signatures, [])
     |> List.wrap()
     |> Enum.flat_map(fn
-      %{id: :finite_present_svo_candidate, source: :core_syntax,
+      %{
+        id: :finite_present_svo_candidate,
+        source: :core_syntax,
         span: {0, ^last},
         roles: %{subject_head: subject, predicate: predicate, object_head: object},
-        evidence: evidence}
+        evidence: evidence
+      }
       when is_integer(subject) and is_integer(predicate) and is_integer(object) and
-           is_list(evidence) ->
+             is_list(evidence) ->
         if subject < predicate and predicate < object and
              Enum.all?(@required_present, &(&1 in evidence)) and
              verb?(tokens, cells, predicate) do
-          [proposal(predicate, :finite_present_svo_predicate, {0, last},
-             [:attested_finite_present_verb, :dictionary_pos_witness,
-              :bounded_predicate_slot])]
+          [
+            proposal(predicate, :finite_present_svo_predicate, {0, last}, [
+              :attested_finite_present_verb,
+              :dictionary_pos_witness,
+              :bounded_predicate_slot
+            ])
+          ]
         else
           []
         end
 
-      _ -> []
+      _ ->
+        []
     end)
   end
 
+  # A complete pronoun + finite-past verb + determiner + noun clause.
+  # Require the original syntax signature AND dictionary morphology.
+  defp attested_past(si, tokens, cells, 3) do
+    si
+    |> Map.get(:sentence_signatures, [])
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{
+        id: :finite_past_svo_candidate,
+        source: :core_syntax,
+        span: {0, 3},
+        roles: %{
+          subject_head: 0,
+          predicate: 1,
+          object_determiner: 2,
+          object_head: 3
+        },
+        evidence: evidence
+      }
+      when is_list(evidence) ->
+        if Enum.all?(@required_past, &(&1 in evidence)) and
+             pronoun?(tokens, cells, 0) and
+             simple_past_verb?(tokens, cells, 1) and
+             witnessed?(tokens, cells, 2, "determiner") and
+             witnessed?(tokens, cells, 3, "noun") do
+          [
+            proposal(
+              1,
+              :finite_past_svo_predicate,
+              {0, 3},
+              [
+                :attested_simple_past_verb,
+                :dictionary_pos_witness,
+                :bounded_predicate_slot
+              ]
+            )
+          ]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp attested_past(_si, _tokens, _cells, _last), do: []
+
   defp proposal(index, basis, span, evidence) do
-    %{token_index: index, pos: "verb", role: :predicate,
-      frame: :predicate_clause, span: span, basis: basis, evidence: evidence}
+    %{
+      token_index: index,
+      pos: "verb",
+      role: :predicate,
+      frame: :predicate_clause,
+      span: span,
+      basis: basis,
+      evidence: evidence
+    }
   end
 
   defp skip_modifiers(tokens, start, last) do
     Enum.reduce(1..2, start, fn _, idx ->
-      if idx <= last and MapSet.member?(@modifiers, Map.get(tokens, idx)),
-        do: idx + 1, else: idx
+      if idx <= last and MapSet.member?(@modifiers, Map.get(tokens, idx)), do: idx + 1, else: idx
     end)
   end
 
@@ -246,10 +368,30 @@ defmodule Core.Syntax.PredicateEvidence do
 
   defp verb?(tokens, cells, i), do: witnessed?(tokens, cells, i, "verb")
 
-  defp plural_noun?(tokens, cells, index) do
+  defp simple_past_verb?(tokens, cells, index) do
     word = Map.get(tokens, index)
+
     Enum.any?(cells, fn cell ->
       tags = List.wrap(Map.get(cell, :semantic_atoms, []))
+      definition = Map.get(cell, :definition) || ""
+
+      cell_matches?(cell, word, "verb") and
+        "tag:form-of" in tags and
+        "tag:past" in tags and
+        ("tag:participle" not in tags or
+           Regex.match?(
+             ~r/\bsimple past and past participle of [\p{L}]+(?:[-'’][\p{L}]+)*\b/ui,
+             definition
+           ))
+    end)
+  end
+
+  defp plural_noun?(tokens, cells, index) do
+    word = Map.get(tokens, index)
+
+    Enum.any?(cells, fn cell ->
+      tags = List.wrap(Map.get(cell, :semantic_atoms, []))
+
       cell_matches?(cell, word, "noun") and
         "tag:plural" in tags and "tag:form-of" in tags
     end)
@@ -257,16 +399,19 @@ defmodule Core.Syntax.PredicateEvidence do
 
   defp present_base_verb?(tokens, cells, index) do
     word = Map.get(tokens, index)
+
     Enum.any?(cells, fn cell ->
       tags = List.wrap(Map.get(cell, :semantic_atoms, []))
+
       cell_matches?(cell, word, "verb") and
         not Enum.any?(["tag:past", "tag:participle"], &(&1 in tags)) and
-        not ("tag:form-of" in tags)
+        "tag:form-of" not in tags
     end)
   end
 
   defp witnessed?(tokens, cells, index, pos) do
     word = Map.get(tokens, index)
+
     is_binary(word) and
       Enum.any?(cells, &cell_matches?(&1, word, pos))
   end
@@ -277,7 +422,9 @@ defmodule Core.Syntax.PredicateEvidence do
       case Map.get(cell, :id) do
         id when is_binary(id) ->
           String.starts_with?(id, word <> "|" <> pos <> "|")
-        _ -> false
+
+        _ ->
+          false
       end
   end
 

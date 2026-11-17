@@ -29,13 +29,21 @@ defmodule Brain.LIFG.UsageRegister do
       when is_map(scores) and is_list(candidates) and is_list(opts) do
     enabled? = Keyword.get(opts, :enabled?, true) == true
     penalty = bounded_penalty(Keyword.get(opts, :penalty, @default_penalty))
+
     historical_context? =
       is_binary(sentence) and String.match?(sentence, @historical_context)
 
     if not enabled? or penalty == 0.0 or historical_context? do
-      {scores, %{applied?: false,
-                 reason: if(historical_context?, do: :historical_context,
-                   else: :disabled), adjustments: []}}
+      {scores,
+       %{
+         applied?: false,
+         reason:
+           if(historical_context?,
+             do: :historical_context,
+             else: :disabled
+           ),
+         adjustments: []
+       }}
     else
       entries =
         candidates
@@ -44,8 +52,11 @@ defmodule Brain.LIFG.UsageRegister do
           %{
             id: field(candidate, :id),
             pos: normalize(field(candidate, :pos)),
-            norm: normalize(field(candidate, :norm) || field(candidate, :lemma) ||
-              field(candidate, :word)),
+            norm:
+              normalize(
+                field(candidate, :norm) || field(candidate, :lemma) ||
+                  field(candidate, :word)
+              ),
             definition: field(candidate, :definition),
             labels: historical_labels(field(candidate, :definition))
           }
@@ -57,19 +68,23 @@ defmodule Brain.LIFG.UsageRegister do
             entry.pos != "" and entry.norm != ""
         end)
 
-      groups = Enum.group_by(entries, &{&1.norm, &1.pos})
+      groups = Enum.group_by(entries, & &1.norm)
 
       adjustments =
         groups
-        |> Enum.flat_map(fn {{_norm, _pos}, group} ->
+        |> Enum.flat_map(fn {_norm, group} ->
           ordinary? = Enum.any?(group, &(&1.labels == []))
 
           if ordinary? do
             group
             |> Enum.filter(&(&1.labels != []))
             |> Enum.map(fn entry ->
-              %{id: entry.id, labels: entry.labels, delta: -penalty,
-                source: :explicit_dictionary_usage_label}
+              %{
+                id: entry.id,
+                labels: entry.labels,
+                delta: -penalty,
+                source: :explicit_dictionary_usage_label
+              }
             end)
           else
             []
@@ -84,10 +99,15 @@ defmodule Brain.LIFG.UsageRegister do
         end)
 
       {adjusted,
-       %{applied?: adjustments != [],
-         reason: if(adjustments == [], do: :no_attested_same_pos_alternative,
-           else: :explicit_historical_register),
-         adjustments: adjustments}}
+       %{
+         applied?: adjustments != [],
+         reason:
+           if(adjustments == [],
+             do: :no_attested_same_pos_alternative,
+             else: :explicit_historical_register
+           ),
+         adjustments: adjustments
+       }}
     end
   end
 
@@ -114,6 +134,7 @@ defmodule Brain.LIFG.UsageRegister do
 
   defp bounded_penalty(n) when is_number(n) and n >= 0,
     do: min(n * 1.0, 0.10)
+
   defp bounded_penalty(_), do: 0.0
 
   defp normalize(s) when is_binary(s), do: s |> String.trim() |> String.downcase()

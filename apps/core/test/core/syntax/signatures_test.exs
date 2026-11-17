@@ -65,20 +65,29 @@ defmodule Core.Syntax.SignaturesTest do
     signatures =
       Signatures.detect(input("The bird is flarping on the fence.", cells))
 
-    assert [%{
-      id: :progressive_lexical_gap_candidate,
-      span: {0, 6},
-      roles: %{subject_head: 1, auxiliary: 2, predicate: 3,
-               preposition: 4, location_head: 6},
-      required_features: %{predicate: [:unresolved_ing_surface]},
-      source: :core_syntax
-    } = gap] =
-      Enum.filter(signatures, &(&1.id == :progressive_lexical_gap_candidate))
+    assert [
+             %{
+               id: :progressive_lexical_gap_candidate,
+               span: {0, 6},
+               roles: %{
+                 subject_head: 1,
+                 auxiliary: 2,
+                 predicate: 3,
+                 preposition: 4,
+                 location_head: 6
+               },
+               required_features: %{predicate: [:unresolved_ing_surface]},
+               source: :core_syntax
+             } = gap
+           ] =
+             Enum.filter(signatures, &(&1.id == :progressive_lexical_gap_candidate))
 
     assert :unresolved_progressive_predicate in gap.evidence
+
     assert gap.source_span_sha256 ==
-      (:crypto.hash(:sha256, "the bird is flarping on the fence")
-       |> Base.encode16(case: :lower))
+             :crypto.hash(:sha256, "the bird is flarping on the fence")
+             |> Base.encode16(case: :lower)
+
     refute :attested_present_participle in gap.evidence
 
     # No candidate can manufacture a missing dictionary verb cell.
@@ -86,17 +95,21 @@ defmodule Core.Syntax.SignaturesTest do
 
     for missing <- ["bird", "on", "fence"] do
       weaker = Enum.reject(cells, &(&1.norm == missing))
-      refute :progressive_lexical_gap_candidate in
-        ids("The bird is flarping on the fence.", weaker)
+
+      refute :progressive_lexical_gap_candidate in ids(
+               "The bird is flarping on the fence.",
+               weaker
+             )
     end
 
     for sentence <- [
-      "The bird is flarping.",
-      "The bird is flarping inside the fence.",
-      "The bird is flarping on fence.",
-      "The bird is dancing on the fence."
-    ] do
+          "The bird is flarping.",
+          "The bird is flarping inside the fence.",
+          "The bird is flarping on fence.",
+          "The bird is dancing on the fence."
+        ] do
       candidates = ids(sentence, cells)
+
       if sentence == "The bird is dancing on the fence." do
         # Surface-only -ing with no dictionary evidence is provisional even
         # when the string happens to be a real English word.
@@ -107,15 +120,20 @@ defmodule Core.Syntax.SignaturesTest do
     end
 
     attested = [
-      %{norm: "flapping", pos: "verb",
-        semantic_atoms: ["tag:form-of", "tag:present", "tag:participle"]}
+      %{
+        norm: "flapping",
+        pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:present", "tag:participle"]
+      }
       | cells
     ]
 
-    refute :progressive_lexical_gap_candidate in
-      ids("The bird is flapping on the fence.", attested)
-    assert :progressive_locative_candidate in
-      ids("The bird is flapping on the fence.", attested)
+    refute :progressive_lexical_gap_candidate in ids(
+             "The bird is flapping on the fence.",
+             attested
+           )
+
+    assert :progressive_locative_candidate in ids("The bird is flapping on the fence.", attested)
   end
 
   test "complete attested regular-past transitive frame distinguishes predicate from noun reading" do
@@ -130,9 +148,11 @@ defmodule Core.Syntax.SignaturesTest do
 
     complete = Signatures.detect(input("The checker verified those claims.", cells))
 
-    assert %{id: :bounded_regular_past_transitive,
+    assert %{
+             id: :bounded_regular_past_transitive,
              roles: %{subject_head: 1, predicate: 2, object_head: 4},
-             source: :core_syntax} =
+             source: :core_syntax
+           } =
              Enum.find(complete, &(&1.id == :bounded_regular_past_transitive))
 
     for sentence <- [
@@ -144,9 +164,10 @@ defmodule Core.Syntax.SignaturesTest do
       refute :bounded_regular_past_transitive in ids(sentence, cells)
     end
 
-    refute :bounded_regular_past_transitive in
-             ids("The checker verified those claims.",
-               Enum.reject(cells, &(&1.norm == "verified" and &1.pos == "verb")))
+    refute :bounded_regular_past_transitive in ids(
+             "The checker verified those claims.",
+             Enum.reject(cells, &(&1.norm == "verified" and &1.pos == "verb"))
+           )
   end
 
   test "complete copular relative clause witnesses a lower-case noun complement" do
@@ -161,11 +182,20 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     clauses = Signatures.detect(input("Links were lines that refute the claim.", cells))
-    assert %{id: :copular_relative_classification,
-             roles: %{subject_head: 0, copula: 1, complement_head: 2,
-               relative_marker: 3, relative_verb: 4,
-               object_determiner: 5, object_head: 6},
-             source: :core_syntax} =
+
+    assert %{
+             id: :copular_relative_classification,
+             roles: %{
+               subject_head: 0,
+               copula: 1,
+               complement_head: 2,
+               relative_marker: 3,
+               relative_verb: 4,
+               object_determiner: 5,
+               object_head: 6
+             },
+             source: :core_syntax
+           } =
              Enum.find(clauses, &(&1.id == :copular_relative_classification))
 
     for unsupported <- [
@@ -176,9 +206,10 @@ defmodule Core.Syntax.SignaturesTest do
       refute :copular_relative_classification in ids(unsupported, cells)
     end
 
-    refute :copular_relative_classification in
-             ids("Links were lines that refute the claim.",
-               Enum.reject(cells, &(&1.norm == "refute")))
+    refute :copular_relative_classification in ids(
+             "Links were lines that refute the claim.",
+             Enum.reject(cells, &(&1.norm == "refute"))
+           )
   end
 
   test "simple-past candidate is found without selecting a BrainCell" do
@@ -192,41 +223,45 @@ defmodule Core.Syntax.SignaturesTest do
       %{norm: "the", pos: "determiner"},
       %{norm: "gathered", pos: "adjective"},
       %{norm: "had", pos: "auxiliary"},
-      %{norm: "grown", pos: "verb",
-        semantic_atoms: ["tag:form-of", "tag:past", "tag:participle"]}
+      %{norm: "grown", pos: "verb", semantic_atoms: ["tag:form-of", "tag:past", "tag:participle"]}
     ]
 
     signatures = Signatures.detect(input("The gathered had grown.", cells))
 
-    assert [%{
-      id: :nominalized_adjective_subject_candidate,
-      span: {0, 1},
-      roles: %{determiner: 0, adjective: 1},
-      required_features: %{
-        determiner: [:pos_determiner], adjective: [:pos_adjective]
-      }
-    }] =
-      Enum.filter(signatures, &(&1.id == :nominalized_adjective_subject_candidate))
+    assert [
+             %{
+               id: :nominalized_adjective_subject_candidate,
+               span: {0, 1},
+               roles: %{determiner: 0, adjective: 1},
+               required_features: %{
+                 determiner: [:pos_determiner],
+                 adjective: [:pos_adjective]
+               }
+             }
+           ] =
+             Enum.filter(signatures, &(&1.id == :nominalized_adjective_subject_candidate))
 
     refute Enum.any?(signatures, fn sig ->
-      sig.id == :noun_phrase and sig.span == {0, 1}
-    end)
+             sig.id == :noun_phrase and sig.span == {0, 1}
+           end)
 
     for sentence <- [
-      "The gathered walked.",
-      "The gathered had quickly grown.",
-      "The gathered had."
-    ] do
+          "The gathered walked.",
+          "The gathered had quickly grown.",
+          "The gathered had."
+        ] do
       refute :nominalized_adjective_subject_candidate in ids(sentence, cells)
     end
 
-    refute :nominalized_adjective_subject_candidate in
-      ids("The gathered had grown.",
-        Enum.reject(cells, &(&1.norm == "gathered" and &1.pos == "adjective")))
+    refute :nominalized_adjective_subject_candidate in ids(
+             "The gathered had grown.",
+             Enum.reject(cells, &(&1.norm == "gathered" and &1.pos == "adjective"))
+           )
 
-    refute :nominalized_adjective_subject_candidate in
-      ids("The gathered had grown.",
-        Enum.reject(cells, &(&1.norm == "grown")))
+    refute :nominalized_adjective_subject_candidate in ids(
+             "The gathered had grown.",
+             Enum.reject(cells, &(&1.norm == "grown"))
+           )
   end
 
   test "have plus past participle supports a perfect construction" do
@@ -282,10 +317,13 @@ defmodule Core.Syntax.SignaturesTest do
       Signatures.detect(input("turn the lights off", cells))
       |> Enum.filter(&(&1.id == :verb_particle_construction))
 
-    assert [%{
-      span: {0, 3},
-      roles: %{verb: 0, determiner: 1, object: 2, particle: 3}
-    }] = separated
+    assert [
+             %{
+               span: {0, 3},
+               roles: %{verb: 0, determiner: 1, object: 2, particle: 3}
+             }
+           ] = separated
+
     assert :separated_particle in hd(separated).evidence
   end
 
@@ -309,11 +347,15 @@ defmodule Core.Syntax.SignaturesTest do
 
     assert Enum.any?(signatures, fn
              %{
-               id: :verb_particle_construction, span: {0, 3},
+               id: :verb_particle_construction,
+               span: {0, 3},
                roles: %{verb: 0, determiner: 1, object: 2, particle: 3},
                required_features: %{particle: particle_pos}
-             } -> :pos_adverb in particle_pos and :pos_preposition in particle_pos
-             _ -> false
+             } ->
+               :pos_adverb in particle_pos and :pos_preposition in particle_pos
+
+             _ ->
+               false
            end)
 
     assert si.active_cells == cells
@@ -383,6 +425,7 @@ defmodule Core.Syntax.SignaturesTest do
       %{norm: "turn", pos: "verb"},
       %{norm: "off", pos: "particle"}
     ]
+
     si = input("turn off", cells)
     out = Signatures.attach(si)
 
@@ -423,22 +466,29 @@ defmodule Core.Syntax.SignaturesTest do
     si = input("What do you know about Japan's railgun development?", cells)
     signatures = Signatures.detect(si)
 
-    assert [%{
-      id: :possessive_noun_phrase,
-      span: {5, 7},
-      surface_possessor: "Japan",
-      roles: %{possessor: 5, modifier: 6, head: 7},
-      evidence: evidence
-    }] = Enum.filter(signatures, &(&1.id == :possessive_noun_phrase))
+    assert [
+             %{
+               id: :possessive_noun_phrase,
+               span: {5, 7},
+               surface_possessor: "Japan",
+               roles: %{possessor: 5, modifier: 6, head: 7},
+               evidence: evidence
+             }
+           ] = Enum.filter(signatures, &(&1.id == :possessive_noun_phrase))
 
     assert :apostrophe_s in evidence
     assert :possessor_not_lexically_verified in evidence
 
     assert Enum.any?(signatures, fn
-             %{id: :prepositional_phrase, span: {4, 7},
-               roles: %{preposition: 4, possessor: 5, modifier: 6,
-                        head: 7, object: 7}} -> true
-             _ -> false
+             %{
+               id: :prepositional_phrase,
+               span: {4, 7},
+               roles: %{preposition: 4, possessor: 5, modifier: 6, head: 7, object: 7}
+             } ->
+               true
+
+             _ ->
+               false
            end)
 
     out = Signatures.attach(si)
@@ -451,12 +501,10 @@ defmodule Core.Syntax.SignaturesTest do
     for {sentence, cells, span, head} <- [
           {"Mary's car", [%{norm: "car", pos: "noun"}], {0, 1}, 1},
           {"the company's annual results",
-           [%{norm: "annual", pos: "adjective"}, %{norm: "results", pos: "noun"}],
-           {1, 3}, 3}
+           [%{norm: "annual", pos: "adjective"}, %{norm: "results", pos: "noun"}], {1, 3}, 3}
         ] do
       assert Enum.any?(Signatures.detect(input(sentence, cells)), fn
-               %{id: :possessive_noun_phrase, span: ^span,
-                 roles: %{head: ^head}} -> true
+               %{id: :possessive_noun_phrase, span: ^span, roles: %{head: ^head}} -> true
                _ -> false
              end)
     end
@@ -472,8 +520,11 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     for sentence <- [
-          "It's time", "There's rain", "He's home",
-          "John's. car", "John's the car"
+          "It's time",
+          "There's rain",
+          "He's home",
+          "John's. car",
+          "John's the car"
         ] do
       refute :possessive_noun_phrase in ids(sentence, cells)
     end
@@ -498,8 +549,11 @@ defmodule Core.Syntax.SignaturesTest do
     assert Enum.any?(signatures, fn sig ->
              sig.id == :prepositional_phrase and sig.span == {0, 3} and
                sig.roles == %{
-                 preposition: 0, determiner: 1, modifier: 2,
-                 head: 3, object: 3
+                 preposition: 0,
+                 determiner: 1,
+                 modifier: 2,
+                 head: 3,
+                 object: 3
                }
            end)
   end
@@ -602,17 +656,24 @@ defmodule Core.Syntax.SignaturesTest do
 
     si = input("What would you do if you were free?", cells)
 
-    assert [%{
-      id: :wh_modal_conditional_question,
-      span: {0, 7},
-      roles: %{
-        wh: 0, modal: 1, subject: 2, predicate: 3,
-        condition_marker: 4, condition_subject: 5,
-        condition_copula: 6, condition_complement: 7
-      },
-      source: :core_syntax
-    } = frame] =
-      Enum.filter(Signatures.detect(si), &(&1.id == :wh_modal_conditional_question))
+    assert [
+             %{
+               id: :wh_modal_conditional_question,
+               span: {0, 7},
+               roles: %{
+                 wh: 0,
+                 modal: 1,
+                 subject: 2,
+                 predicate: 3,
+                 condition_marker: 4,
+                 condition_subject: 5,
+                 condition_copula: 6,
+                 condition_complement: 7
+               },
+               source: :core_syntax
+             } = frame
+           ] =
+             Enum.filter(Signatures.detect(si), &(&1.id == :wh_modal_conditional_question))
 
     assert :explicit_if_condition in frame.evidence
     assert :attested_copular_state in frame.evidence
@@ -621,11 +682,12 @@ defmodule Core.Syntax.SignaturesTest do
 
     # Detecting grammar must NOT silently promote external text into meaning.
     attached = Signatures.attach(si)
+
     assert %{
-      status: :modal_conditional_signature_detected,
-      semantic_composition: :not_yet_interpreted,
-      role_indices: %{condition_marker: 4, predicate: 3}
-    } = Core.Semantic.SentenceMeaning.question_diagnostic(attached)
+             status: :modal_conditional_signature_detected,
+             semantic_composition: :not_yet_interpreted,
+             role_indices: %{condition_marker: 4, predicate: 3}
+           } = Core.Semantic.SentenceMeaning.question_diagnostic(attached)
   end
 
   test "COLONY-14 refuses unsupported modal-condition structure" do
@@ -640,42 +702,66 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     for sentence <- [
-      "What would you do if you were free.",
-      "What would you do because you were free?",
-      "What would you do if you were free tomorrow?",
-      "What would you do if you were free and rich?"
-    ] do
+          "What would you do if you were free.",
+          "What would you do because you were free?",
+          "What would you do if you were free tomorrow?",
+          "What would you do if you were free and rich?"
+        ] do
       refute :wh_modal_conditional_question in ids(sentence, cells)
     end
 
     for missing <- ["what", "would", "do", "were", "free"] do
       filtered = Enum.reject(cells, &(&1.norm == missing))
 
-      refute :wh_modal_conditional_question in
-        ids("What would you do if you were free?", filtered)
+      refute :wh_modal_conditional_question in ids(
+               "What would you do if you were free?",
+               filtered
+             )
     end
   end
 
   test "WH-topic signature retains token roles around adverbs and negation" do
     examples = [
       {"What exactly do you actually know about Japan?",
-       %{wh: 0, wh_modifier: 1, auxiliary: 2, subject: 3,
-         predicate_modifier: 4, predicate: 5, preposition: 6}},
+       %{
+         wh: 0,
+         wh_modifier: 1,
+         auxiliary: 2,
+         subject: 3,
+         predicate_modifier: 4,
+         predicate: 5,
+         preposition: 6
+       }},
       {"What do you actually know about Japan?",
-       %{wh: 0, auxiliary: 1, subject: 2, predicate_modifier: 3,
-         predicate: 4, preposition: 5}},
+       %{wh: 0, auxiliary: 1, subject: 2, predicate_modifier: 3, predicate: 4, preposition: 5}},
       {"What do you not actually know about Japan?",
-       %{wh: 0, auxiliary: 1, subject: 2, negation: 3,
-         predicate_modifier: 4, predicate: 5, preposition: 6}},
+       %{
+         wh: 0,
+         auxiliary: 1,
+         subject: 2,
+         negation: 3,
+         predicate_modifier: 4,
+         predicate: 5,
+         preposition: 6
+       }},
       {"What do you really not know about Japan?",
-       %{wh: 0, auxiliary: 1, subject: 2, predicate_modifier: 3,
-         negation: 4, predicate: 5, preposition: 6}}
+       %{
+         wh: 0,
+         auxiliary: 1,
+         subject: 2,
+         predicate_modifier: 3,
+         negation: 4,
+         predicate: 5,
+         preposition: 6
+       }}
     ]
 
     for {sentence, expected_roles} <- examples do
       si = input(sentence, @question_cells)
+
       assert [%{roles: ^expected_roles} = frame] =
                Enum.filter(Signatures.detect(si), &(&1.id == :wh_aux_topic_question))
+
       assert frame.span == {0, length(si.tokens) - 1}
       assert frame.required_features.predicate == [:pos_verb]
       assert :explicit_prepositional_topic in frame.evidence
@@ -686,9 +772,14 @@ defmodule Core.Syntax.SignaturesTest do
   test "negative auxiliary contractions stay one base-token role" do
     si = input("What don't you know about Japan?", @question_cells)
 
-    assert [%{roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3,
-                       preposition: 4} = roles, evidence: evidence}] =
+    assert [
+             %{
+               roles: %{wh: 0, auxiliary: 1, subject: 2, predicate: 3, preposition: 4} = roles,
+               evidence: evidence
+             }
+           ] =
              Enum.filter(Signatures.detect(si), &(&1.id == :wh_aux_topic_question))
+
     refute Map.has_key?(roles, :negation)
     assert :negative_auxiliary_contraction in evidence
   end
@@ -703,14 +794,16 @@ defmodule Core.Syntax.SignaturesTest do
           {"What do you actually know?", @question_cells},
           {"What do you actually know about quickly?", @question_cells}
         ] do
-      refute Enum.any?(Signatures.detect(input(sentence, cells)),
-               &(&1.id == :wh_aux_topic_question))
+      refute Enum.any?(
+               Signatures.detect(input(sentence, cells)),
+               &(&1.id == :wh_aux_topic_question)
+             )
     end
   end
+
   test "counted plural present SVO requires attested plural noun and base verb" do
     cells = [
-      %{norm: "reports", pos: "noun",
-        semantic_atoms: ["tag:form-of", "tag:plural"]},
+      %{norm: "reports", pos: "noun", semantic_atoms: ["tag:form-of", "tag:plural"]},
       %{norm: "support", pos: "noun", semantic_atoms: []},
       %{norm: "support", pos: "verb", semantic_atoms: []},
       %{norm: "the", pos: "determiner", semantic_atoms: []},
@@ -718,33 +811,51 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     sentence = "Four reports support the claims."
-    assert [%{id: :counted_finite_present_svo_candidate,
-             span: {0, 4},
-             roles: %{count: 0, subject_head: 1, predicate: 2,
-                      object_determiner: 3, object_head: 4},
-             source: :core_syntax}] =
+
+    assert [
+             %{
+               id: :counted_finite_present_svo_candidate,
+               span: {0, 4},
+               roles: %{
+                 count: 0,
+                 subject_head: 1,
+                 predicate: 2,
+                 object_determiner: 3,
+                 object_head: 4
+               },
+               source: :core_syntax
+             }
+           ] =
              Signatures.detect(input(sentence, cells))
              |> Enum.filter(&(&1.id == :counted_finite_present_svo_candidate))
 
     no_plural = Enum.reject(cells, &(&1.norm == "reports"))
     no_verb = Enum.reject(cells, &(&1.norm == "support" and &1.pos == "verb"))
+
     past_form =
       Enum.map(cells, fn
         %{norm: "support", pos: "verb"} = cell ->
           %{cell | semantic_atoms: ["tag:form-of", "tag:past"]}
-        cell -> cell
+
+        cell ->
+          cell
       end)
 
     for bad <- [no_plural, no_verb, past_form] do
       refute :counted_finite_present_svo_candidate in ids(sentence, bad)
     end
 
-    refute :counted_finite_present_svo_candidate in
-             ids("One report support the claims.", cells)
-    refute :counted_finite_present_svo_candidate in
-             ids("Four reports might support the claims.", cells)
-    refute :counted_finite_present_svo_candidate in
-             ids("Four reports support. the claims.", cells)
+    refute :counted_finite_present_svo_candidate in ids("One report support the claims.", cells)
+
+    refute :counted_finite_present_svo_candidate in ids(
+             "Four reports might support the claims.",
+             cells
+           )
+
+    refute :counted_finite_present_svo_candidate in ids(
+             "Four reports support. the claims.",
+             cells
+           )
   end
 
   test "finite present subject–verb–object clause uses exact verb morphology" do
@@ -752,17 +863,30 @@ defmodule Core.Syntax.SignaturesTest do
       %{norm: "the", pos: "determiner"},
       %{norm: "artist", pos: "noun"},
       %{norm: "draws", pos: "noun", semantic_atoms: ["tag:form-of", "tag:plural"]},
-      %{norm: "draws", pos: "verb",
-        semantic_atoms: ["tag:form-of", "tag:indicative", "tag:present",
-                         "tag:singular", "tag:third-person"]},
+      %{
+        norm: "draws",
+        pos: "verb",
+        semantic_atoms: [
+          "tag:form-of",
+          "tag:indicative",
+          "tag:present",
+          "tag:singular",
+          "tag:third-person"
+        ]
+      },
       %{norm: "a", pos: "determiner"},
       %{norm: "picture", pos: "noun"}
     ]
 
     clauses = Signatures.detect(input("The artist draws a picture.", cells))
-    assert [%{id: :finite_present_svo_candidate,
-              span: {0, 4},
-              roles: %{subject_head: 1, predicate: 2, object_head: 4}}] =
+
+    assert [
+             %{
+               id: :finite_present_svo_candidate,
+               span: {0, 4},
+               roles: %{subject_head: 1, predicate: 2, object_head: 4}
+             }
+           ] =
              Enum.filter(clauses, &(&1.id == :finite_present_svo_candidate))
 
     refute :finite_present_svo_candidate in ids("The artist draws. a picture.", cells)
@@ -773,12 +897,23 @@ defmodule Core.Syntax.SignaturesTest do
 
   test "finite-present construction generalizes but does not promote first-person agreement" do
     cells = [
-      %{norm: "the", pos: "determiner"}, %{norm: "painter", pos: "noun"},
-      %{norm: "paints", pos: "verb",
-        semantic_atoms: ["tag:form-of", "tag:indicative", "tag:present",
-                         "tag:singular", "tag:third-person"]},
-      %{norm: "a", pos: "determiner"}, %{norm: "wall", pos: "noun"},
-      %{norm: "she", pos: "pronoun"}, %{norm: "i", pos: "pronoun"}
+      %{norm: "the", pos: "determiner"},
+      %{norm: "painter", pos: "noun"},
+      %{
+        norm: "paints",
+        pos: "verb",
+        semantic_atoms: [
+          "tag:form-of",
+          "tag:indicative",
+          "tag:present",
+          "tag:singular",
+          "tag:third-person"
+        ]
+      },
+      %{norm: "a", pos: "determiner"},
+      %{norm: "wall", pos: "noun"},
+      %{norm: "she", pos: "pronoun"},
+      %{norm: "i", pos: "pronoun"}
     ]
 
     assert :finite_present_svo_candidate in ids("The painter paints a wall.", cells)
@@ -786,7 +921,6 @@ defmodule Core.Syntax.SignaturesTest do
     refute :finite_present_svo_candidate in ids("I paints a wall.", cells)
     refute :finite_present_svo_candidate in ids("She paints. a wall.", cells)
   end
-
 
   test "complete definition imperatives annotate verb and common-noun object roles" do
     cells = [
@@ -798,16 +932,17 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     for {sentence, predicate, object} <- [
-      {"Define artist.", 0, 1},
-      {"please define artist", 1, 2},
-      {"Define the artist.", 0, 2},
-      {"Please define the artist.", 1, 3}
-    ] do
+          {"Define artist.", 0, 1},
+          {"please define artist", 1, 2},
+          {"Define the artist.", 0, 2},
+          {"Please define the artist.", 1, 3}
+        ] do
       si = input(sentence, cells) |> Map.put(:intent, :define)
       signature = Enum.find(Signatures.detect(si), &(&1.id == :definition_imperative))
 
-      assert %{source: :core_syntax, roles: %{predicate: ^predicate,
-                                            object_head: ^object}} = signature
+      assert %{source: :core_syntax, roles: %{predicate: ^predicate, object_head: ^object}} =
+               signature
+
       assert signature.span == {0, object}
       assert :attested_common_noun_object in signature.evidence
       assert :attested_verb_alternative in signature.evidence
@@ -821,29 +956,33 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     for {sentence, intent} <- [
-      {"Define artist now", :define},
-      {"Define artist and painter", :define},
-      {"The define artist", :define},
-      {"Define artist", :unknown},
-      {"Artist define", :define},
-      {"Define artist about painting", :define}
-    ] do
+          {"Define artist now", :define},
+          {"Define artist and painter", :define},
+          {"The define artist", :define},
+          {"Define artist", :unknown},
+          {"Artist define", :define},
+          {"Define artist about painting", :define}
+        ] do
       si = input(sentence, cells) |> Map.put(:intent, intent)
+
       refute Enum.any?(Signatures.detect(si), &(&1.id == :definition_imperative)),
              sentence
     end
 
     noun_only = Enum.reject(cells, &(&1.pos == "verb"))
-    refute :definition_imperative in
-      (input("Define artist", noun_only)
-       |> Map.put(:intent, :define) |> Signatures.detect() |> Enum.map(& &1.id))
+
+    refute :definition_imperative in (input("Define artist", noun_only)
+                                      |> Map.put(:intent, :define)
+                                      |> Signatures.detect()
+                                      |> Enum.map(& &1.id))
 
     verb_only = Enum.reject(cells, &(&1.pos == "noun"))
-    refute :definition_imperative in
-      (input("Define artist", verb_only)
-       |> Map.put(:intent, :define) |> Signatures.detect() |> Enum.map(& &1.id))
-  end
 
+    refute :definition_imperative in (input("Define artist", verb_only)
+                                      |> Map.put(:intent, :define)
+                                      |> Signatures.detect()
+                                      |> Enum.map(& &1.id))
+  end
 
   test "polite commands classified as :command still supply evidenced definition roles" do
     cells = [
@@ -854,17 +993,15 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     si = input("please define artist", cells) |> Map.put(:intent, :command)
-    assert [%{roles: %{predicate: 1, object_head: 2},
-              source: :core_syntax}] =
-      Enum.filter(Signatures.detect(si), &(&1.id == :definition_imperative))
 
-    refute :definition_imperative in
-      (input("please define artist now", cells)
-       |> Map.put(:intent, :command)
-       |> Signatures.detect()
-       |> Enum.map(& &1.id))
+    assert [%{roles: %{predicate: 1, object_head: 2}, source: :core_syntax}] =
+             Enum.filter(Signatures.detect(si), &(&1.id == :definition_imperative))
+
+    refute :definition_imperative in (input("please define artist now", cells)
+                                      |> Map.put(:intent, :command)
+                                      |> Signatures.detect()
+                                      |> Enum.map(& &1.id))
   end
-
 
   test "dictionary gloss explicitly attesting simple past and past participle preserves both" do
     cells = [
@@ -881,11 +1018,9 @@ defmodule Core.Syntax.SignaturesTest do
       }
     ]
 
-    assert :finite_past_svo_candidate in
-             ids("The bank granted a loan.", cells)
+    assert :finite_past_svo_candidate in ids("The bank granted a loan.", cells)
 
-    assert :perfect_predicate in
-             ids("The bank has granted a loan.", cells)
+    assert :perfect_predicate in ids("The bank has granted a loan.", cells)
   end
 
   test "past-participle-only or unverified gloss never manufactures finite past" do
@@ -897,32 +1032,77 @@ defmodule Core.Syntax.SignaturesTest do
     ]
 
     for {definition, tags} <- [
-      {"(form-of, participle, past) past participle of break",
-       ["tag:form-of", "tag:participle", "tag:past"]},
-      {nil, ["tag:form-of", "tag:participle", "tag:past"]},
-      {"simple past and past participle of break",
-       ["tag:participle", "tag:past"]}
-    ] do
-      cells = base ++ [%{
-        id: "broken|verb|1",
-        norm: "broken",
-        pos: "verb",
-        definition: definition,
-        semantic_atoms: tags
-      }]
+          {"(form-of, participle, past) past participle of break",
+           ["tag:form-of", "tag:participle", "tag:past"]},
+          {nil, ["tag:form-of", "tag:participle", "tag:past"]},
+          {"simple past and past participle of break", ["tag:participle", "tag:past"]}
+        ] do
+      cells =
+        base ++
+          [
+            %{
+              id: "broken|verb|1",
+              norm: "broken",
+              pos: "verb",
+              definition: definition,
+              semantic_atoms: tags
+            }
+          ]
 
-      refute :finite_past_svo_candidate in
-               ids("The bank broken a loan.", cells)
+      refute :finite_past_svo_candidate in ids("The bank broken a loan.", cells)
     end
 
-    participle = base ++ [%{
-      id: "broken|verb|1",
-      norm: "broken",
-      pos: "verb",
-      definition: "(form-of, participle, past) past participle of break",
-      semantic_atoms: ["tag:form-of", "tag:participle", "tag:past"]
-    }]
+    participle =
+      base ++
+        [
+          %{
+            id: "broken|verb|1",
+            norm: "broken",
+            pos: "verb",
+            definition: "(form-of, participle, past) past participle of break",
+            semantic_atoms: ["tag:form-of", "tag:participle", "tag:past"]
+          }
+        ]
+
     assert :perfect_predicate in ids("The bank has broken a loan.", participle)
   end
 
+  test "attested pronoun finite-past SVO preserves grammatical roles" do
+    cells = [
+      %{id: "he|pronoun|1", norm: "he", pos: "pronoun"},
+      %{id: "bought|noun|1", norm: "bought", pos: "noun"},
+      %{
+        id: "bought|verb|1",
+        norm: "bought",
+        pos: "verb",
+        semantic_atoms: ["tag:form-of", "tag:past", "tag:participle"],
+        definition: "Simple past and past participle of buy."
+      },
+      %{id: "some|determiner|1", norm: "some", pos: "determiner"},
+      %{id: "bread|noun|1", norm: "bread", pos: "noun"}
+    ]
+
+    signatures =
+      Signatures.detect(input("He bought some bread.", cells))
+
+    assert [
+             %{
+               id: :finite_past_svo_candidate,
+               span: {0, 3},
+               roles: %{
+                 subject_head: 0,
+                 predicate: 1,
+                 object_determiner: 2,
+                 object_head: 3
+               },
+               source: :core_syntax
+             }
+           ] =
+             Enum.filter(signatures, &(&1.id == :finite_past_svo_candidate))
+
+    noun_only =
+      Enum.reject(cells, &(&1.id == "bought|verb|1"))
+
+    refute :finite_past_svo_candidate in ids("He bought some bread.", noun_only)
+  end
 end

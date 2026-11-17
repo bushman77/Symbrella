@@ -13,7 +13,9 @@ defmodule Brain.LIFG.RoleCompetition do
 
   @spec resolve(map()) :: map()
   def resolve(%{} = si) do
-    signatures = Map.get(si, :sentence_signatures, []) |> List.wrap() |> Enum.take(@max_signatures)
+    signatures =
+      Map.get(si, :sentence_signatures, []) |> List.wrap() |> Enum.take(@max_signatures)
+
     tokens =
       si
       |> Map.get(:tokens, [])
@@ -29,23 +31,36 @@ defmodule Brain.LIFG.RoleCompetition do
 
     proposals =
       Enum.flat_map(signatures, fn
-        %{id: :noun_phrase, source: :core_syntax, span: {first, last},
+        %{
+          id: :noun_phrase,
+          source: :core_syntax,
+          span: {first, last},
           roles: %{determiner: det_role, modifier: modifier, head: head_role},
-          evidence: evidence}
+          evidence: evidence
+        }
         when is_integer(first) and is_integer(last) and is_integer(modifier) and
-             det_role == first and head_role == last and
-             modifier == first + 1 and last == first + 2 and is_list(evidence) ->
+               det_role == first and head_role == last and
+               modifier == first + 1 and last == first + 2 and is_list(evidence) ->
           if :nominal_constituent in evidence and :pos_pattern in evidence and
                MapSet.member?(@determiners, Map.get(tokens, first)) and
                witnessed?(cells, tokens, first, "determiner") and
                witnessed?(cells, tokens, modifier, "adjective") and
                witnessed?(cells, tokens, last, "noun") do
-            [%{token_index: modifier, pos: "adjective",
-               role: :modifier, frame: :noun_phrase,
-               span: {first, last},
-               basis: :complete_determiner_adjective_noun,
-               evidence: [:bounded_determiner_surface, :dictionary_pos_witness,
-                          :complete_nominal_constituent]}]
+            [
+              %{
+                token_index: modifier,
+                pos: "adjective",
+                role: :modifier,
+                frame: :noun_phrase,
+                span: {first, last},
+                basis: :complete_determiner_adjective_noun,
+                evidence: [
+                  :bounded_determiner_surface,
+                  :dictionary_pos_witness,
+                  :complete_nominal_constituent
+                ]
+              }
+            ]
           else
             []
           end
@@ -54,25 +69,30 @@ defmodule Brain.LIFG.RoleCompetition do
           []
       end)
 
-    past = Enum.filter(signatures, fn
-      %{id: :finite_past_candidate, source: :core_syntax,
-        roles: %{verb: i}, evidence: evidence}
-      when is_integer(i) and is_list(evidence) ->
-        :simple_past_form_available in evidence
+    past =
+      Enum.filter(signatures, fn
+        %{id: :finite_past_candidate, source: :core_syntax, roles: %{verb: i}, evidence: evidence}
+        when is_integer(i) and is_list(evidence) ->
+          :simple_past_form_available in evidence
 
-      _ -> false
-    end)
+        _ ->
+          false
+      end)
 
     subject_proposals =
       Enum.flat_map(signatures, fn
-        %{id: :noun_phrase, source: :core_syntax,
+        %{
+          id: :noun_phrase,
+          source: :core_syntax,
           span: {determiner, head},
           roles: %{determiner: det_role, head: head_role},
-          evidence: evidence}
+          evidence: evidence
+        }
         when is_integer(determiner) and is_integer(head) and
-             det_role == determiner and head_role == head and
-             head == determiner + 1 and is_list(evidence) ->
+               det_role == determiner and head_role == head and
+               head == determiner + 1 and is_list(evidence) ->
           predicate = head + 1
+
           attested_predicate? =
             Enum.any?(past, fn sig ->
               Map.get(sig.roles, :verb) == predicate and
@@ -83,11 +103,21 @@ defmodule Brain.LIFG.RoleCompetition do
                MapSet.member?(@determiners, Map.get(tokens, determiner)) and
                witnessed?(cells, tokens, determiner, "determiner") and
                witnessed?(cells, tokens, head, "noun") and attested_predicate? do
-            [%{token_index: head, pos: "noun", role: :subject_head,
-               frame: :finite_past_candidate, span: {determiner, predicate},
-               basis: :determined_subject_before_attested_past_predicate,
-               evidence: [:bounded_determiner_surface, :dictionary_pos_witness,
-                          :attested_simple_past_predicate]}]
+            [
+              %{
+                token_index: head,
+                pos: "noun",
+                role: :subject_head,
+                frame: :finite_past_candidate,
+                span: {determiner, predicate},
+                basis: :determined_subject_before_attested_past_predicate,
+                evidence: [
+                  :bounded_determiner_surface,
+                  :dictionary_pos_witness,
+                  :attested_simple_past_predicate
+                ]
+              }
+            ]
           else
             []
           end
@@ -101,15 +131,27 @@ defmodule Brain.LIFG.RoleCompetition do
     # alternative, without inferring or verifying any dictionary meaning.
     present_subject_proposals =
       Enum.flat_map(signatures, fn
-        %{id: :finite_present_svo_candidate, source: :core_syntax,
+        %{
+          id: :finite_present_svo_candidate,
+          source: :core_syntax,
           span: {start, last},
-          roles: %{subject_determiner: det, subject_head: subject,
-                   predicate: predicate, object_head: object}, evidence: evidence}
+          roles: %{
+            subject_determiner: det,
+            subject_head: subject,
+            predicate: predicate,
+            object_head: object
+          },
+          evidence: evidence
+        }
         when is_integer(start) and is_integer(last) and is_integer(det) and
-             is_integer(subject) and is_integer(predicate) and is_integer(object) and
-             is_list(evidence) ->
-          required = [:contiguous_surface, :attested_nominal_subject,
-                      :attested_nominal_object, :attested_finite_present_verb]
+               is_integer(subject) and is_integer(predicate) and is_integer(object) and
+               is_list(evidence) ->
+          required = [
+            :contiguous_surface,
+            :attested_nominal_subject,
+            :attested_nominal_object,
+            :attested_finite_present_verb
+          ]
 
           if start == det and subject == det + 1 and predicate == subject + 1 and
                predicate < object and object <= last and
@@ -119,16 +161,27 @@ defmodule Brain.LIFG.RoleCompetition do
                witnessed?(cells, tokens, subject, "noun") and
                witnessed?(cells, tokens, predicate, "verb") and
                witnessed?(cells, tokens, object, "noun") do
-            [%{token_index: subject, pos: "noun", role: :subject_head,
-               frame: :finite_present_svo_candidate, span: {start, last},
-               basis: :determined_subject_before_attested_present_predicate,
-               evidence: [:complete_finite_present_svo, :dictionary_pos_witness,
-                          :attested_finite_present_verb]}]
+            [
+              %{
+                token_index: subject,
+                pos: "noun",
+                role: :subject_head,
+                frame: :finite_present_svo_candidate,
+                span: {start, last},
+                basis: :determined_subject_before_attested_present_predicate,
+                evidence: [
+                  :complete_finite_present_svo,
+                  :dictionary_pos_witness,
+                  :attested_finite_present_verb
+                ]
+              }
+            ]
           else
             []
           end
 
-        _ -> []
+        _ ->
+          []
       end)
 
     # "What did the artist draw?" has a complete auxiliary inversion and
@@ -136,17 +189,31 @@ defmodule Brain.LIFG.RoleCompetition do
     # this supports POS only, not a specific word sense or a factual event.
     question_proposals =
       Enum.flat_map(signatures, fn
-        %{id: :wh_aux_object_question, source: :core_syntax,
+        %{
+          id: :wh_aux_object_question,
+          source: :core_syntax,
           span: {first, last},
-          roles: %{wh: wh, auxiliary: aux, subject_determiner: det,
-                   subject_head: subject, predicate: predicate},
-          evidence: evidence}
+          roles: %{
+            wh: wh,
+            auxiliary: aux,
+            subject_determiner: det,
+            subject_head: subject,
+            predicate: predicate
+          },
+          evidence: evidence
+        }
         when is_integer(first) and is_integer(last) and is_integer(wh) and
-             is_integer(aux) and is_integer(det) and is_integer(subject) and
-             is_integer(predicate) and is_list(evidence) ->
-          needed = [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
-                    :attested_nominal_subject, :lexical_verb_available,
-                    :question_punctuation, :contiguous_surface]
+               is_integer(aux) and is_integer(det) and is_integer(subject) and
+               is_integer(predicate) and is_list(evidence) ->
+          needed = [
+            :wh_fronted,
+            :auxiliary_inversion,
+            :bounded_determiner_surface,
+            :attested_nominal_subject,
+            :lexical_verb_available,
+            :question_punctuation,
+            :contiguous_surface
+          ]
 
           if first == wh and aux == wh + 1 and det == aux + 1 and
                subject == det + 1 and predicate == subject + 1 and last == predicate and
@@ -157,25 +224,41 @@ defmodule Brain.LIFG.RoleCompetition do
                witnessed?(cells, tokens, det, "determiner") and
                witnessed?(cells, tokens, subject, "noun") and
                witnessed?(cells, tokens, predicate, "verb") do
-            basis_evidence = [:wh_fronted, :auxiliary_inversion,
-                              :bounded_determiner_surface, :dictionary_pos_witness,
-                              :question_punctuation]
+            basis_evidence = [
+              :wh_fronted,
+              :auxiliary_inversion,
+              :bounded_determiner_surface,
+              :dictionary_pos_witness,
+              :question_punctuation
+            ]
 
-            [%{token_index: subject, pos: "noun", role: :subject_head,
-               frame: :wh_aux_object_question, span: {first, last},
-               basis: :determined_subject_in_wh_aux_question,
-               evidence: basis_evidence},
-             %{token_index: predicate, pos: "verb", role: :predicate,
-               frame: :wh_aux_object_question, span: {first, last},
-               basis: :predicate_in_wh_aux_question,
-               evidence: basis_evidence ++ [:attested_verb_alternative]}]
+            [
+              %{
+                token_index: subject,
+                pos: "noun",
+                role: :subject_head,
+                frame: :wh_aux_object_question,
+                span: {first, last},
+                basis: :determined_subject_in_wh_aux_question,
+                evidence: basis_evidence
+              },
+              %{
+                token_index: predicate,
+                pos: "verb",
+                role: :predicate,
+                frame: :wh_aux_object_question,
+                span: {first, last},
+                basis: :predicate_in_wh_aux_question,
+                evidence: basis_evidence ++ [:attested_verb_alternative]
+              }
+            ]
           else
             []
           end
 
-        _ -> []
+        _ ->
+          []
       end)
-
 
     # An exact complete definition imperative resolves TWO competing roles:
     # an existing verb alternative for "define" and an existing common-noun
@@ -183,14 +266,21 @@ defmodule Brain.LIFG.RoleCompetition do
     # fabricated signature can create a role. No sense ID is selected here.
     definition_proposals =
       Enum.flat_map(signatures, fn
-        %{id: :definition_imperative, source: :core_syntax,
+        %{
+          id: :definition_imperative,
+          source: :core_syntax,
           span: {0, last},
           roles: %{predicate: predicate, object_head: object},
-          evidence: evidence}
+          evidence: evidence
+        }
         when is_integer(last) and is_integer(predicate) and
-             is_integer(object) and is_list(evidence) ->
-          required = [:complete_imperative_surface, :explicit_definition_command,
-                      :attested_verb_alternative, :attested_common_noun_object]
+               is_integer(object) and is_list(evidence) ->
+          required = [
+            :complete_imperative_surface,
+            :explicit_definition_command,
+            :attested_verb_alternative,
+            :attested_common_noun_object
+          ]
 
           if Map.get(si, :intent) in [:define, :command] and last == object and
                object in [predicate + 1, predicate + 2] and
@@ -202,25 +292,41 @@ defmodule Brain.LIFG.RoleCompetition do
                Enum.sort(Map.keys(tokens)) == Enum.to_list(0..last) and
                (predicate != 1 or Map.get(tokens, 0) == "please") and
                definition_object_shape?(cells, tokens, predicate, object) do
-            [%{token_index: predicate, pos: "verb", role: :predicate,
-               frame: :definition_imperative, span: {0, last},
-               basis: :definition_imperative_predicate,
-               evidence: [:complete_definition_imperative,
-                          :dictionary_pos_witness, :attested_verb_alternative]},
-             %{
-               token_index: object, pos: "noun", role: :object_head,
-               frame: :definition_imperative, span: {0, last},
-               basis: :definition_imperative_object,
-               evidence: [:complete_definition_imperative,
-                          :dictionary_pos_witness, :attested_common_noun_object]
-             }]
+            [
+              %{
+                token_index: predicate,
+                pos: "verb",
+                role: :predicate,
+                frame: :definition_imperative,
+                span: {0, last},
+                basis: :definition_imperative_predicate,
+                evidence: [
+                  :complete_definition_imperative,
+                  :dictionary_pos_witness,
+                  :attested_verb_alternative
+                ]
+              },
+              %{
+                token_index: object,
+                pos: "noun",
+                role: :object_head,
+                frame: :definition_imperative,
+                span: {0, last},
+                basis: :definition_imperative_object,
+                evidence: [
+                  :complete_definition_imperative,
+                  :dictionary_pos_witness,
+                  :attested_common_noun_object
+                ]
+              }
+            ]
           else
             []
           end
 
-        _ -> []
+        _ ->
+          []
       end)
-
 
     # Evidence for existing lexical-request constructions must be independent
     # of their eventual canonical semantic frame. Revalidate full token order,
@@ -228,12 +334,15 @@ defmodule Brain.LIFG.RoleCompetition do
     # a lexical target to noun/verb merely because it was requested.
     meaning_proposals =
       Enum.flat_map(signatures, fn
-        %{id: id, source: :core_syntax,
-          span: {0, last}, roles: sig_roles, evidence: evidence}
+        %{id: id, source: :core_syntax, span: {0, last}, roles: sig_roles, evidence: evidence}
         when id in [:meaning_request_imperative, :meaning_wh_question] and
-             is_integer(last) and is_map(sig_roles) and is_list(evidence) ->
-          required = [:complete_lexical_request, :attested_request_cues,
-                      :attested_target_alternatives, :original_contiguous_surface]
+               is_integer(last) and is_map(sig_roles) and is_list(evidence) ->
+          required = [
+            :complete_lexical_request,
+            :attested_request_cues,
+            :attested_target_alternatives,
+            :original_contiguous_surface
+          ]
 
           if Map.get(si, :intent) in [:define, :command, :ask, :ask_info] and
                Enum.sort(Map.keys(tokens)) == Enum.to_list(0..last) and
@@ -244,12 +353,17 @@ defmodule Brain.LIFG.RoleCompetition do
                   predicate = if first == "please", do: 1, else: 0
 
                   expected = %{
-                    predicate: predicate, recipient: predicate + 1,
-                    determiner: predicate + 2, nominal_head: predicate + 3,
-                    preposition: predicate + 4, lexical_target: predicate + 5
+                    predicate: predicate,
+                    recipient: predicate + 1,
+                    determiner: predicate + 2,
+                    nominal_head: predicate + 3,
+                    preposition: predicate + 4,
+                    lexical_target: predicate + 5
                   }
+
                   expected =
-                    if predicate == 1, do: Map.put(expected, :politeness, 0),
+                    if predicate == 1,
+                      do: Map.put(expected, :politeness, 0),
                       else: expected
 
                   if last == predicate + 5 and sig_roles == expected and
@@ -258,69 +372,94 @@ defmodule Brain.LIFG.RoleCompetition do
                        Map.get(tokens, predicate + 2) == "the" and
                        Map.get(tokens, predicate + 3) == "meaning" and
                        Map.get(tokens, predicate + 4) == "of" and
-                       Enum.all?([
-                         {predicate, "verb"},
-                         {predicate + 1, "pronoun"},
-                         {predicate + 2, "determiner"},
-                         {predicate + 3, "noun"},
-                         {predicate + 4, "preposition"}
-                       ], fn {i, pos} -> witnessed_identity?(cells, tokens, i, pos) end) and
+                       Enum.all?(
+                         [
+                           {predicate, "verb"},
+                           {predicate + 1, "pronoun"},
+                           {predicate + 2, "determiner"},
+                           {predicate + 3, "noun"},
+                           {predicate + 4, "preposition"}
+                         ],
+                         fn {i, pos} -> witnessed_identity?(cells, tokens, i, pos) end
+                       ) and
                        any_dictionary_pos?(cells, tokens, last) do
-                    [{predicate, "verb", :predicate, :meaning_request_predicate},
-                     {predicate + 1, "pronoun", :recipient, :meaning_request_recipient},
-                     {predicate + 2, "determiner", :determiner,
-                       :meaning_request_determiner},
-                     {predicate + 3, "noun", :nominal_head, :meaning_request_nominal_head},
-                     {predicate + 4, "preposition", :preposition,
-                       :meaning_request_preposition}] ++
-                    maybe_polite_proposal(cells, tokens, 0, predicate == 1)
+                    [
+                      {predicate, "verb", :predicate, :meaning_request_predicate},
+                      {predicate + 1, "pronoun", :recipient, :meaning_request_recipient},
+                      {predicate + 2, "determiner", :determiner, :meaning_request_determiner},
+                      {predicate + 3, "noun", :nominal_head, :meaning_request_nominal_head},
+                      {predicate + 4, "preposition", :preposition, :meaning_request_preposition}
+                    ] ++
+                      maybe_polite_proposal(cells, tokens, 0, predicate == 1)
                   else
                     []
                   end
 
                 {:meaning_wh_question, "what"} ->
                   cond do
-                    last == 3 and sig_roles == %{
-                      wh: 0, auxiliary: 1, lexical_target: 2, predicate: 3
-                    } and Map.get(tokens, 1) == "does" and
-                       Map.get(tokens, 3) == "mean" and
-                       witnessed_identity?(cells, tokens, 3, "verb") and
-                       any_dictionary_pos?(cells, tokens, 2) ->
+                    last == 3 and
+                      sig_roles == %{
+                        wh: 0,
+                        auxiliary: 1,
+                        lexical_target: 2,
+                        predicate: 3
+                      } and Map.get(tokens, 1) == "does" and
+                      Map.get(tokens, 3) == "mean" and
+                      witnessed_identity?(cells, tokens, 3, "verb") and
+                        any_dictionary_pos?(cells, tokens, 2) ->
                       [{3, "verb", :predicate, :meaning_question_predicate}]
 
-                    last == 5 and sig_roles == %{
-                      wh: 0, auxiliary: 1, determiner: 2,
-                      nominal_head: 3, preposition: 4, lexical_target: 5
-                    } and Map.get(tokens, 1) == "is" and
-                       Map.get(tokens, 2) == "the" and
-                       Map.get(tokens, 3) in ["meaning", "definition"] and
-                       Map.get(tokens, 4) == "of" and
-                       witnessed_identity?(cells, tokens, 2, "determiner") and
-                       witnessed_identity?(cells, tokens, 3, "noun") and
-                       witnessed_identity?(cells, tokens, 4, "preposition") and
-                       any_dictionary_pos?(cells, tokens, 5) ->
-                      [{2, "determiner", :determiner, :meaning_request_determiner},
-                       {3, "noun", :nominal_head, :meaning_request_nominal_head},
-                       {4, "preposition", :preposition, :meaning_request_preposition}]
+                    last == 5 and
+                      sig_roles == %{
+                        wh: 0,
+                        auxiliary: 1,
+                        determiner: 2,
+                        nominal_head: 3,
+                        preposition: 4,
+                        lexical_target: 5
+                      } and Map.get(tokens, 1) == "is" and
+                      Map.get(tokens, 2) == "the" and
+                      Map.get(tokens, 3) in ["meaning", "definition"] and
+                      Map.get(tokens, 4) == "of" and
+                      witnessed_identity?(cells, tokens, 2, "determiner") and
+                      witnessed_identity?(cells, tokens, 3, "noun") and
+                      witnessed_identity?(cells, tokens, 4, "preposition") and
+                        any_dictionary_pos?(cells, tokens, 5) ->
+                      [
+                        {2, "determiner", :determiner, :meaning_request_determiner},
+                        {3, "noun", :nominal_head, :meaning_request_nominal_head},
+                        {4, "preposition", :preposition, :meaning_request_preposition}
+                      ]
 
                     true ->
                       []
                   end
 
-                _ -> []
+                _ ->
+                  []
               end
 
             Enum.map(observed, fn {index, pos, role, basis} ->
-              %{token_index: index, pos: pos, role: role,
-                frame: id, span: {0, last}, basis: basis,
-                evidence: [:complete_lexical_request, :dictionary_pos_witness,
-                           :bounded_grammatical_role]}
+              %{
+                token_index: index,
+                pos: pos,
+                role: role,
+                frame: id,
+                span: {0, last},
+                basis: basis,
+                evidence: [
+                  :complete_lexical_request,
+                  :dictionary_pos_witness,
+                  :bounded_grammatical_role
+                ]
+              }
             end)
           else
             []
           end
 
-        _ -> []
+        _ ->
+          []
       end)
 
     definition_polite =
@@ -329,11 +468,19 @@ defmodule Brain.LIFG.RoleCompetition do
            Map.get(tokens, 1) == "define" do
         maybe_polite_proposal(cells, tokens, 0, true)
         |> Enum.map(fn {index, pos, role, basis} ->
-          %{token_index: index, pos: pos, role: role,
+          %{
+            token_index: index,
+            pos: pos,
+            role: role,
             frame: :definition_imperative,
-            span: {0, map_size(tokens) - 1}, basis: basis,
-            evidence: [:complete_lexical_request, :dictionary_pos_witness,
-                       :bounded_grammatical_role]}
+            span: {0, map_size(tokens) - 1},
+            basis: basis,
+            evidence: [
+              :complete_lexical_request,
+              :dictionary_pos_witness,
+              :bounded_grammatical_role
+            ]
+          }
         end)
       else
         []
@@ -346,19 +493,24 @@ defmodule Brain.LIFG.RoleCompetition do
       |> Map.get(:predicate_proposals, [])
       |> List.wrap()
       |> Enum.filter(fn
-        %{token_index: i, pos: "verb", role: :predicate, basis: basis,
-          evidence: evidence}
+        %{token_index: i, pos: "verb", role: :predicate, basis: basis, evidence: evidence}
         when is_integer(i) and i >= 0 and is_list(evidence) and
-             basis in [:modal_question_predicate, :modal_declarative_predicate,
-                       :imperative_predicate, :plural_present_predicate,
-                       :finite_present_svo_predicate,
-                       :counted_present_transitive_predicate,
-                       :counted_negative_transitive_predicate] ->
+               basis in [
+                 :modal_question_predicate,
+                 :modal_declarative_predicate,
+                 :imperative_predicate,
+                 :plural_present_predicate,
+                 :finite_present_svo_predicate,
+                 :finite_past_svo_predicate,
+                 :counted_present_transitive_predicate,
+                 :counted_negative_transitive_predicate
+               ] ->
           :bounded_predicate_slot in evidence and
             :dictionary_pos_witness in evidence and
             witnessed?(cells, tokens, i, "verb")
 
-        _ -> false
+        _ ->
+          false
       end)
 
     # A dictionary-witnessed adjective preceding an unresolved CamelCase
@@ -369,13 +521,17 @@ defmodule Brain.LIFG.RoleCompetition do
       |> Map.get(:nominal_proposals, [])
       |> List.wrap()
       |> Enum.filter(fn
-        %{token_index: i, role: :modifier, pos: "adjective",
+        %{
+          token_index: i,
+          role: :modifier,
+          pos: "adjective",
           span: {det, head},
           basis: :determined_adjective_before_unresolved_head,
-          evidence: evidence}
+          evidence: evidence
+        }
         when is_integer(i) and is_integer(det) and is_integer(head) and
-             i >= 0 and det == i - 1 and head == i + 1 and
-             is_list(evidence) ->
+               i >= 0 and det == i - 1 and head == i + 1 and
+               is_list(evidence) ->
           raw_head =
             si
             |> Map.get(:tokens, [])
@@ -387,8 +543,12 @@ defmodule Brain.LIFG.RoleCompetition do
             |> String.replace(~r/[?!.;,]+\z/u, "")
 
           Enum.all?(
-            [:bounded_determiner_surface, :dictionary_pos_witness,
-             :unresolved_code_head, :complete_nominal_surface],
+            [
+              :bounded_determiner_surface,
+              :dictionary_pos_witness,
+              :unresolved_code_head,
+              :complete_nominal_surface
+            ],
             &(&1 in evidence)
           ) and
             MapSet.member?(@determiners, Map.get(tokens, det)) and
@@ -400,7 +560,8 @@ defmodule Brain.LIFG.RoleCompetition do
                 Map.get(tokens, head)
             end)
 
-        _ -> false
+        _ ->
+          false
       end)
 
     # A local determiner + adjective + noun hypothesis can straddle the
@@ -423,27 +584,35 @@ defmodule Brain.LIFG.RoleCompetition do
       end)
 
     decisions =
-      (local_proposals ++ subject_proposals ++ present_subject_proposals ++
-         question_proposals ++ definition_proposals ++
-         definition_polite ++ meaning_proposals ++
+      (local_proposals ++
+         subject_proposals ++
+         present_subject_proposals ++
+         question_proposals ++
+         definition_proposals ++
+         definition_polite ++
+         meaning_proposals ++
          predicate_proposals ++ nominal_proposals)
       |> Enum.group_by(& &1.token_index)
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.map(fn {index, alternatives} ->
         poses = alternatives |> Enum.map(& &1.pos) |> Enum.uniq()
+
         case poses do
           [pos] ->
-            candidate = Enum.min_by(alternatives, fn a ->
-              {a.basis, elem(a.span, 0), elem(a.span, 1)}
-            end)
+            candidate =
+              Enum.min_by(alternatives, fn a ->
+                {a.basis, elem(a.span, 0), elem(a.span, 1)}
+              end)
 
-            Map.merge(candidate, %{pos: pos, status: :supported,
-              proposals: length(alternatives)})
+            Map.merge(candidate, %{pos: pos, status: :supported, proposals: length(alternatives)})
 
           _ ->
-            %{token_index: index, status: :unresolved,
+            %{
+              token_index: index,
+              status: :unresolved,
               reason: :incompatible_evidence_supported,
-              competing_pos: Enum.sort(poses)}
+              competing_pos: Enum.sort(poses)
+            }
         end
       end)
 
@@ -468,37 +637,49 @@ defmodule Brain.LIFG.RoleCompetition do
     }
   end
 
-  def resolve(_), do: %{version: 1, source: :invalid_input, roles: %{},
-    unresolved_roles: %{}, decisions: []}
+  def resolve(_),
+    do: %{version: 1, source: :invalid_input, roles: %{}, unresolved_roles: %{}, decisions: []}
 
   @gap_roles %{
-    subject_determiner: 0, subject_head: 1, auxiliary: 2,
-    predicate: 3, preposition: 4, location_determiner: 5,
+    subject_determiner: 0,
+    subject_head: 1,
+    auxiliary: 2,
+    predicate: 3,
+    preposition: 4,
+    location_determiner: 5,
     location_head: 6
   }
   @gap_evidence [
-    :contiguous_surface, :attested_nominal_subject,
-    :unresolved_progressive_predicate, :attested_preposition,
+    :contiguous_surface,
+    :attested_nominal_subject,
+    :unresolved_progressive_predicate,
+    :attested_preposition,
     :attested_nominal_location
   ]
 
   defp observe_progressive_gaps(signatures, tokens, cells) do
     signatures
     |> Enum.filter(fn
-      %{id: :progressive_lexical_gap_candidate,
-        source: :core_syntax, span: {0, 6},
-        roles: roles, evidence: evidence,
-        source_span_sha256: source_digest}
+      %{
+        id: :progressive_lexical_gap_candidate,
+        source: :core_syntax,
+        span: {0, 6},
+        roles: roles,
+        evidence: evidence,
+        source_span_sha256: source_digest
+      }
       when is_map(roles) and is_list(evidence) and is_binary(source_digest) ->
         roles == @gap_roles and
           Enum.all?(@gap_evidence, &(&1 in evidence)) and
           byte_size(source_digest) == 64 and
           Enum.sort(Map.keys(tokens)) == Enum.to_list(0..6) and
-          Enum.all?(0..6, &(is_binary(Map.get(tokens, &1)))) and
+          Enum.all?(0..6, &is_binary(Map.get(tokens, &1))) and
           source_digest ==
-            (:crypto.hash(:sha256,
-              Enum.map_join(0..6, " ", &Map.get(tokens, &1)))
-            |> Base.encode16(case: :lower)) and
+            :crypto.hash(
+              :sha256,
+              Enum.map_join(0..6, " ", &Map.get(tokens, &1))
+            )
+            |> Base.encode16(case: :lower) and
           Map.get(tokens, 2) == "is" and
           Map.get(tokens, 4) in ~w(on in under beside above below) and
           Map.get(tokens, 0) in ~w(a an the) and
@@ -512,7 +693,8 @@ defmodule Brain.LIFG.RoleCompetition do
           witnessed?(cells, tokens, 6, "noun") and
           not any_dictionary_pos?(cells, tokens, 3)
 
-      _ -> false
+      _ ->
+        false
     end)
     |> Enum.reduce(%{}, fn _signature, acc ->
       Map.put(acc, 3, %{
@@ -534,18 +716,32 @@ defmodule Brain.LIFG.RoleCompetition do
   # the independently attested predicate. Do not suppress adjective evidence
   # for ordinary noun phrases or for a different clause boundary.
   defp superseded_local_modifier?(
-         %{role: :modifier, pos: "adjective",
+         %{
+           role: :modifier,
+           pos: "adjective",
            basis: :complete_determiner_adjective_noun,
-           span: {local_det, local_head}}, complete_subjects
+           span: {local_det, local_head}
+         },
+         complete_subjects
        ) do
     Enum.any?(complete_subjects, fn
-      %{role: :subject_head, pos: "noun", token_index: subject,
-        frame: :finite_present_svo_candidate, span: {first, last}} ->
+      %{
+        role: :subject_head,
+        pos: "noun",
+        token_index: subject,
+        frame: :finite_present_svo_candidate,
+        span: {first, last}
+      } ->
         local_det == subject - 1 and local_head == subject + 1 and
           first == local_det and last > local_head
 
-      %{role: :subject_head, pos: "noun", token_index: subject,
-        frame: :wh_aux_object_question, span: {first, last}} ->
+      %{
+        role: :subject_head,
+        pos: "noun",
+        token_index: subject,
+        frame: :wh_aux_object_question,
+        span: {first, last}
+      } ->
         local_det == subject - 1 and local_head == subject + 1 and
           first < local_det and last == local_head
 
@@ -553,8 +749,7 @@ defmodule Brain.LIFG.RoleCompetition do
       # determiner + adjective + noun. A complete lexical-request grammar
       # establishes meaning as the noun and of as a preposition, but only
       # within this exact local overlap.
-      %{role: :nominal_head, pos: "noun", token_index: head,
-        frame: frame, span: {first, last}}
+      %{role: :nominal_head, pos: "noun", token_index: head, frame: frame, span: {first, last}}
       when frame in [:meaning_request_imperative, :meaning_wh_question] ->
         local_det == head - 1 and local_head == head + 1 and
           first <= local_det and last > local_head
@@ -583,9 +778,11 @@ defmodule Brain.LIFG.RoleCompetition do
 
   defp any_dictionary_pos?(cells, tokens, index) do
     word = Map.get(tokens, index)
+
     is_binary(word) and
       Enum.any?(cells, fn cell ->
         pos = normalize(Map.get(cell, :pos))
+
         is_binary(pos) and pos != "" and
           witnessed_identity?(cells, tokens, index, pos)
       end)
@@ -603,6 +800,7 @@ defmodule Brain.LIFG.RoleCompetition do
 
   defp witnessed_identity?(cells, tokens, index, pos) do
     word = Map.get(tokens, index)
+
     is_binary(word) and
       Enum.any?(cells, fn cell ->
         normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == word and
@@ -616,6 +814,7 @@ defmodule Brain.LIFG.RoleCompetition do
 
   defp witnessed?(cells, tokens, index, pos) do
     word = Map.get(tokens, index)
+
     is_binary(word) and
       Enum.any?(cells, fn cell ->
         normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == word and
@@ -629,14 +828,16 @@ defmodule Brain.LIFG.RoleCompetition do
     is_binary(word) and
       Enum.any?(cells, fn cell ->
         tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+
         normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == word and
           normalize(Map.get(cell, :pos)) == "verb" and
           Enum.all?(["tag:form-of", "tag:past"], &(&1 in tags)) and
-          not ("tag:participle" in tags)
+          "tag:participle" not in tags
       end)
   end
 
   defp normalize(value) when is_atom(value), do: value |> Atom.to_string() |> normalize()
+
   defp normalize(value) when is_binary(value) do
     value
     |> String.downcase()

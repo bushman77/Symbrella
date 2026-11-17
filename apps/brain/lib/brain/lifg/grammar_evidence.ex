@@ -93,103 +93,158 @@ defmodule Brain.LIFG.GrammarEvidence do
       when is_map(scores) and is_map(roles) and is_integer(index) and index >= 0 do
     case Map.get(roles, index) do
       %{status: :supported, pos: pos, basis: basis, evidence: evidence}
-      when pos in ["noun", "adjective", "verb", "pronoun", "preposition",
-                   "adverb", "interjection", "determiner"] and
-           basis in [:complete_determiner_adjective_noun,
-                     :determined_adjective_before_unresolved_head,
-                     :determined_subject_before_attested_past_predicate,
-                     :determined_subject_before_attested_present_predicate,
-                     :determined_subject_in_wh_aux_question,
-                     :predicate_in_wh_aux_question,
-                     :modal_question_predicate, :modal_declarative_predicate,
-                     :imperative_predicate, :definition_imperative_predicate,
-                     :lexical_request_politeness,
-                     :meaning_request_predicate,
-                     :meaning_request_recipient,
-                     :meaning_request_determiner,
-                     :meaning_request_nominal_head,
-                     :meaning_request_preposition,
-                     :meaning_question_predicate,
-
-                     :definition_imperative_object, :plural_present_predicate,
-                     :finite_present_svo_predicate,
-                     :counted_present_transitive_predicate,
-                     :counted_negative_transitive_predicate] and
-           is_list(evidence) ->
+      when pos in [
+             "noun",
+             "adjective",
+             "verb",
+             "pronoun",
+             "preposition",
+             "adverb",
+             "interjection",
+             "determiner"
+           ] and
+             basis in [
+               :complete_determiner_adjective_noun,
+               :determined_adjective_before_unresolved_head,
+               :determined_subject_before_attested_past_predicate,
+               :determined_subject_before_attested_present_predicate,
+               :determined_subject_in_wh_aux_question,
+               :predicate_in_wh_aux_question,
+               :modal_question_predicate,
+               :modal_declarative_predicate,
+               :imperative_predicate,
+               :definition_imperative_predicate,
+               :lexical_request_politeness,
+               :meaning_request_predicate,
+               :meaning_request_recipient,
+               :meaning_request_determiner,
+               :meaning_request_nominal_head,
+               :meaning_request_preposition,
+               :meaning_question_predicate,
+               :definition_imperative_object,
+               :plural_present_predicate,
+               :finite_present_svo_predicate,
+               :counted_present_transitive_predicate,
+               :finite_past_svo_predicate,
+               :counted_negative_transitive_predicate
+             ] and
+             is_list(evidence) ->
         expected =
           case basis do
             :complete_determiner_adjective_noun ->
-              [:bounded_determiner_surface, :dictionary_pos_witness,
-               :complete_nominal_constituent]
+              [
+                :bounded_determiner_surface,
+                :dictionary_pos_witness,
+                :complete_nominal_constituent
+              ]
 
             :determined_adjective_before_unresolved_head ->
-              [:bounded_determiner_surface, :dictionary_pos_witness,
-               :unresolved_code_head, :complete_nominal_surface]
+              [
+                :bounded_determiner_surface,
+                :dictionary_pos_witness,
+                :unresolved_code_head,
+                :complete_nominal_surface
+              ]
 
             :determined_subject_before_attested_past_predicate ->
-              [:bounded_determiner_surface, :dictionary_pos_witness,
-               :attested_simple_past_predicate]
+              [
+                :bounded_determiner_surface,
+                :dictionary_pos_witness,
+                :attested_simple_past_predicate
+              ]
 
             :determined_subject_before_attested_present_predicate ->
-              [:complete_finite_present_svo, :dictionary_pos_witness,
-               :attested_finite_present_verb]
+              [
+                :complete_finite_present_svo,
+                :dictionary_pos_witness,
+                :attested_finite_present_verb
+              ]
 
             :determined_subject_in_wh_aux_question ->
-              [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
-               :dictionary_pos_witness, :question_punctuation]
+              [
+                :wh_fronted,
+                :auxiliary_inversion,
+                :bounded_determiner_surface,
+                :dictionary_pos_witness,
+                :question_punctuation
+              ]
 
             :predicate_in_wh_aux_question ->
-              [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
-               :dictionary_pos_witness, :question_punctuation,
-               :attested_verb_alternative]
+              [
+                :wh_fronted,
+                :auxiliary_inversion,
+                :bounded_determiner_surface,
+                :dictionary_pos_witness,
+                :question_punctuation,
+                :attested_verb_alternative
+              ]
 
             :modal_question_predicate ->
-              [:auxiliary_subject_order, :dictionary_pos_witness,
-               :bounded_predicate_slot]
+              [:auxiliary_subject_order, :dictionary_pos_witness, :bounded_predicate_slot]
 
             :modal_declarative_predicate ->
-              [:subject_auxiliary_order, :dictionary_pos_witness,
-               :bounded_predicate_slot]
+              [:subject_auxiliary_order, :dictionary_pos_witness, :bounded_predicate_slot]
 
             :imperative_predicate ->
-              [:initial_predicate, :dictionary_pos_witness,
-               :bounded_predicate_slot]
+              [:initial_predicate, :dictionary_pos_witness, :bounded_predicate_slot]
 
             :definition_imperative_predicate ->
-              [:complete_definition_imperative, :dictionary_pos_witness,
-               :attested_verb_alternative]
+              [
+                :complete_definition_imperative,
+                :dictionary_pos_witness,
+                :attested_verb_alternative
+              ]
 
             :definition_imperative_object ->
-              [:complete_definition_imperative, :dictionary_pos_witness,
-               :attested_common_noun_object]
+              [
+                :complete_definition_imperative,
+                :dictionary_pos_witness,
+                :attested_common_noun_object
+              ]
 
-            basis when basis in [:lexical_request_politeness,
-                                 :meaning_request_predicate,
-                                 :meaning_request_recipient,
-                                 :meaning_request_determiner,
-                                 :meaning_request_nominal_head,
-                                 :meaning_request_preposition,
-                                 :meaning_question_predicate] ->
-              [:complete_lexical_request, :dictionary_pos_witness,
-               :bounded_grammatical_role]
+            basis
+            when basis in [
+                   :lexical_request_politeness,
+                   :meaning_request_predicate,
+                   :meaning_request_recipient,
+                   :meaning_request_determiner,
+                   :meaning_request_nominal_head,
+                   :meaning_request_preposition,
+                   :meaning_question_predicate
+                 ] ->
+              [:complete_lexical_request, :dictionary_pos_witness, :bounded_grammatical_role]
 
             :plural_present_predicate ->
-              [:attested_plural_subject, :present_base_verb_witness,
-               :dictionary_pos_witness, :bounded_predicate_slot]
+              [
+                :attested_plural_subject,
+                :present_base_verb_witness,
+                :dictionary_pos_witness,
+                :bounded_predicate_slot
+              ]
 
             :finite_present_svo_predicate ->
-              [:attested_finite_present_verb, :dictionary_pos_witness,
-               :bounded_predicate_slot]
+              [:attested_finite_present_verb, :dictionary_pos_witness, :bounded_predicate_slot]
+
+            :finite_past_svo_predicate ->
+              [:attested_simple_past_verb, :dictionary_pos_witness, :bounded_predicate_slot]
 
             :counted_present_transitive_predicate ->
-              [:attested_counted_plural_subject, :attested_base_present_verb,
-               :attested_nominal_object, :dictionary_pos_witness,
-               :bounded_predicate_slot]
+              [
+                :attested_counted_plural_subject,
+                :attested_base_present_verb,
+                :attested_nominal_object,
+                :dictionary_pos_witness,
+                :bounded_predicate_slot
+              ]
 
             :counted_negative_transitive_predicate ->
-              [:attested_counted_subject, :explicit_did_not_negation,
-               :attested_nominal_object, :dictionary_pos_witness,
-               :bounded_predicate_slot]
+              [
+                :attested_counted_subject,
+                :explicit_did_not_negation,
+                :attested_nominal_object,
+                :dictionary_pos_witness,
+                :bounded_predicate_slot
+              ]
           end
 
         if Enum.all?(expected, &(&1 in evidence)) do
@@ -225,19 +280,27 @@ defmodule Brain.LIFG.GrammarEvidence do
     # A supported Core predicate role already receives the shared 0.30 POS
     # adjustment; do not stack the legacy 0.32 on the same evidence.
     already_supported? =
-      match?(%{status: :supported, basis: :finite_present_svo_predicate},
-        get_in(context, [:resolved_roles, index]))
+      match?(
+        %{status: :supported, basis: :finite_present_svo_predicate},
+        get_in(context, [:resolved_roles, index])
+      )
 
     observed? =
       Enum.any?(signatures, fn
-        %{id: :finite_present_svo_candidate,
+        %{
+          id: :finite_present_svo_candidate,
           roles: %{subject_head: subject, predicate: ^index, object_head: object},
-          evidence: evidence}
+          evidence: evidence
+        }
         when is_integer(subject) and is_integer(object) and is_list(evidence) ->
           subject < index and index < object and
             Enum.all?(
-              [:contiguous_surface, :attested_nominal_subject,
-               :attested_nominal_object, :attested_finite_present_verb],
+              [
+                :contiguous_surface,
+                :attested_nominal_subject,
+                :attested_nominal_object,
+                :attested_finite_present_verb
+              ],
               &(&1 in evidence)
             )
 
@@ -248,6 +311,7 @@ defmodule Brain.LIFG.GrammarEvidence do
     if observed? and not already_supported? do
       Map.new(scores, fn {id, score} ->
         cell = Map.get(cells, id)
+
         updated =
           if is_binary(id) and not String.ends_with?(id, "|fallback") and
                id_pos(id) == "verb" and finite_present_sense?(cell) and
@@ -291,20 +355,28 @@ defmodule Brain.LIFG.GrammarEvidence do
           source: :core_syntax,
           span: {first, last},
           roles: %{
-            subject_head: subject, copula: copula,
-            complement_head: ^index, relative_marker: marker,
-            relative_verb: verb, object_determiner: det, object_head: object
+            subject_head: subject,
+            copula: copula,
+            complement_head: ^index,
+            relative_marker: marker,
+            relative_verb: verb,
+            object_determiner: det,
+            object_head: object
           },
           evidence: evidence
-        } when is_list(evidence) ->
+        }
+        when is_list(evidence) ->
           first == subject and last == object and
             [copula, index, marker, verb, det, object] ==
               Enum.to_list((subject + 1)..(subject + 6)) and
             Enum.all?(
               [
-                :contiguous_surface, :attested_subject_noun,
-                :attested_copular_be, :attested_complement_noun,
-                :explicit_relative_clause, :attested_relative_verb,
+                :contiguous_surface,
+                :attested_subject_noun,
+                :attested_copular_be,
+                :attested_complement_noun,
+                :explicit_relative_clause,
+                :attested_relative_verb,
                 :attested_object_noun
               ],
               &(&1 in evidence)
@@ -344,29 +416,44 @@ defmodule Brain.LIFG.GrammarEvidence do
   """
   @spec apply_bounded_past_transitive(map(), context(), non_neg_integer()) :: map()
   def apply_bounded_past_transitive(
-        scores, %{signatures: signatures, cells_by_id: cells}, index
+        scores,
+        %{signatures: signatures, cells_by_id: cells},
+        index
       )
       when is_map(scores) and is_list(signatures) and is_map(cells) and
              is_integer(index) and index >= 0 do
     witnessed? =
       Enum.any?(signatures, fn
-        %{id: :bounded_regular_past_transitive, source: :core_syntax,
+        %{
+          id: :bounded_regular_past_transitive,
+          source: :core_syntax,
           span: {first, last},
-          roles: %{subject_determiner: det, subject_head: subject,
-                   predicate: ^index, object_determiner: object_det,
-                   object_head: object},
-          evidence: evidence} when is_list(evidence) ->
+          roles: %{
+            subject_determiner: det,
+            subject_head: subject,
+            predicate: ^index,
+            object_determiner: object_det,
+            object_head: object
+          },
+          evidence: evidence
+        }
+        when is_list(evidence) ->
           first == det and last == object and
             [subject, index, object_det, object] ==
               Enum.to_list((det + 1)..(det + 4)) and
             Enum.all?(
-              [:contiguous_surface, :attested_nominal_subject,
-               :attested_dictionary_verb, :bounded_past_surface,
-               :attested_nominal_object],
+              [
+                :contiguous_surface,
+                :attested_nominal_subject,
+                :attested_dictionary_verb,
+                :bounded_past_surface,
+                :attested_nominal_object
+              ],
               &(&1 in evidence)
             )
 
-        _ -> false
+        _ ->
+          false
       end)
 
     if witnessed? do
@@ -381,7 +468,8 @@ defmodule Brain.LIFG.GrammarEvidence do
             {id, score}
           end
 
-        entry -> entry
+        entry ->
+          entry
       end)
     else
       scores
@@ -437,11 +525,18 @@ defmodule Brain.LIFG.GrammarEvidence do
   # Reward *existing* verb candidates only; this never chooses a dictionary
   # sense or invents a candidate.
   defp support_for(
-         %{id: :wh_aux_topic_question,
-           roles: %{wh: wh, auxiliary: aux, subject: subject,
-                    predicate: predicate, preposition: prep},
+         %{
+           id: :wh_aux_topic_question,
+           roles: %{
+             wh: wh,
+             auxiliary: aux,
+             subject: subject,
+             predicate: predicate,
+             preposition: prep
+           },
            required_features: %{predicate: required},
-           evidence: evidence},
+           evidence: evidence
+         },
          index,
          id,
          _cell
@@ -453,8 +548,13 @@ defmodule Brain.LIFG.GrammarEvidence do
       wh < aux and aux < subject and subject < predicate and
         predicate < prep and
         Enum.all?(
-          [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
-           :explicit_prepositional_topic, :question_punctuation],
+          [
+            :wh_fronted,
+            :auxiliary_inversion,
+            :lexical_verb_available,
+            :explicit_prepositional_topic,
+            :question_punctuation
+          ],
           &(&1 in evidence)
         )
 
@@ -510,11 +610,17 @@ defmodule Brain.LIFG.GrammarEvidence do
   defp role_support(:verb_particle_construction, :determiner), do: 0.10
   defp role_support(:noun_phrase, :head), do: 0.18
   defp role_support(:noun_phrase, :determiner), do: 0.14
-  defp role_support(:noun_phrase, role) when role in [:modifier, :modifier_1, :modifier_2], do: 0.12
+
+  defp role_support(:noun_phrase, role) when role in [:modifier, :modifier_1, :modifier_2],
+    do: 0.12
+
   defp role_support(:prepositional_phrase, :preposition), do: 0.18
   defp role_support(:prepositional_phrase, role) when role in [:object, :head], do: 0.14
   defp role_support(:prepositional_phrase, :determiner), do: 0.10
-  defp role_support(:prepositional_phrase, role) when role in [:modifier, :modifier_1, :modifier_2], do: 0.10
+
+  defp role_support(:prepositional_phrase, role)
+       when role in [:modifier, :modifier_1, :modifier_2], do: 0.10
+
   defp role_support(_, _), do: 0.0
 
   defp matches_pos?(:pos_noun_or_pronoun, pos),

@@ -56,8 +56,7 @@ defmodule Core.Syntax.Signatures do
      [:subject_determiner, :subject_head, :predicate, :object_head]},
     {["pronoun", "verb", "determiner", "noun"],
      [:subject_head, :predicate, :object_determiner, :object_head]},
-    {["pronoun", "verb", "noun"],
-     [:subject_head, :predicate, :object_head]}
+    {["pronoun", "verb", "noun"], [:subject_head, :predicate, :object_head]}
   ]
   @third_person_singular_pronouns MapSet.new(~w(he she it))
 
@@ -83,19 +82,25 @@ defmodule Core.Syntax.Signatures do
 
     (definition_imperatives(si, nodes) ++
        definition_request_structures(si, nodes) ++
-       wh_aux_questions(si, nodes) ++ wh_aux_object_questions(si, nodes) ++
+       wh_aux_questions(si, nodes) ++
+       wh_aux_object_questions(si, nodes) ++
        wh_modal_conditional_questions(si, nodes) ++
-       progressive_locatives(nodes) ++ finite_past_locatives(nodes) ++
+       progressive_locatives(nodes) ++
+       finite_past_locatives(nodes) ++
        progressive_lexical_gaps(nodes) ++
        anaphoric_progressive_locatives(nodes) ++
        finite_present_svo(nodes) ++
        finite_past_svo(nodes) ++
+       finite_past_pronoun_svo(nodes) ++
        counted_present_svo(nodes) ++
        copular_relative_classifications(nodes) ++
        bounded_past_transitives(nodes) ++
-       finite_past(nodes) ++ perfect_predicates(nodes) ++
+       finite_past(nodes) ++
+       perfect_predicates(nodes) ++
        nominalized_adjective_subject_candidates(nodes) ++
-       have_verb_infinitives(nodes) ++ verb_particle_constructions(nodes) ++ noun_phrases ++
+       have_verb_infinitives(nodes) ++
+       verb_particle_constructions(nodes) ++
+       noun_phrases ++
        possessive_phrases ++
        prepositional_phrase_constructions(nodes, noun_phrases ++ possessive_phrases))
     |> Enum.uniq_by(fn sig -> {sig.id, sig.span, sig.roles} end)
@@ -139,7 +144,8 @@ defmodule Core.Syntax.Signatures do
         candidate = %{
           pos: MapSet.new([pos]),
           morphology: morphology(get(cell, :semantic_atoms), get(cell, :definition)),
-          finite_present_verb?: pos == "verb" and finite_present_verb?(get(cell, :semantic_atoms)),
+          finite_present_verb?:
+            pos == "verb" and finite_present_verb?(get(cell, :semantic_atoms)),
           plural_noun?: pos == "noun" and plural_noun?(get(cell, :semantic_atoms)),
           base_present_verb?: pos == "verb" and base_present_verb?(get(cell, :semantic_atoms))
         }
@@ -191,10 +197,11 @@ defmodule Core.Syntax.Signatures do
   defp morphology(_, _), do: MapSet.new()
 
   defp attested_both_past_forms?(definition) when is_binary(definition),
-    do: Regex.match?(
-      ~r/\bsimple past and past participle of [\p{L}]+(?:[-'’][\p{L}]+)*\b/ui,
-      definition
-    )
+    do:
+      Regex.match?(
+        ~r/\bsimple past and past participle of [\p{L}]+(?:[-'’][\p{L}]+)*\b/ui,
+        definition
+      )
 
   defp attested_both_past_forms?(_), do: false
 
@@ -211,6 +218,7 @@ defmodule Core.Syntax.Signatures do
 
   defp plural_noun?(tags) when is_list(tags),
     do: "tag:form-of" in tags and "tag:plural" in tags
+
   defp plural_noun?(_), do: false
 
   # An uninflected base-form verb is compatible with a plural-present
@@ -218,6 +226,7 @@ defmodule Core.Syntax.Signatures do
   # Inflected/past/participle forms cannot be promoted to base verbs.
   defp base_present_verb?(tags) when is_list(tags),
     do: not Enum.any?(tags, &(&1 in ["tag:form-of", "tag:past", "tag:participle"]))
+
   defp base_present_verb?(_), do: false
 
   # Base tokens only; never treat MWE phrase windows as individual words.
@@ -247,6 +256,7 @@ defmodule Core.Syntax.Signatures do
             plural_noun?: false,
             base_present_verb?: false
           })
+
         [
           %{
             index: index,
@@ -264,7 +274,6 @@ defmodule Core.Syntax.Signatures do
   end
 
   defp base_nodes(_, _), do: []
-
 
   # An entire definition command is an imperative, not a noun phrase.
   # The intent is established before Core syntax runs, but the intent alone
@@ -294,7 +303,8 @@ defmodule Core.Syntax.Signatures do
 
           [polite, predicate, determiner, object] ->
             if polite.word == "please" and determiner.word in ~w(a an the),
-              do: {predicate, determiner, object}, else: nil
+              do: {predicate, determiner, object},
+              else: nil
 
           _ ->
             nil
@@ -310,19 +320,26 @@ defmodule Core.Syntax.Signatures do
                (is_nil(determiner) or pos?(determiner, "determiner")) and
                valid_surface?(nodes) do
             roles = %{predicate: predicate.index, object_head: object.index}
+
             roles =
               if determiner,
                 do: Map.put(roles, :object_determiner, determiner.index),
                 else: roles
 
-            [signature(
-              :definition_imperative,
-              {0, object.index},
-              roles,
-              %{predicate: [:pos_verb], object_head: [:pos_noun]},
-              [:complete_imperative_surface, :explicit_definition_command,
-               :attested_verb_alternative, :attested_common_noun_object]
-            )]
+            [
+              signature(
+                :definition_imperative,
+                {0, object.index},
+                roles,
+                %{predicate: [:pos_verb], object_head: [:pos_noun]},
+                [
+                  :complete_imperative_surface,
+                  :explicit_definition_command,
+                  :attested_verb_alternative,
+                  :attested_common_noun_object
+                ]
+              )
+            ]
           else
             []
           end
@@ -334,7 +351,6 @@ defmodule Core.Syntax.Signatures do
       []
     end
   end
-
 
   # Grammar for a family of lexical requests. These signatures are produced
   # before LIFG/ATL or FrameUnifier, from complete original token sequences
@@ -357,35 +373,58 @@ defmodule Core.Syntax.Signatures do
           pos?(Enum.at(core, 2), "determiner") and
           pos?(Enum.at(core, 3), "noun") and
           pos?(Enum.at(core, 4), "preposition") and
-          Enum.at(core, 5).pos != MapSet.new() ->
+            Enum.at(core, 5).pos != MapSet.new() ->
           roles = %{
-            predicate: leading, recipient: leading + 1,
-            determiner: leading + 2, nominal_head: leading + 3,
-            preposition: leading + 4, lexical_target: leading + 5
+            predicate: leading,
+            recipient: leading + 1,
+            determiner: leading + 2,
+            nominal_head: leading + 3,
+            preposition: leading + 4,
+            lexical_target: leading + 5
           }
+
           roles = if leading == 1, do: Map.put(roles, :politeness, 0), else: roles
 
-          [signature(
-            :meaning_request_imperative, {0, length(nodes) - 1}, roles,
-            %{predicate: [:pos_verb], recipient: [:pos_pronoun],
-              nominal_head: [:pos_noun], preposition: [:pos_preposition]},
-            [:complete_lexical_request, :attested_request_cues,
-             :attested_target_alternatives, :original_contiguous_surface]
-          )]
+          [
+            signature(
+              :meaning_request_imperative,
+              {0, length(nodes) - 1},
+              roles,
+              %{
+                predicate: [:pos_verb],
+                recipient: [:pos_pronoun],
+                nominal_head: [:pos_noun],
+                preposition: [:pos_preposition]
+              },
+              [
+                :complete_lexical_request,
+                :attested_request_cues,
+                :attested_target_alternatives,
+                :original_contiguous_surface
+              ]
+            )
+          ]
 
         leading == 0 and match?([_, _, _, _], core) and
           Enum.at(core, 0).word == "what" and
           Enum.at(core, 1).word == "does" and
           Enum.at(core, 3).word == "mean" and
           pos?(Enum.at(core, 3), "verb") and
-          Enum.at(core, 2).pos != MapSet.new() ->
-          [signature(
-            :meaning_wh_question, {0, 3},
-            %{wh: 0, auxiliary: 1, lexical_target: 2, predicate: 3},
-            %{predicate: [:pos_verb]},
-            [:complete_lexical_request, :attested_request_cues,
-             :attested_target_alternatives, :original_contiguous_surface]
-          )]
+            Enum.at(core, 2).pos != MapSet.new() ->
+          [
+            signature(
+              :meaning_wh_question,
+              {0, 3},
+              %{wh: 0, auxiliary: 1, lexical_target: 2, predicate: 3},
+              %{predicate: [:pos_verb]},
+              [
+                :complete_lexical_request,
+                :attested_request_cues,
+                :attested_target_alternatives,
+                :original_contiguous_surface
+              ]
+            )
+          ]
 
         leading == 0 and match?([_, _, _, _, _, _], core) and
           Enum.take(Enum.map(core, & &1.word), 3) == ["what", "is", "the"] and
@@ -394,15 +433,28 @@ defmodule Core.Syntax.Signatures do
           pos?(Enum.at(core, 2), "determiner") and
           pos?(Enum.at(core, 3), "noun") and
           pos?(Enum.at(core, 4), "preposition") and
-          Enum.at(core, 5).pos != MapSet.new() ->
-          [signature(
-            :meaning_wh_question, {0, 5},
-            %{wh: 0, auxiliary: 1, determiner: 2,
-              nominal_head: 3, preposition: 4, lexical_target: 5},
-            %{nominal_head: [:pos_noun], preposition: [:pos_preposition]},
-            [:complete_lexical_request, :attested_request_cues,
-             :attested_target_alternatives, :original_contiguous_surface]
-          )]
+            Enum.at(core, 5).pos != MapSet.new() ->
+          [
+            signature(
+              :meaning_wh_question,
+              {0, 5},
+              %{
+                wh: 0,
+                auxiliary: 1,
+                determiner: 2,
+                nominal_head: 3,
+                preposition: 4,
+                lexical_target: 5
+              },
+              %{nominal_head: [:pos_noun], preposition: [:pos_preposition]},
+              [
+                :complete_lexical_request,
+                :attested_request_cues,
+                :attested_target_alternatives,
+                :original_contiguous_surface
+              ]
+            )
+          ]
 
         true ->
           []
@@ -439,45 +491,69 @@ defmodule Core.Syntax.Signatures do
            {wh_modifier, [aux | after_aux]} <- take_wh_modifier(after_wh),
            true <- question_auxiliary?(aux),
            [subject | after_subject] <- after_aux,
-           true <- (pos?(subject, "pronoun") or
-                      MapSet.member?(@question_subjects, subject.word)),
+           true <-
+             pos?(subject, "pronoun") or
+               MapSet.member?(@question_subjects, subject.word),
            {predicate_modifier, negation, [verb, prep | topic]} <-
              take_predicate_prefix(after_subject),
            true <- pos?(verb, "verb"),
            true <- MapSet.member?(@topic_prepositions, prep.word),
-           true <- topic != [] and
-                     Enum.any?(Enum.take(topic, 7), fn node ->
-                       pos?(node, "noun") or pos?(node, "proper_noun") or
-                         pos?(node, "pronoun")
-                     end),
+           true <-
+             topic != [] and
+               Enum.any?(Enum.take(topic, 7), fn node ->
+                 pos?(node, "noun") or pos?(node, "proper_noun") or
+                   pos?(node, "pronoun")
+               end),
            true <- valid_surface?(Enum.take(nodes, length(nodes) - length(topic))),
            true <- valid_surface?([prep, hd(topic)]) do
         roles =
-          %{wh: wh.index, auxiliary: aux.index, subject: subject.index,
-            predicate: verb.index, preposition: prep.index}
+          %{
+            wh: wh.index,
+            auxiliary: aux.index,
+            subject: subject.index,
+            predicate: verb.index,
+            preposition: prep.index
+          }
           |> maybe_question_role(:wh_modifier, wh_modifier)
           |> maybe_question_role(:predicate_modifier, predicate_modifier)
           |> maybe_question_role(:negation, negation)
 
         required =
-          %{auxiliary: [:pos_auxiliary, :pos_modal, :pos_verb],
-            subject: [:pos_pronoun], predicate: [:pos_verb],
-            preposition: [:pos_preposition]}
+          %{
+            auxiliary: [:pos_auxiliary, :pos_modal, :pos_verb],
+            subject: [:pos_pronoun],
+            predicate: [:pos_verb],
+            preposition: [:pos_preposition]
+          }
           |> maybe_question_features(:wh_modifier, wh_modifier, [:pos_adverb])
           |> maybe_question_features(:predicate_modifier, predicate_modifier, [:pos_adverb])
           |> maybe_question_features(:negation, negation, [:pos_adverb, :pos_particle])
 
         evidence =
-          [:wh_fronted, :auxiliary_inversion, :lexical_verb_available,
-           :explicit_prepositional_topic, :question_punctuation] ++
+          [
+            :wh_fronted,
+            :auxiliary_inversion,
+            :lexical_verb_available,
+            :explicit_prepositional_topic,
+            :question_punctuation
+          ] ++
             if(wh_modifier, do: [:wh_adverb_modifier], else: []) ++
             if(predicate_modifier, do: [:predicate_adverb_modifier], else: []) ++
             if(negation, do: [:explicit_negation], else: []) ++
             if(MapSet.member?(@negative_question_auxiliaries, aux.word),
-              do: [:negative_auxiliary_contraction], else: [])
+              do: [:negative_auxiliary_contraction],
+              else: []
+            )
 
-        [signature(:wh_aux_topic_question,
-          {wh.index, List.last(nodes).index}, roles, required, evidence)]
+        [
+          signature(
+            :wh_aux_topic_question,
+            {wh.index, List.last(nodes).index},
+            roles,
+            required,
+            evidence
+          )
+        ]
       else
         _ -> []
       end
@@ -502,18 +578,35 @@ defmodule Core.Syntax.Signatures do
              MapSet.member?(@determiners, det.word) and pos?(det, "determiner") and
              pos?(subject, "noun") and pos?(predicate, "verb") and
              valid_surface?(segment) do
-          [signature(
-            :wh_aux_object_question,
-            {wh.index, predicate.index},
-            %{wh: wh.index, auxiliary: aux.index, subject_determiner: det.index,
-              subject_head: subject.index, predicate: predicate.index},
-            %{wh: [:pos_pronoun], auxiliary: [:pos_auxiliary, :pos_modal, :pos_verb],
-              subject_determiner: [:pos_determiner],
-              subject_head: [:pos_noun], predicate: [:pos_verb]},
-            [:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
-             :attested_nominal_subject, :lexical_verb_available,
-             :question_punctuation, :contiguous_surface]
-          )]
+          [
+            signature(
+              :wh_aux_object_question,
+              {wh.index, predicate.index},
+              %{
+                wh: wh.index,
+                auxiliary: aux.index,
+                subject_determiner: det.index,
+                subject_head: subject.index,
+                predicate: predicate.index
+              },
+              %{
+                wh: [:pos_pronoun],
+                auxiliary: [:pos_auxiliary, :pos_modal, :pos_verb],
+                subject_determiner: [:pos_determiner],
+                subject_head: [:pos_noun],
+                predicate: [:pos_verb]
+              },
+              [
+                :wh_fronted,
+                :auxiliary_inversion,
+                :bounded_determiner_surface,
+                :attested_nominal_subject,
+                :lexical_verb_available,
+                :question_punctuation,
+                :contiguous_surface
+              ]
+            )
+          ]
         else
           []
         end
@@ -547,30 +640,41 @@ defmodule Core.Syntax.Signatures do
              copula.word in ~w(was were) and
              (pos?(copula, "auxiliary") or pos?(copula, "verb")) and
              pos?(complement, "adjective") and valid_surface?(window) do
-          [signature(
-            :wh_modal_conditional_question,
-            {wh.index, complement.index},
-            %{
-              wh: wh.index, modal: modal.index, subject: subject.index,
-              predicate: verb.index, condition_marker: marker.index,
-              condition_subject: if_subject.index, condition_copula: copula.index,
-              condition_complement: complement.index
-            },
-            %{
-              wh: [:pos_pronoun],
-              modal: [:pos_modal_or_auxiliary_or_verb],
-              subject: [:pos_pronoun], predicate: [:pos_verb],
-              condition_marker: [:explicit_if_surface],
-              condition_subject: [:pos_pronoun],
-              condition_copula: [:attested_copular_form],
-              condition_complement: [:pos_adjective]
-            },
-            [
-              :wh_fronted, :modal_auxiliary_inversion, :attested_lexical_predicate,
-              :explicit_if_condition, :attested_copular_state,
-              :question_punctuation, :contiguous_surface
-            ]
-          )]
+          [
+            signature(
+              :wh_modal_conditional_question,
+              {wh.index, complement.index},
+              %{
+                wh: wh.index,
+                modal: modal.index,
+                subject: subject.index,
+                predicate: verb.index,
+                condition_marker: marker.index,
+                condition_subject: if_subject.index,
+                condition_copula: copula.index,
+                condition_complement: complement.index
+              },
+              %{
+                wh: [:pos_pronoun],
+                modal: [:pos_modal_or_auxiliary_or_verb],
+                subject: [:pos_pronoun],
+                predicate: [:pos_verb],
+                condition_marker: [:explicit_if_surface],
+                condition_subject: [:pos_pronoun],
+                condition_copula: [:attested_copular_form],
+                condition_complement: [:pos_adjective]
+              },
+              [
+                :wh_fronted,
+                :modal_auxiliary_inversion,
+                :attested_lexical_predicate,
+                :explicit_if_condition,
+                :attested_copular_state,
+                :question_punctuation,
+                :contiguous_surface
+              ]
+            )
+          ]
         else
           []
         end
@@ -742,18 +846,27 @@ defmodule Core.Syntax.Signatures do
           pos?(object_det, "determiner") and pos?(object, "noun")
 
       if contiguous? and attested? and valid_surface?(segment) do
-        [signature(
-          :bounded_regular_past_transitive,
-          {subject_det.index, object.index},
-          %{subject_determiner: subject_det.index, subject_head: subject.index,
-            predicate: predicate.index, object_determiner: object_det.index,
-            object_head: object.index},
-          %{subject_head: [:pos_noun], predicate: [:pos_verb],
-            object_head: [:pos_noun]},
-          [:contiguous_surface, :attested_nominal_subject,
-           :attested_dictionary_verb, :bounded_past_surface,
-           :attested_nominal_object]
-        )]
+        [
+          signature(
+            :bounded_regular_past_transitive,
+            {subject_det.index, object.index},
+            %{
+              subject_determiner: subject_det.index,
+              subject_head: subject.index,
+              predicate: predicate.index,
+              object_determiner: object_det.index,
+              object_head: object.index
+            },
+            %{subject_head: [:pos_noun], predicate: [:pos_verb], object_head: [:pos_noun]},
+            [
+              :contiguous_surface,
+              :attested_nominal_subject,
+              :attested_dictionary_verb,
+              :bounded_past_surface,
+              :attested_nominal_object
+            ]
+          )
+        ]
       else
         []
       end
@@ -818,14 +931,19 @@ defmodule Core.Syntax.Signatures do
       if pos?(det, "determiner") and pos?(adjective, "adjective") and
            auxiliary_have?(aux) and form?(verb, :past_participle) and
            valid_surface?(segment) do
-        [signature(
-          :nominalized_adjective_subject_candidate,
-          {det.index, adjective.index},
-          %{determiner: det.index, adjective: adjective.index},
-          %{determiner: [:pos_determiner], adjective: [:pos_adjective]},
-          [:determiner_adjective_surface, :following_perfect_predicate,
-           :nominalization_only_hypothesized]
-        )]
+        [
+          signature(
+            :nominalized_adjective_subject_candidate,
+            {det.index, adjective.index},
+            %{determiner: det.index, adjective: adjective.index},
+            %{determiner: [:pos_determiner], adjective: [:pos_adjective]},
+            [
+              :determiner_adjective_surface,
+              :following_perfect_predicate,
+              :nominalization_only_hypothesized
+            ]
+          )
+        ]
       else
         []
       end
@@ -876,8 +994,9 @@ defmodule Core.Syntax.Signatures do
     nodes
     |> Enum.chunk_every(6, 1, :discard)
     |> Enum.flat_map(fn [sd, subject, predicate, prep, ld, location] = segment ->
-      contiguous? = Enum.map(segment, & &1.index) ==
-        Enum.to_list(sd.index..(sd.index + 5))
+      contiguous? =
+        Enum.map(segment, & &1.index) ==
+          Enum.to_list(sd.index..(sd.index + 5))
 
       if contiguous? and pos?(sd, "determiner") and pos?(subject, "noun") and
            pos?(predicate, "verb") and form?(predicate, :simple_past) and
@@ -885,18 +1004,33 @@ defmodule Core.Syntax.Signatures do
            prep.word in ~w(on in under beside above below) and
            pos?(ld, "determiner") and pos?(location, "noun") and
            valid_surface?(segment) do
-        [signature(
-          :finite_past_locative_candidate,
-          {sd.index, location.index},
-          %{subject_determiner: sd.index, subject_head: subject.index,
-            predicate: predicate.index, preposition: prep.index,
-            location_determiner: ld.index, location_head: location.index},
-          %{subject_head: [:pos_noun], predicate: [:simple_past],
-            preposition: [:pos_preposition], location_head: [:pos_noun]},
-          [:contiguous_surface, :attested_nominal_subject,
-           :attested_simple_past_verb, :attested_preposition,
-           :attested_nominal_location]
-        )]
+        [
+          signature(
+            :finite_past_locative_candidate,
+            {sd.index, location.index},
+            %{
+              subject_determiner: sd.index,
+              subject_head: subject.index,
+              predicate: predicate.index,
+              preposition: prep.index,
+              location_determiner: ld.index,
+              location_head: location.index
+            },
+            %{
+              subject_head: [:pos_noun],
+              predicate: [:simple_past],
+              preposition: [:pos_preposition],
+              location_head: [:pos_noun]
+            },
+            [
+              :contiguous_surface,
+              :attested_nominal_subject,
+              :attested_simple_past_verb,
+              :attested_preposition,
+              :attested_nominal_location
+            ]
+          )
+        ]
       else
         []
       end
@@ -914,22 +1048,38 @@ defmodule Core.Syntax.Signatures do
            prep.word in ~w(on in under beside above below into) and
            pos?(loc_det, "determiner") and pos?(location, "noun") and
            valid_surface?(segment) do
-        [signature(
-          if(prep.word == "into",
-            do: :progressive_directional_candidate,
-            else: :progressive_locative_candidate),
-          {subject_det.index, location.index},
-          %{subject_determiner: subject_det.index, subject_head: subject.index,
-            auxiliary: aux.index, predicate: predicate.index,
-            preposition: prep.index, location_determiner: loc_det.index,
-            location_head: location.index},
-          %{subject_head: [:pos_noun], predicate: [:present_participle],
-            preposition: [:pos_preposition], location_head: [:pos_noun]},
-          [:contiguous_surface, :attested_nominal_subject,
-           :attested_present_participle, :attested_preposition,
-           :attested_nominal_location] ++
-            if(prep.word == "into", do: [:directional_not_arrival], else: [])
-        )]
+        [
+          signature(
+            if(prep.word == "into",
+              do: :progressive_directional_candidate,
+              else: :progressive_locative_candidate
+            ),
+            {subject_det.index, location.index},
+            %{
+              subject_determiner: subject_det.index,
+              subject_head: subject.index,
+              auxiliary: aux.index,
+              predicate: predicate.index,
+              preposition: prep.index,
+              location_determiner: loc_det.index,
+              location_head: location.index
+            },
+            %{
+              subject_head: [:pos_noun],
+              predicate: [:present_participle],
+              preposition: [:pos_preposition],
+              location_head: [:pos_noun]
+            },
+            [
+              :contiguous_surface,
+              :attested_nominal_subject,
+              :attested_present_participle,
+              :attested_preposition,
+              :attested_nominal_location
+            ] ++
+              if(prep.word == "into", do: [:directional_not_arrival], else: [])
+          )
+        ]
       else
         []
       end
@@ -953,22 +1103,39 @@ defmodule Core.Syntax.Signatures do
            prep.word in ~w(on in under beside above below) and
            pos?(loc_det, "determiner") and pos?(location, "noun") and
            valid_surface?(segment) do
-        [signature(
-          :progressive_lexical_gap_candidate,
-          {subject_det.index, location.index},
-          %{subject_determiner: subject_det.index, subject_head: subject.index,
-            auxiliary: aux.index, predicate: predicate.index,
-            preposition: prep.index, location_determiner: loc_det.index,
-            location_head: location.index},
-          %{subject_head: [:pos_noun], predicate: [:unresolved_ing_surface],
-            preposition: [:pos_preposition], location_head: [:pos_noun]},
-          [:contiguous_surface, :attested_nominal_subject,
-           :unresolved_progressive_predicate, :attested_preposition,
-           :attested_nominal_location]
-        )
-        |> Map.put(:source_span_sha256,
-          :crypto.hash(:sha256, Enum.map_join(segment, " ", & &1.word))
-          |> Base.encode16(case: :lower))]
+        [
+          signature(
+            :progressive_lexical_gap_candidate,
+            {subject_det.index, location.index},
+            %{
+              subject_determiner: subject_det.index,
+              subject_head: subject.index,
+              auxiliary: aux.index,
+              predicate: predicate.index,
+              preposition: prep.index,
+              location_determiner: loc_det.index,
+              location_head: location.index
+            },
+            %{
+              subject_head: [:pos_noun],
+              predicate: [:unresolved_ing_surface],
+              preposition: [:pos_preposition],
+              location_head: [:pos_noun]
+            },
+            [
+              :contiguous_surface,
+              :attested_nominal_subject,
+              :unresolved_progressive_predicate,
+              :attested_preposition,
+              :attested_nominal_location
+            ]
+          )
+          |> Map.put(
+            :source_span_sha256,
+            :crypto.hash(:sha256, Enum.map_join(segment, " ", & &1.word))
+            |> Base.encode16(case: :lower)
+          )
+        ]
       else
         []
       end
@@ -991,19 +1158,36 @@ defmodule Core.Syntax.Signatures do
            prep.word in ~w(on in under beside above below into) and
            pos?(loc_det, "determiner") and pos?(location, "noun") and
            valid_surface?(segment) do
-        [signature(
-          :progressive_anaphoric_locative_candidate,
-          {subject.index, location.index},
-          %{subject: subject.index, auxiliary: aux.index,
-            predicate: predicate.index, preposition: prep.index,
-            location_determiner: loc_det.index, location_head: location.index},
-          %{subject: [:pos_pronoun], auxiliary: [:pos_auxiliary],
-            predicate: [:present_participle], preposition: [:pos_preposition],
-            location_determiner: [:pos_determiner], location_head: [:pos_noun]},
-          [:contiguous_surface, :attested_subject_pronoun,
-           :attested_present_participle, :attested_preposition,
-           :attested_nominal_location, :unresolved_anaphoric_subject]
-        )]
+        [
+          signature(
+            :progressive_anaphoric_locative_candidate,
+            {subject.index, location.index},
+            %{
+              subject: subject.index,
+              auxiliary: aux.index,
+              predicate: predicate.index,
+              preposition: prep.index,
+              location_determiner: loc_det.index,
+              location_head: location.index
+            },
+            %{
+              subject: [:pos_pronoun],
+              auxiliary: [:pos_auxiliary],
+              predicate: [:present_participle],
+              preposition: [:pos_preposition],
+              location_determiner: [:pos_determiner],
+              location_head: [:pos_noun]
+            },
+            [
+              :contiguous_surface,
+              :attested_subject_pronoun,
+              :attested_present_participle,
+              :attested_preposition,
+              :attested_nominal_location,
+              :unresolved_anaphoric_subject
+            ]
+          )
+        ]
       else
         []
       end
@@ -1019,7 +1203,9 @@ defmodule Core.Syntax.Signatures do
       nodes
       |> Enum.chunk_every(length(pattern), 1, :discard)
       |> Enum.flat_map(fn segment ->
-        roles = Enum.zip(role_names, segment) |> Map.new(fn {role, node} -> {role, node.index} end)
+        roles =
+          Enum.zip(role_names, segment) |> Map.new(fn {role, node} -> {role, node.index} end)
+
         predicate = Enum.find(segment, &(&1.index == roles.predicate))
         subject = Enum.find(segment, &(&1.index == roles.subject_head))
 
@@ -1039,10 +1225,17 @@ defmodule Core.Syntax.Signatures do
               :finite_present_svo_candidate,
               {hd(segment).index, List.last(segment).index},
               roles,
-              %{subject_head: [:pos_noun_or_pronoun], predicate: [:pos_verb],
-                object_head: [:pos_noun]},
-              [:contiguous_surface, :attested_nominal_subject, :attested_nominal_object,
-               :attested_finite_present_verb]
+              %{
+                subject_head: [:pos_noun_or_pronoun],
+                predicate: [:pos_verb],
+                object_head: [:pos_noun]
+              },
+              [
+                :contiguous_surface,
+                :attested_nominal_subject,
+                :attested_nominal_object,
+                :attested_finite_present_verb
+              ]
             )
           ]
         else
@@ -1059,25 +1252,82 @@ defmodule Core.Syntax.Signatures do
     nodes
     |> Enum.chunk_every(5, 1, :discard)
     |> Enum.flat_map(fn [sd, subject, predicate, od, object] = segment ->
-      contiguous? = Enum.map(segment, & &1.index) ==
-        Enum.to_list(sd.index..(sd.index + 4))
+      contiguous? =
+        Enum.map(segment, & &1.index) ==
+          Enum.to_list(sd.index..(sd.index + 4))
 
       if contiguous? and
            pos?(sd, "determiner") and pos?(subject, "noun") and
            pos?(predicate, "verb") and form?(predicate, :simple_past) and
            pos?(od, "determiner") and pos?(object, "noun") and
            valid_surface?(segment) do
-        [signature(
-          :finite_past_svo_candidate,
-          {sd.index, object.index},
-          %{subject_determiner: sd.index, subject_head: subject.index,
-            predicate: predicate.index, object_determiner: od.index,
-            object_head: object.index},
-          %{subject_head: [:pos_noun], predicate: [:simple_past],
-            object_head: [:pos_noun]},
-          [:contiguous_surface, :attested_nominal_subject,
-           :attested_nominal_object, :attested_simple_past_verb]
-        )]
+        [
+          signature(
+            :finite_past_svo_candidate,
+            {sd.index, object.index},
+            %{
+              subject_determiner: sd.index,
+              subject_head: subject.index,
+              predicate: predicate.index,
+              object_determiner: od.index,
+              object_head: object.index
+            },
+            %{subject_head: [:pos_noun], predicate: [:simple_past], object_head: [:pos_noun]},
+            [
+              :contiguous_surface,
+              :attested_nominal_subject,
+              :attested_nominal_object,
+              :attested_simple_past_verb
+            ]
+          )
+        ]
+      else
+        []
+      end
+    end)
+  end
+
+  # Pronoun + finite-past verb + determiner + noun.
+  # Example: "He bought some bread."
+  # This is grammatical evidence, not a selected dictionary meaning.
+  defp finite_past_pronoun_svo(nodes) do
+    nodes
+    |> Enum.chunk_every(4, 1, :discard)
+    |> Enum.flat_map(fn [subject, predicate, det, object] = segment ->
+      contiguous? =
+        Enum.map(segment, & &1.index) ==
+          Enum.to_list(subject.index..(subject.index + 3))
+
+      if contiguous? and
+           pos?(subject, "pronoun") and
+           pos?(predicate, "verb") and
+           form?(predicate, :simple_past) and
+           pos?(det, "determiner") and
+           pos?(object, "noun") and
+           valid_surface?(segment) do
+        [
+          signature(
+            :finite_past_svo_candidate,
+            {subject.index, object.index},
+            %{
+              subject_head: subject.index,
+              predicate: predicate.index,
+              object_determiner: det.index,
+              object_head: object.index
+            },
+            %{
+              subject_head: [:pos_noun_or_pronoun],
+              predicate: [:simple_past],
+              object_head: [:pos_noun]
+            },
+            [
+              :contiguous_surface,
+              :attested_nominal_subject,
+              :attested_nominal_object,
+              :attested_simple_past_verb
+            ]
+          )
+        ]
       else
         []
       end
@@ -1093,8 +1343,11 @@ defmodule Core.Syntax.Signatures do
     |> Enum.flat_map(fn [count, subject, predicate, det, object] = segment ->
       counted_plural? =
         case Integer.parse(count.word) do
-          {n, ""} when n in 2..999 -> true
-          _ -> count.word in ~w(two three four five six seven eight nine ten eleven twelve thirteen)
+          {n, ""} when n in 2..999 ->
+            true
+
+          _ ->
+            count.word in ~w(two three four five six seven eight nine ten eleven twelve thirteen)
         end
 
       if counted_plural? and pos?(subject, "noun") and subject.plural_noun? and
@@ -1102,17 +1355,26 @@ defmodule Core.Syntax.Signatures do
            MapSet.member?(@determiners, det.word) and
            pos?(det, "determiner") and pos?(object, "noun") and
            valid_surface?(segment) do
-        [signature(
-           :counted_finite_present_svo_candidate,
-           {count.index, object.index},
-           %{count: count.index, subject_head: subject.index,
-             predicate: predicate.index, object_determiner: det.index,
-             object_head: object.index},
-           %{subject_head: [:pos_noun], predicate: [:pos_verb],
-             object_head: [:pos_noun]},
-           [:contiguous_surface, :attested_counted_plural_subject,
-            :attested_base_present_verb, :attested_nominal_object]
-         )]
+        [
+          signature(
+            :counted_finite_present_svo_candidate,
+            {count.index, object.index},
+            %{
+              count: count.index,
+              subject_head: subject.index,
+              predicate: predicate.index,
+              object_determiner: det.index,
+              object_head: object.index
+            },
+            %{subject_head: [:pos_noun], predicate: [:pos_verb], object_head: [:pos_noun]},
+            [
+              :contiguous_surface,
+              :attested_counted_plural_subject,
+              :attested_base_present_verb,
+              :attested_nominal_object
+            ]
+          )
+        ]
       else
         []
       end
@@ -1169,6 +1431,7 @@ defmodule Core.Syntax.Signatures do
            matching <-
              Enum.filter(noun_phrases, fn phrase ->
                {first, last} = phrase.span
+
                first == following.index and
                  last <= owner.index + @max_possessive_tokens - 1
              end),
@@ -1186,8 +1449,12 @@ defmodule Core.Syntax.Signatures do
             {owner.index, last},
             Map.put(roles, :possessor, owner.index),
             Map.put(required, :possessor, [:pos_noun_or_pronoun]),
-            [:apostrophe_s, :nominal_head_available, :surface_possessive,
-             :possessor_not_lexically_verified]
+            [
+              :apostrophe_s,
+              :nominal_head_available,
+              :surface_possessive,
+              :possessor_not_lexically_verified
+            ]
           )
           |> Map.put(:surface_possessor, base)
         ]
@@ -1333,7 +1600,11 @@ defmodule Core.Syntax.Signatures do
               :verb_particle_construction,
               {verb.index, particle.index},
               %{verb: verb.index, object: object.index, particle: particle.index},
-              %{verb: [:pos_verb], object: [:pos_noun_or_pronoun], particle: particle_features(particle)},
+              %{
+                verb: [:pos_verb],
+                object: [:pos_noun_or_pronoun],
+                particle: particle_features(particle)
+              },
               [:separated_particle, :object_between]
             )
           ]
@@ -1384,9 +1655,9 @@ defmodule Core.Syntax.Signatures do
   # require a plausible particle surface even for direct particle POS rows.
   defp particle_features(particle) do
     if MapSet.member?(@particle_surfaces, particle.word) do
-      (if pos?(particle, "particle"), do: [:pos_particle], else: []) ++
-        (if pos?(particle, "adverb"), do: [:pos_adverb], else: []) ++
-        (if pos?(particle, "preposition"), do: [:pos_preposition], else: [])
+      if(pos?(particle, "particle"), do: [:pos_particle], else: []) ++
+        if(pos?(particle, "adverb"), do: [:pos_adverb], else: []) ++
+        if pos?(particle, "preposition"), do: [:pos_preposition], else: []
     else
       []
     end

@@ -33,16 +33,26 @@ defmodule Brain.LIFG.SenseFocus do
     role =
       case Map.get(si, :role_competition) do
         %{source: :core_syntax_and_attested_dictionary_pos, roles: roles}
-        when is_map(roles) -> Map.get(roles, index)
+        when is_map(roles) ->
+          Map.get(roles, index)
 
-        _ -> nil
+        _ ->
+          nil
       end
 
     cond do
-      not enabled? -> broad(total, :disabled)
-      mwe? -> broad(total, :mwe_preserves_broad_context)
-      total < 2 -> broad(total, :insufficient_competition)
-      not supported_role?(role) -> broad(total, :no_adjudicated_pos)
+      not enabled? ->
+        broad(total, :disabled)
+
+      mwe? ->
+        broad(total, :mwe_preserves_broad_context)
+
+      total < 2 ->
+        broad(total, :insufficient_competition)
+
+      not supported_role?(role) ->
+        broad(total, :no_adjudicated_pos)
+
       true ->
         pos = role.pos
         matching = Enum.count(candidates, &(candidate_pos(&1) == pos))
@@ -57,8 +67,10 @@ defmodule Brain.LIFG.SenseFocus do
             context_skipped: total - matching
           }
         else
-          broad(total, if(matching == 0,
-            do: :no_matching_pos_candidate, else: :all_candidates_same_pos))
+          broad(
+            total,
+            if(matching == 0, do: :no_matching_pos_candidate, else: :all_candidates_same_pos)
+          )
         end
     end
   end
@@ -73,84 +85,163 @@ defmodule Brain.LIFG.SenseFocus do
 
   def evaluate_context?(_, _), do: true
 
-  defp supported_role?(%{status: :supported, pos: "noun",
-                         role: :subject_head,
-                         basis: :determined_subject_before_attested_past_predicate,
-                         evidence: evidence}) when is_list(evidence) do
-    Enum.all?([:bounded_determiner_surface, :dictionary_pos_witness,
-               :attested_simple_past_predicate], &(&1 in evidence))
+  defp supported_role?(%{
+         status: :supported,
+         pos: "noun",
+         role: :subject_head,
+         basis: :determined_subject_before_attested_past_predicate,
+         evidence: evidence
+       })
+       when is_list(evidence) do
+    Enum.all?(
+      [:bounded_determiner_surface, :dictionary_pos_witness, :attested_simple_past_predicate],
+      &(&1 in evidence)
+    )
   end
 
-  defp supported_role?(%{status: :supported, pos: "noun",
-                          role: :subject_head,
-                          basis: :determined_subject_before_attested_present_predicate,
-                          evidence: evidence}) when is_list(evidence) do
-    Enum.all?([:complete_finite_present_svo, :dictionary_pos_witness,
-               :attested_finite_present_verb], &(&1 in evidence))
+  defp supported_role?(%{
+         status: :supported,
+         pos: "noun",
+         role: :subject_head,
+         basis: :determined_subject_before_attested_present_predicate,
+         evidence: evidence
+       })
+       when is_list(evidence) do
+    Enum.all?(
+      [:complete_finite_present_svo, :dictionary_pos_witness, :attested_finite_present_verb],
+      &(&1 in evidence)
+    )
   end
 
-  defp supported_role?(%{status: :supported, pos: "noun",
-                          role: :subject_head,
-                          basis: :determined_subject_in_wh_aux_question,
-                          evidence: evidence}) when is_list(evidence) do
-    Enum.all?([:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
-               :dictionary_pos_witness, :question_punctuation], &(&1 in evidence))
+  defp supported_role?(%{
+         status: :supported,
+         pos: "noun",
+         role: :subject_head,
+         basis: :determined_subject_in_wh_aux_question,
+         evidence: evidence
+       })
+       when is_list(evidence) do
+    Enum.all?(
+      [
+        :wh_fronted,
+        :auxiliary_inversion,
+        :bounded_determiner_surface,
+        :dictionary_pos_witness,
+        :question_punctuation
+      ],
+      &(&1 in evidence)
+    )
   end
 
-  defp supported_role?(%{status: :supported, pos: "verb",
-                          role: :predicate,
-                          basis: :predicate_in_wh_aux_question,
-                          evidence: evidence}) when is_list(evidence) do
-    Enum.all?([:wh_fronted, :auxiliary_inversion, :bounded_determiner_surface,
-               :dictionary_pos_witness, :question_punctuation,
-               :attested_verb_alternative], &(&1 in evidence))
+  defp supported_role?(%{
+         status: :supported,
+         pos: "verb",
+         role: :predicate,
+         basis: :predicate_in_wh_aux_question,
+         evidence: evidence
+       })
+       when is_list(evidence) do
+    Enum.all?(
+      [
+        :wh_fronted,
+        :auxiliary_inversion,
+        :bounded_determiner_surface,
+        :dictionary_pos_witness,
+        :question_punctuation,
+        :attested_verb_alternative
+      ],
+      &(&1 in evidence)
+    )
   end
 
   # Consume the same independently witnessed predicate role as Stage1
   # scoring. This focuses contextual work but never prunes alternatives or
   # independently selects a verb meaning.
-  defp supported_role?(%{status: :supported, pos: "verb",
-                          role: :predicate, basis: basis, evidence: evidence})
-       when basis in [:modal_question_predicate, :modal_declarative_predicate,
-                      :imperative_predicate, :plural_present_predicate,
-                      :finite_present_svo_predicate,
-                      :counted_present_transitive_predicate,
-                      :counted_negative_transitive_predicate] and is_list(evidence) do
+  defp supported_role?(%{
+         status: :supported,
+         pos: "verb",
+         role: :predicate,
+         basis: basis,
+         evidence: evidence
+       })
+       when basis in [
+              :modal_question_predicate,
+              :modal_declarative_predicate,
+              :imperative_predicate,
+              :plural_present_predicate,
+              :finite_present_svo_predicate,
+              :finite_past_svo_predicate,
+              :counted_present_transitive_predicate,
+              :counted_negative_transitive_predicate
+            ] and is_list(evidence) do
     required =
       case basis do
-        :modal_question_predicate -> [:auxiliary_subject_order]
-        :modal_declarative_predicate -> [:subject_auxiliary_order]
-        :imperative_predicate -> [:initial_predicate]
+        :modal_question_predicate ->
+          [:auxiliary_subject_order]
+
+        :modal_declarative_predicate ->
+          [:subject_auxiliary_order]
+
+        :imperative_predicate ->
+          [:initial_predicate]
+
         :plural_present_predicate ->
           [:attested_plural_subject, :present_base_verb_witness]
-        :finite_present_svo_predicate -> [:attested_finite_present_verb]
+
+        :finite_present_svo_predicate ->
+          [:attested_finite_present_verb]
+
+        :finite_past_svo_predicate ->
+          [:attested_simple_past_verb]
+
         :counted_present_transitive_predicate ->
-          [:attested_counted_plural_subject, :attested_base_present_verb,
-           :attested_nominal_object]
+          [
+            :attested_counted_plural_subject,
+            :attested_base_present_verb,
+            :attested_nominal_object
+          ]
+
         :counted_negative_transitive_predicate ->
-          [:attested_counted_subject, :explicit_did_not_negation,
-           :attested_nominal_object]
+          [:attested_counted_subject, :explicit_did_not_negation, :attested_nominal_object]
       end
 
-    Enum.all?(required ++ [:dictionary_pos_witness, :bounded_predicate_slot],
-      &(&1 in evidence))
+    Enum.all?(
+      required ++ [:dictionary_pos_witness, :bounded_predicate_slot],
+      &(&1 in evidence)
+    )
   end
 
-  defp supported_role?(%{status: :supported, pos: "adjective",
-                         role: :modifier,
-                         basis: :determined_adjective_before_unresolved_head,
-                         evidence: evidence}) when is_list(evidence) do
-    Enum.all?([:bounded_determiner_surface, :dictionary_pos_witness,
-               :unresolved_code_head, :complete_nominal_surface],
-      &(&1 in evidence))
+  defp supported_role?(%{
+         status: :supported,
+         pos: "adjective",
+         role: :modifier,
+         basis: :determined_adjective_before_unresolved_head,
+         evidence: evidence
+       })
+       when is_list(evidence) do
+    Enum.all?(
+      [
+        :bounded_determiner_surface,
+        :dictionary_pos_witness,
+        :unresolved_code_head,
+        :complete_nominal_surface
+      ],
+      &(&1 in evidence)
+    )
   end
 
-  defp supported_role?(%{status: :supported, pos: "adjective",
-                         role: :modifier,
-                         basis: :complete_determiner_adjective_noun,
-                         evidence: evidence}) when is_list(evidence) do
-    Enum.all?([:bounded_determiner_surface, :dictionary_pos_witness,
-               :complete_nominal_constituent], &(&1 in evidence))
+  defp supported_role?(%{
+         status: :supported,
+         pos: "adjective",
+         role: :modifier,
+         basis: :complete_determiner_adjective_noun,
+         evidence: evidence
+       })
+       when is_list(evidence) do
+    Enum.all?(
+      [:bounded_determiner_surface, :dictionary_pos_witness, :complete_nominal_constituent],
+      &(&1 in evidence)
+    )
   end
 
   defp supported_role?(_), do: false
