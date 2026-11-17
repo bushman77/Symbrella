@@ -22,10 +22,11 @@ defmodule Core.Semantic.VerbLemma do
 
   defp base_pattern, do: ~r/\A[a-z][a-z0-9_]{0,47}\z/
 
-  defp form_of_glosses, do: [
-    ~r/\A(?:\([^)]*\)\s*)?(?:an?\s+)?inflected form of (?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu,
-    ~r/\A(?:\([^)]*\)\s*)?third-person singular (?:simple )?present (?:indicative )?(?:form )?of (?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu
-  ]
+  defp form_of_glosses,
+    do: [
+      ~r/\A(?:\([^)]*\)\s*)?(?:an?\s+)?inflected form of (?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu,
+      ~r/\A(?:\([^)]*\)\s*)?third-person singular (?:simple )?present (?:indicative )?(?:form )?of (?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu
+    ]
 
   @spec canonical(map(), map()) :: {:ok, String.t()} | :error
   def canonical(si, choice) when is_map(si) and is_map(choice) do
@@ -83,10 +84,12 @@ defmodule Core.Semantic.VerbLemma do
               :error
             end
 
-          _ -> :error
+          _ ->
+            :error
         end
 
-      _ -> :error
+      _ ->
+        :error
     end
   end
 
@@ -96,21 +99,30 @@ defmodule Core.Semantic.VerbLemma do
     tags = get(cell, :semantic_atoms)
     definition = get(cell, :definition)
 
-    if is_list(tags) and "tag:form-of" in tags and "tag:past" in tags and
-         "tag:participle" not in tags and is_binary(definition) do
+    if is_list(tags) and
+         "tag:form-of" in tags and
+         "tag:past" in tags and
+         is_binary(definition) do
       gloss =
         definition
         |> String.split(" — ")
         |> List.last()
         |> String.trim()
 
-      case Regex.named_captures(
-             ~r/\A(?:\([^)]*\)\s*)?(?:the\s+)?(?:simple\s+)?past\s+(?:tense\s+)?(?:indicative\s+)?(?:form\s+)?of\s+(?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu,
-             gloss
-           ) do
+      pattern =
+        if "tag:participle" in tags do
+          ~r/\A(?:\([^)]*\)\s*)?simple past and past participle of (?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu
+        else
+          ~r/\A(?:\([^)]*\)\s*)?(?:the\s+)?(?:simple\s+)?past\s+(?:tense\s+)?(?:indicative\s+)?(?:form\s+)?of\s+(?<base>[a-z][a-z0-9_]{0,47})\.?\z/iu
+        end
+
+      case Regex.named_captures(pattern, gloss) do
         %{"base" => base} ->
           base = String.downcase(base)
-          if Regex.match?(base_pattern(), base), do: base, else: nil
+
+          if Regex.match?(base_pattern(), base),
+            do: base,
+            else: nil
 
         _ ->
           nil

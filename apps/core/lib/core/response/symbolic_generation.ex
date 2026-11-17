@@ -8,22 +8,38 @@ defmodule Core.Response.SymbolicGeneration do
   """
 
   alias Core.Semantic.Composition
-  alias Core.Semantic.{DiscourseComposition, EpisodicProjection, SentenceMeaning,
-    SpeechActs, TemporalClaimReconciliation, TemporalClarificationResolution,
-    TemporalMemoryRetrieval}
+
+  alias Core.Semantic.{
+    DiscourseComposition,
+    EpisodicProjection,
+    SentenceMeaning,
+    SpeechActs,
+    TemporalClaimReconciliation,
+    TemporalClarificationResolution,
+    TemporalMemoryRetrieval
+  }
 
   # Accept the intent labels the live classifier actually emits for
   # complete social turns. These labels by themselves never authorize output:
   # social_realization/2 still revalidates the whole-utterance SpeechActs frame.
   @social_intents [
-    :greet, :greeting, :gratitude, :smalltalk, :feedback, :bye, :unknown,
-    :tell, :statement, :ask, :ask_info, :question
+    :greet,
+    :greeting,
+    :gratitude,
+    :smalltalk,
+    :feedback,
+    :bye,
+    :unknown,
+    :tell,
+    :statement,
+    :ask,
+    :ask_info,
+    :question
   ]
 
   @spec generate(String.t(), map(), map(), map()) ::
           {:ok, String.t(), map()} | :not_applicable
-  def generate(user_text, %{risk_bucket: :low} = features,
-               %{action: action} = decision, si)
+  def generate(user_text, %{risk_bucket: :low} = features, %{action: action} = decision, si)
       when is_binary(user_text) and is_map(si) and
              action in [:answer, :offer_options, :act_first, :ask_first] do
     # Exact temporal operations revalidate the saved meaning and the live
@@ -37,10 +53,9 @@ defmodule Core.Response.SymbolicGeneration do
 
   def generate(_text, _features, _decision, _si), do: :not_applicable
 
-  defp generate_ordinary(user_text, %{risk_bucket: :low, intent: intent},
-                         %{action: action}, si)
+  defp generate_ordinary(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
        when intent in @social_intents and
-            action in [:answer, :offer_options, :act_first] do
+              action in [:answer, :offer_options, :act_first] do
     case social_realization(user_text, si) do
       {:ok, _, _} = realized ->
         realized
@@ -57,8 +72,21 @@ defmodule Core.Response.SymbolicGeneration do
 
               :not_applicable ->
                 case maybe_realize_compositional_event(user_text, intent, si) do
-                  {:ok, _, _} = event -> event
-                  :not_applicable -> maybe_realize_report(user_text, intent, si)
+                  {:ok, _, _} = event ->
+                    event
+
+                  :not_applicable ->
+                    case maybe_realize_provisional_past_pronoun(
+                           user_text,
+                           intent,
+                           si
+                         ) do
+                      {:ok, _, _} = provisional ->
+                        provisional
+
+                      :not_applicable ->
+                        maybe_realize_report(user_text, intent, si)
+                    end
                 end
             end
         end
@@ -70,9 +98,13 @@ defmodule Core.Response.SymbolicGeneration do
   defp social_realization(user_text, si) do
     case Map.get(si, :speech_act_frame) do
       %{
-        version: 1, speech_act: act, speaker: :user,
-        addressee: addressee, temporal_anchor: anchor,
-        lexical_evidence: lexical, source_text: ^user_text
+        version: 1,
+        speech_act: act,
+        speaker: :user,
+        addressee: addressee,
+        temporal_anchor: anchor,
+        lexical_evidence: lexical,
+        source_text: ^user_text
       } = frame
       when act in [:greeting, :gratitude, :farewell, :wellbeing_query] and
              addressee in [:self, :unspecified] and is_map(lexical) ->
@@ -94,16 +126,21 @@ defmodule Core.Response.SymbolicGeneration do
          level: :canonical_lifg_selection,
          status: :provisional,
          witness: %{id: "hello|interjection|1", token_index: 0}
-       }), do: true
+       }),
+       do: true
 
   defp supported_lexical_evidence?(_act, %{
-         level: :surface_only, status: :provisional, witness: nil
-       }), do: true
+         level: :surface_only,
+         status: :provisional,
+         witness: nil
+       }),
+       do: true
 
   defp supported_lexical_evidence?(_, _), do: false
 
   defp social_provenance(frame) do
     lexical = frame.lexical_evidence
+
     provenance =
       case {frame.speech_act, lexical.level} do
         {:greeting, :surface_only} -> :surface_greeting
@@ -155,26 +192,31 @@ defmodule Core.Response.SymbolicGeneration do
          %{compositional_evidence: evidence} = meaning <-
            Map.get(si, :sentence_meaning),
          ^meaning <- SentenceMeaning.build(si),
-         %{kind: :nominal_property, formally_verified?: true,
-           factual_authority?: false} <- evidence,
-         {:ok, %{kind: :nominal_property,
-           construction: :stacked_adjective_noun,
-           result: result, quantifier_applied?: false,
-           factual_authority?: false} = proof} <- Composition.verified(si),
+         %{kind: :nominal_property, formally_verified?: true, factual_authority?: false} <-
+           evidence,
+         {:ok,
+          %{
+            kind: :nominal_property,
+            construction: :stacked_adjective_noun,
+            result: result,
+            quantifier_applied?: false,
+            factual_authority?: false
+          } = proof} <- Composition.verified(si),
          {:ok, description} <- nominal_description(result) do
-      {:ok, "You're describing a #{description}. What would you like to know about it?", %{
-        status: :symbolic_realized,
-        speech_act: :clarify_nominal_fragment,
-        interpreted_speech_act: :nominal_fragment,
-        provenance: :revalidated_nominal_composition,
-        construction: proof.construction,
-        proof_steps: length(proof.steps),
-        compositional_proof_verified?: true,
-        exact_dictionary_sense_verified?: false,
-        referent_verified?: false,
-        factual_claims?: false,
-        llm_called?: false
-      }}
+      {:ok, "You're describing a #{description}. What would you like to know about it?",
+       %{
+         status: :symbolic_realized,
+         speech_act: :clarify_nominal_fragment,
+         interpreted_speech_act: :nominal_fragment,
+         provenance: :revalidated_nominal_composition,
+         construction: proof.construction,
+         proof_steps: length(proof.steps),
+         compositional_proof_verified?: true,
+         exact_dictionary_sense_verified?: false,
+         referent_verified?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
     else
       _ -> :not_applicable
     end
@@ -185,10 +227,10 @@ defmodule Core.Response.SymbolicGeneration do
   defp nominal_description(
          {:lambda, variable, :entity,
           {:and,
-           {:and, {:predicate, noun, {:var, noun_var}},
-                  {:predicate, inner, {:var, inner_var}}},
+           {:and, {:predicate, noun, {:var, noun_var}}, {:predicate, inner, {:var, inner_var}}},
            {:predicate, outer, {:var, outer_var}}}}
-       ) when is_binary(variable) and noun_var == variable and
+       )
+       when is_binary(variable) and noun_var == variable and
               inner_var == variable and outer_var == variable do
     with {:ok, noun_word} <- Map.fetch(@nominal_nouns, noun),
          {:ok, inner_word} <- Map.fetch(@nominal_adjectives, inner),
@@ -208,8 +250,12 @@ defmodule Core.Response.SymbolicGeneration do
   @event_landmarks %{tree: "tree", table: "table", fence: "fence"}
   @event_activities %{sit: "sitting", sleep: "sleeping"}
   @event_static_relations %{
-    on: "on", in: "in", under: "under", beside: "beside",
-    above: "above", below: "below"
+    on: "on",
+    in: "in",
+    under: "under",
+    beside: "beside",
+    above: "above",
+    below: "below"
   }
 
   # A clarification needs both speaker claims revalidated from the current
@@ -223,7 +269,9 @@ defmodule Core.Response.SymbolicGeneration do
 
   defp maybe_realize_temporal_resolution_or_conflict(text, si) do
     case maybe_realize_temporal_resolution(text, si) do
-      {:ok, _, _} = acknowledgment -> acknowledgment
+      {:ok, _, _} = acknowledgment ->
+        acknowledgment
+
       :not_applicable ->
         case maybe_realize_temporal_conflict(text, si) do
           {:ok, _, _} = clarification -> clarification
@@ -234,17 +282,18 @@ defmodule Core.Response.SymbolicGeneration do
 
   defp maybe_realize_temporal_resolution(user_text, si) do
     with ^user_text <- Map.get(si, :sentence),
-         {:ok, %{
-           kind: :temporal_clarification_resolution,
-           operation: :select_intended_report_order,
-           chosen_report_seq: chosen,
-           pending_request_seq: pending,
-           speaker_attributed?: true,
-           contradiction_verified?: false,
-           event_occurrence_verified?: false,
-           actual_event_chronology_verified?: false,
-           factual_authority?: false
-         }} <- TemporalClarificationResolution.verified(si),
+         {:ok,
+          %{
+            kind: :temporal_clarification_resolution,
+            operation: :select_intended_report_order,
+            chosen_report_seq: chosen,
+            pending_request_seq: pending,
+            speaker_attributed?: true,
+            contradiction_verified?: false,
+            event_occurrence_verified?: false,
+            actual_event_chronology_verified?: false,
+            factual_authority?: false
+          }} <- TemporalClarificationResolution.verified(si),
          true <- is_integer(chosen) and chosen > 0,
          true <- is_integer(pending) and pending > chosen do
       {:ok,
@@ -271,19 +320,24 @@ defmodule Core.Response.SymbolicGeneration do
 
   defp maybe_realize_temporal_conflict(user_text, si) do
     with ^user_text <- Map.get(si, :sentence),
-         {:ok, %{kind: :temporal_claim_conflict_question,
-           operation: :clarify_opposing_temporal_reports,
-           conflict_evidence: %{
-             kind: :candidate_temporal_order_conflict,
-             older_report: older, newer_report: newer,
-             report_order: :verified_from_session_sequence,
-             occurrence_identity: :unresolved,
-             event_occurrence: :not_established,
-             actual_event_chronology: :not_established,
-             contradiction_verified?: false,
-             report_evidence_qualified?: true,
-             factual_authority?: false
-           }, factual_authority?: false}} <-
+         {:ok,
+          %{
+            kind: :temporal_claim_conflict_question,
+            operation: :clarify_opposing_temporal_reports,
+            conflict_evidence: %{
+              kind: :candidate_temporal_order_conflict,
+              older_report: older,
+              newer_report: newer,
+              report_order: :verified_from_session_sequence,
+              occurrence_identity: :unresolved,
+              event_occurrence: :not_established,
+              actual_event_chronology: :not_established,
+              contradiction_verified?: false,
+              report_evidence_qualified?: true,
+              factual_authority?: false
+            },
+            factual_authority?: false
+          }} <-
            TemporalClaimReconciliation.verified(si),
          %{seq: earlier_seq, earlier: older_first, later: older_last} <- older,
          %{seq: later_seq, earlier: newer_first, later: newer_last} <- newer,
@@ -322,25 +376,26 @@ defmodule Core.Response.SymbolicGeneration do
   # evidence and the closed event vocabulary below.
   defp maybe_realize_temporal_memory_recall(user_text, si) do
     with ^user_text <- Map.get(si, :sentence),
-         {:ok, %{
-           kind: :temporal_preference_recall_question,
-           operation: :recall_intended_temporal_order,
-           temporal_evidence: %{
-             kind: :recalled_temporal_speaker_preference,
-             status: :revalidated_from_ledger,
-             chosen_report_seq: chosen,
-             resolution_seq: resolution,
-             earlier: earlier,
-             later: later,
-             speaker_attributed?: true,
-             event_identity_verified?: false,
-             event_occurrence_verified?: false,
-             actual_event_chronology_verified?: false,
-             contradiction_verified?: false,
-             factual_authority?: false
-           },
-           factual_authority?: false
-         }} <- TemporalMemoryRetrieval.verified(si),
+         {:ok,
+          %{
+            kind: :temporal_preference_recall_question,
+            operation: :recall_intended_temporal_order,
+            temporal_evidence: %{
+              kind: :recalled_temporal_speaker_preference,
+              status: :revalidated_from_ledger,
+              chosen_report_seq: chosen,
+              resolution_seq: resolution,
+              earlier: earlier,
+              later: later,
+              speaker_attributed?: true,
+              event_identity_verified?: false,
+              event_occurrence_verified?: false,
+              actual_event_chronology_verified?: false,
+              contradiction_verified?: false,
+              factual_authority?: false
+            },
+            factual_authority?: false
+          }} <- TemporalMemoryRetrieval.verified(si),
          true <- is_integer(chosen) and chosen > 0,
          true <- is_integer(resolution) and resolution > chosen,
          true <- earlier != later,
@@ -371,8 +426,10 @@ defmodule Core.Response.SymbolicGeneration do
   end
 
   defp temporal_claim_event_words(%{
-         actor_kind: actor, action: action,
-         relation: relation, landmark: landmark
+         actor_kind: actor,
+         action: action,
+         relation: relation,
+         landmark: landmark
        }) do
     with {:ok, subject} <- Map.fetch(@event_actors, actor),
          {:ok, activity} <- Map.fetch(@event_activities, action),
@@ -391,19 +448,25 @@ defmodule Core.Response.SymbolicGeneration do
   # of events, and the noun description remains an unresolved candidate.
   defp maybe_realize_temporal_report_order(user_text, si) do
     with ^user_text <- Map.get(si, :sentence),
-         {:ok, %{kind: :reported_event_order_question,
-           temporal_evidence: %{
-             order: :reported_before, antecedent: surface,
-             earlier: earlier, later: later,
-             same_actor_identity: :candidate_only,
-             actual_event_order: :not_established,
-             event_occurrence: :not_established,
-             factual_authority?: false
-           }}} <- Core.Semantic.TemporalEventComposition.verified(si),
+         {:ok,
+          %{
+            kind: :reported_event_order_question,
+            temporal_evidence: %{
+              order: :reported_before,
+              antecedent: surface,
+              earlier: earlier,
+              later: later,
+              same_actor_identity: :candidate_only,
+              actual_event_order: :not_established,
+              event_occurrence: :not_established,
+              factual_authority?: false
+            }
+          }} <- Core.Semantic.TemporalEventComposition.verified(si),
          %{head: noun, modifiers: [first, second]} <- nominal_words(surface),
          true <- noun in ["bird", "cat", "dog"],
-         true <- first in ["small", "black", "white"] and
-                   second in ["small", "black", "white"],
+         true <-
+           first in ["small", "black", "white"] and
+             second in ["small", "black", "white"],
          ^surface <- Enum.join([first, second, noun], " "),
          {:ok, first_event} <- temporal_event_words(earlier),
          {:ok, last_event} <- temporal_event_words(later) do
@@ -439,11 +502,15 @@ defmodule Core.Response.SymbolicGeneration do
       _ -> nil
     end
   end
+
   defp nominal_words(_), do: nil
 
   defp temporal_event_words(%{
-         action: action, relation: relation, landmark: landmark,
-         event_existence: :not_asserted, factual_authority?: false
+         action: action,
+         relation: relation,
+         landmark: landmark,
+         event_existence: :not_asserted,
+         factual_authority?: false
        }) do
     with {:ok, activity} <- Map.fetch(@event_activities, action),
          {:ok, preposition} <- Map.fetch(@event_static_relations, relation),
@@ -453,6 +520,7 @@ defmodule Core.Response.SymbolicGeneration do
       _ -> :not_applicable
     end
   end
+
   defp temporal_event_words(_), do: :not_applicable
 
   # A cross-turn link is *provisional*, even though both its nominal
@@ -463,31 +531,43 @@ defmodule Core.Response.SymbolicGeneration do
        when intent in [:unknown, :tell, :statement] do
     with true <- Map.get(si, :source) in [:user, :prod, :test],
          ^user_text <- Map.get(si, :sentence),
-         %{kind: :anaphoric_spatial_report,
-           status: :provisional, factual_authority?: false} = meaning <-
-             Map.get(si, :sentence_meaning),
+         %{kind: :anaphoric_spatial_report, status: :provisional, factual_authority?: false} =
+           meaning <-
+           Map.get(si, :sentence_meaning),
          ^meaning <- SentenceMeaning.build(si),
          {:ok, ^meaning} <- DiscourseComposition.verified(si),
-         %{antecedent: %{head: head, modifiers: [first, second],
-                          description: description,
-                          referent_status: :candidate_same_session},
+         %{
+           antecedent: %{
+             head: head,
+             modifiers: [first, second],
+             description: description,
+             referent_status: :candidate_same_session
+           },
            event_semantics: %{
              aspect: :progressive,
              predicate: activity_kind,
              actor: %{kind: actor_kind, referent: :unresolved},
-             spatial: %{relation: relation, landmark_kind: landmark_kind,
-                        reading: :locative, arrival: :not_established},
+             spatial: %{
+               relation: relation,
+               landmark_kind: landmark_kind,
+               reading: :locative,
+               arrival: :not_established
+             },
              event_existence: :not_asserted
            },
            compositional_evidence: %{
              nominal_property: %{formally_verified?: true},
              event_property: %{formally_verified?: true},
-             typed_cross_turn_join: %{formally_verified?: true,
-               quantifier_applied?: false, referent_identity: :unresolved,
-               event_existence: :not_asserted},
+             typed_cross_turn_join: %{
+               formally_verified?: true,
+               quantifier_applied?: false,
+               referent_identity: :unresolved,
+               event_existence: :not_asserted
+             },
              typed_cross_turn_join_verified?: true,
              lexical_witnesses: witnesses
-           }} <- meaning,
+           }
+         } <- meaning,
          {:ok, actor} <- Map.fetch(@event_actors, actor_kind),
          ^actor <- head,
          true <- first in ["small", "black", "white"],
@@ -533,26 +613,36 @@ defmodule Core.Response.SymbolicGeneration do
          %{compositional_evidence: evidence} = meaning <-
            Map.get(si, :sentence_meaning),
          ^meaning <- SentenceMeaning.build(si),
-         %{kind: :progressive_event_property, formally_verified?: true,
-           factual_authority?: false, event_semantics: reported_semantics} <- evidence,
-         {:ok, %{kind: :progressive_event_property, status: :derived,
-           event_semantics: semantics, quantifier_applied?: false,
-           factual_authority?: false} = proof} <- Composition.verified(si),
+         %{
+           kind: :progressive_event_property,
+           formally_verified?: true,
+           factual_authority?: false,
+           event_semantics: reported_semantics
+         } <- evidence,
+         {:ok,
+          %{
+            kind: :progressive_event_property,
+            status: :derived,
+            event_semantics: semantics,
+            quantifier_applied?: false,
+            factual_authority?: false
+          } = proof} <- Composition.verified(si),
          true <- reported_semantics == semantics,
          {:ok, reply} <- describe_event(semantics) do
-      {:ok, reply, %{
-        status: :symbolic_realized,
-        speech_act: :acknowledge_user_report,
-        interpreted_speech_act: :assertion,
-        provenance: :revalidated_event_composition,
-        construction: proof.construction,
-        proof_steps: length(proof.steps),
-        compositional_proof_verified?: true,
-        event_occurrence_verified?: false,
-        response_is_memory_acknowledgment?: false,
-        factual_claims?: false,
-        llm_called?: false
-      }}
+      {:ok, reply,
+       %{
+         status: :symbolic_realized,
+         speech_act: :acknowledge_user_report,
+         interpreted_speech_act: :assertion,
+         provenance: :revalidated_event_composition,
+         construction: proof.construction,
+         proof_steps: length(proof.steps),
+         compositional_proof_verified?: true,
+         event_occurrence_verified?: false,
+         response_is_memory_acknowledgment?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
     else
       _ -> :not_applicable
     end
@@ -565,22 +655,28 @@ defmodule Core.Response.SymbolicGeneration do
          aspect: :progressive,
          predicate: predicate,
          actor: %{kind: actor_kind, referent: :unresolved},
-         spatial: %{relation: relation, landmark_kind: landmark_kind,
-                    reading: reading, arrival: :not_established},
+         spatial: %{
+           relation: relation,
+           landmark_kind: landmark_kind,
+           reading: reading,
+           arrival: :not_established
+         },
          event_existence: :not_asserted
        }) do
     with {:ok, actor} <- Map.fetch(@event_actors, actor_kind),
          {:ok, landmark} <- Map.fetch(@event_landmarks, landmark_kind) do
       case {predicate, relation, reading} do
         {:fly, :into, :directional} ->
-          {:ok, "You're describing a #{actor} flying into a #{landmark}. " <>
-            "The direction is expressed, but arrival and actual occurrence aren't established."}
+          {:ok,
+           "You're describing a #{actor} flying into a #{landmark}. " <>
+             "The direction is expressed, but arrival and actual occurrence aren't established."}
 
         {activity, spatial_relation, :locative} when activity in [:sit, :sleep] ->
           with {:ok, word} <- Map.fetch(@event_activities, activity),
                {:ok, prep} <- Map.fetch(@event_static_relations, spatial_relation) do
-            {:ok, "You're describing a #{actor} #{word} #{prep} a #{landmark}. " <>
-              "That's a spatial description, not independent proof the event occurred."}
+            {:ok,
+             "You're describing a #{actor} #{word} #{prep} a #{landmark}. " <>
+               "That's a spatial description, not independent proof the event occurred."}
           else
             _ -> :not_applicable
           end
@@ -594,6 +690,66 @@ defmodule Core.Response.SymbolicGeneration do
   end
 
   defp describe_event(_), do: :not_applicable
+  # A provisional grammatical interpretation can authorize a cautious
+  # acknowledgment, but not a factual claim or a memory acknowledgment.
+  defp maybe_realize_provisional_past_pronoun(user_text, intent, si)
+       when intent in [:unknown, :tell, :statement] do
+    with true <- Map.get(si, :source) in [:user, :prod, :test],
+         true <- Map.get(si, :intent) in [:unknown, :tell, :statement],
+         ^user_text <- Map.get(si, :sentence),
+         true <- not String.ends_with?(String.trim(user_text), "?"),
+         %{
+           kind: :structural_hypothesis,
+           status: :provisional,
+           source: :lifg_structural_competition,
+           source_frame: :finite_past_svo_candidate,
+           participants: %{
+             actor: %{
+               surface: actor,
+               referent: :unresolved
+             },
+             predicate: %{
+               surface: verb,
+               lemma: lemma,
+               tense: :past
+             },
+             patient: %{surface: patient}
+           },
+           unresolved: unresolved,
+           grounding: %{factual_authority?: false}
+         } = meaning <- Map.get(si, :sentence_meaning),
+         ^meaning <- SentenceMeaning.build(si),
+         true <- is_list(unresolved),
+         true <- :actor_referent in unresolved,
+         true <- :event_grounding in unresolved,
+         true <- Map.get(si, :episodic_candidates, []) == [],
+         true <- safe_parts?([actor, verb, lemma, patient]) do
+      reply =
+        "You're saying that #{actor} #{verb} #{patient}. " <>
+          "I can't tell who \"#{actor}\" refers to."
+
+      {:ok, reply,
+       %{
+         status: :symbolic_realized,
+         speech_act: :acknowledge_provisional_action,
+         interpreted_speech_act: :assertion,
+         source_frame: :finite_past_svo_candidate,
+         provenance: :revalidated_provisional_past_svo,
+         semantic_verified?: false,
+         event_occurrence_verified?: false,
+         referent_verified?: false,
+         exact_dictionary_sense_verified?: false,
+         response_is_memory_acknowledgment?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  defp maybe_realize_provisional_past_pronoun(_, _, _),
+    do: :not_applicable
 
   # No generic fallback to parroting text: only one verified participant event
   # may license a compositional response. Exact user report, LIFG/ATL
@@ -602,30 +758,36 @@ defmodule Core.Response.SymbolicGeneration do
        when intent in [:tell, :statement, :unknown] do
     with true <- Map.get(si, :source) in [:user, :prod, :test],
          ^user_text <- Map.get(si, :sentence),
-         %{version: 2, kind: :participant_assertion,
-           status: :structurally_interpreted, speech_act: :assertion,
-           polarity: :positive, source: :revalidated_episodic_projection,
-           grounding: %{external_facts: :not_checked}} = meaning <-
-             Map.get(si, :sentence_meaning),
+         %{
+           version: 2,
+           kind: :participant_assertion,
+           status: :structurally_interpreted,
+           speech_act: :assertion,
+           polarity: :positive,
+           source: :revalidated_episodic_projection,
+           grounding: %{external_facts: :not_checked}
+         } = meaning <-
+           Map.get(si, :sentence_meaning),
          ^meaning <- SentenceMeaning.build(si),
          %{source_frame: source_frame} <- EpisodicProjection.validated_participant(si),
          ^source_frame <- Map.get(meaning, :source_frame),
          {:ok, reply} <- compose_report(meaning) do
-      {:ok, reply, %{
-        status: :symbolic_realized,
-        speech_act: :acknowledge_user_report,
-        interpreted_speech_act: :assertion,
-        event_kind: meaning.event_type,
-        source_frame: source_frame,
-        provenance: :revalidated_episodic_projection,
-        evidence_level: :structurally_interpreted_not_verified,
-        semantic_verified?: false,
-        event_occurrence_verified?: false,
-        exact_verb_sense_verified?: false,
-        response_is_memory_acknowledgment?: false,
-        factual_claims?: false,
-        llm_called?: false
-      }}
+      {:ok, reply,
+       %{
+         status: :symbolic_realized,
+         speech_act: :acknowledge_user_report,
+         interpreted_speech_act: :assertion,
+         event_kind: meaning.event_type,
+         source_frame: source_frame,
+         provenance: :revalidated_episodic_projection,
+         evidence_level: :structurally_interpreted_not_verified,
+         semantic_verified?: false,
+         event_occurrence_verified?: false,
+         exact_verb_sense_verified?: false,
+         response_is_memory_acknowledgment?: false,
+         factual_claims?: false,
+         llm_called?: false
+       }}
     else
       _ -> :not_applicable
     end
@@ -634,22 +796,29 @@ defmodule Core.Response.SymbolicGeneration do
   defp maybe_realize_report(_text, _intent, _si), do: :not_applicable
 
   defp compose_report(%{
-         event_type: :action, source_frame: frame,
-         roles: %{actor: %{surface: actor},
-                  predicate: %{surface: verb},
-                  patient: %{surface: patient}}
-       }) when frame in [:finite_present_svo, :finite_past_svo] do
+         event_type: :action,
+         source_frame: frame,
+         roles: %{
+           actor: %{surface: actor},
+           predicate: %{surface: verb},
+           patient: %{surface: patient}
+         }
+       })
+       when frame in [:finite_present_svo, :finite_past_svo] do
     if safe_parts?([actor, verb, patient]),
       do: {:ok, "You're saying that #{actor} #{verb} #{patient}."},
       else: :not_applicable
   end
 
   defp compose_report(%{
-         event_type: :spatial, source_frame: :progressive_spatial,
-         roles: %{actor: %{surface: actor},
-                  predicate: %{surface: verb},
-                  position: %{surface: position},
-                  location: %{surface: location}}
+         event_type: :spatial,
+         source_frame: :progressive_spatial,
+         roles: %{
+           actor: %{surface: actor},
+           predicate: %{surface: verb},
+           position: %{surface: position},
+           location: %{surface: location}
+         }
        }) do
     if safe_parts?([actor, verb, position, location]),
       do: {:ok, "You're describing #{actor} as #{verb} #{position} #{location}."},
@@ -663,7 +832,9 @@ defmodule Core.Response.SymbolicGeneration do
       word when is_binary(word) ->
         byte_size(word) <= 120 and
           Regex.match?(~r/\A[\p{L}\p{N}][\p{L}\p{N} '\-]*\z/u, word)
-      _ -> false
+
+      _ ->
+        false
     end)
   end
 end

@@ -53,9 +53,12 @@ defmodule Core.Semantic.SentenceMeaning do
               _ -> false
             end)
 
-          if atl && is_map(roles), do: compose_question(frame, atl, frames, tokens, sentence), else: nil
+          if atl && is_map(roles),
+            do: compose_question(frame, atl, frames, tokens, sentence),
+            else: nil
 
-        _ -> nil
+        _ ->
+          nil
       end)
 
     # Preserve exactly what the user wrote; token reconstruction is only a
@@ -67,8 +70,12 @@ defmodule Core.Semantic.SentenceMeaning do
         |> then(fn meaning ->
           if get_in(meaning, [:proposition, :content, :complement, :argument, :type]) ==
                :unparsed_topic do
-            Map.update(meaning, :unresolved, [:topic_internal_structure],
-              &Enum.uniq(&1 ++ [:topic_internal_structure]))
+            Map.update(
+              meaning,
+              :unresolved,
+              [:topic_internal_structure],
+              &Enum.uniq(&1 ++ [:topic_internal_structure])
+            )
           else
             meaning
           end
@@ -90,7 +97,8 @@ defmodule Core.Semantic.SentenceMeaning do
         question || object_question(si, sentence, frames, constituents, tokens) ||
         participant_meaning(si, sentence) ||
         DiscourseComposition.build(si) ||
-        provisional_structure(si, sentence) || %{
+        provisional_structure(si, sentence) ||
+        %{
           version: 1,
           sentence: sentence,
           definition: nil,
@@ -106,9 +114,12 @@ defmodule Core.Semantic.SentenceMeaning do
   # independently replayed event/temporal proof and all lexical witnesses.
   # Do not let a partial single-clause compositional candidate overwrite it.
   defp attach_compositional_evidence(_si, %{kind: kind} = meaning)
-       when kind in [:explicit_temporal_report, :temporal_clarification_resolution,
-                     :temporal_claim_conflict_question,
-                     :temporal_preference_recall_question],
+       when kind in [
+              :explicit_temporal_report,
+              :temporal_clarification_resolution,
+              :temporal_claim_conflict_question,
+              :temporal_preference_recall_question
+            ],
        do: meaning
 
   # build/1 and attach/1 must agree exactly. Revalidate the current proof
@@ -132,11 +143,15 @@ defmodule Core.Semantic.SentenceMeaning do
     end
   end
 
-  def build(_), do: %{
-    version: 1, sentence: nil, definition: nil, kind: :unknown,
-    status: :not_yet_interpreted, source: :invalid_input
-  }
-
+  def build(_),
+    do: %{
+      version: 1,
+      sentence: nil,
+      definition: nil,
+      kind: :unknown,
+      status: :not_yet_interpreted,
+      source: :invalid_input
+    }
 
   # A preferred grammatical construction is meaningful *evidence* but not
   # authorization to assert an event. Keep its roles and alternatives visible
@@ -144,7 +159,7 @@ defmodule Core.Semantic.SentenceMeaning do
   defp provisional_structure(si, sentence) do
     case Core.Syntax.StructuralCompetition.verified(si) do
       {:ok, %{preferred: preferred, candidates: candidates}} ->
-        %{
+        hypothesis = %{
           version: 1,
           sentence: sentence,
           definition: nil,
@@ -153,13 +168,19 @@ defmodule Core.Semantic.SentenceMeaning do
           source: :lifg_structural_competition,
           source_frame: preferred.construction,
           roles: preferred.roles,
-          alternatives: Enum.map(candidates, fn candidate ->
-            %{construction: candidate.construction,
-              compatibility: candidate.compatibility,
-              conflicting_roles: candidate.conflicting_roles}
-          end),
-          unresolved: [:semantic_role_binding, :event_grounding,
-                       :exact_dictionary_senses],
+          alternatives:
+            Enum.map(candidates, fn candidate ->
+              %{
+                construction: candidate.construction,
+                compatibility: candidate.compatibility,
+                conflicting_roles: candidate.conflicting_roles
+              }
+            end),
+          unresolved: [
+            :semantic_role_binding,
+            :event_grounding,
+            :exact_dictionary_senses
+          ],
           grounding: %{
             grammatical_roles: :preferred_signature_hypothesis,
             external_facts: :not_checked,
@@ -167,8 +188,161 @@ defmodule Core.Semantic.SentenceMeaning do
           }
         }
 
+        case provisional_past_pronoun_participants(
+               si,
+               sentence,
+               preferred
+             ) do
+          {:ok, participants} ->
+            hypothesis
+            |> Map.put(:participants, participants)
+            |> Map.update!(:unresolved, fn reasons ->
+              [
+                :actor_referent
+                | Enum.reject(reasons, &(&1 == :semantic_role_binding))
+              ]
+            end)
+
+          :error ->
+            hypothesis
+        end
+
       :not_applicable ->
         nil
+    end
+  end
+
+  # A pronoun-subject clause may be structurally interpretable even when
+  # the actor's real-world identity is unknown. This is read-only and
+  # does not authorize episodic projection or factual claims.
+  defp provisional_past_pronoun_participants(
+         si,
+         sentence,
+         %{
+           construction: :finite_past_svo_candidate,
+           span: {0, 3},
+           roles: %{
+             subject_head: 0,
+             predicate: 1,
+             object_determiner: 2,
+             object_head: 3
+           }
+         }
+       )
+       when is_binary(sentence) do
+    tokens = indexed_base_tokens(Map.get(si, :tokens, []))
+
+    with true <- Map.get(si, :source) in [:user, :prod, :test],
+         {:ok, clause} <- surface_range(tokens, 0, 3),
+         true <-
+           String.downcase(String.trim(sentence)) in [
+             String.downcase(clause),
+             String.downcase(clause <> ".")
+           ],
+         {:ok, actor} <- surface_at(tokens, 0),
+         {:ok, predicate} <- surface_at(tokens, 1),
+         {:ok, determiner} <- surface_at(tokens, 2),
+         {:ok, object} <- surface_at(tokens, 3),
+         {:ok, actor_id} <-
+           provisional_selected_witness(si, 0, "pronoun", actor),
+         {:ok, predicate_id} <-
+           provisional_selected_witness(si, 1, "verb", predicate),
+         {:ok, determiner_id} <-
+           provisional_selected_witness(si, 2, "determiner", determiner),
+         {:ok, object_id} <-
+           provisional_selected_witness(si, 3, "noun", object),
+         true <-
+           object_roles_agree_with_winners?(si, %{
+             actor: %{token_index: 0, sense_id: actor_id},
+             predicate: %{token_index: 1, sense_id: predicate_id},
+             determiner: %{token_index: 2, sense_id: determiner_id},
+             patient: %{token_index: 3, sense_id: object_id}
+           }),
+         {:ok, lemma} <-
+           Core.Semantic.VerbLemma.canonical_past(
+             si,
+             %{id: predicate_id}
+           ) do
+      {:ok,
+       %{
+         actor: %{
+           surface: String.downcase(actor),
+           token_index: 0,
+           sense_id: actor_id,
+           referent: :unresolved
+         },
+         predicate: %{
+           surface: String.downcase(predicate),
+           lemma: lemma,
+           tense: :past,
+           token_index: 1,
+           sense_id: predicate_id
+         },
+         patient: %{
+           surface: String.downcase(determiner <> " " <> object),
+           span: {2, 3},
+           determiner_sense_id: determiner_id,
+           head_sense_id: object_id
+         }
+       }}
+    else
+      _ -> :error
+    end
+  end
+
+  defp provisional_past_pronoun_participants(_, _, _),
+    do: :error
+
+  # Require the exact current LIFG selection and a matching dictionary
+  # cell. The separate ATL check above must also agree with the selection.
+  defp provisional_selected_witness(si, index, pos, surface) do
+    selected =
+      si
+      |> Map.get(:lifg_choices, [])
+      |> List.wrap()
+      |> Enum.filter(fn
+        %{token_index: ^index} -> true
+        _ -> false
+      end)
+
+    case selected do
+      [choice] ->
+        id = Map.get(choice, :id) || Map.get(choice, :chosen_id)
+
+        case id do
+          id when is_binary(id) ->
+            case String.split(id, "|", parts: 3) do
+              [norm, ^pos, _sense] ->
+                cells = List.wrap(Map.get(si, :active_cells))
+
+                witnessed? =
+                  Enum.any?(cells, fn
+                    %{id: ^id, pos: ^pos, norm: cell_norm}
+                    when is_binary(cell_norm) ->
+                      String.downcase(cell_norm) ==
+                        String.downcase(surface)
+
+                    _ ->
+                      false
+                  end)
+
+                if String.downcase(norm) ==
+                     String.downcase(surface) and witnessed? do
+                  {:ok, id}
+                else
+                  :error
+                end
+
+              _ ->
+                :error
+            end
+
+          _ ->
+            :error
+        end
+
+      _ ->
+        :error
     end
   end
 
@@ -193,7 +367,8 @@ defmodule Core.Semantic.SentenceMeaning do
           source: :semantic_frame_unifier
         }
 
-      _ -> nil
+      _ ->
+        nil
     end
   end
 
@@ -232,9 +407,12 @@ defmodule Core.Semantic.SentenceMeaning do
               status:
                 if(match?(%{status: :resolved}, atl),
                   do: :modal_conditional_atl_resolved,
-                  else: if(is_map(atl),
-                    do: :modal_conditional_roles_unresolved,
-                    else: :modal_conditional_signature_detected)),
+                  else:
+                    if(is_map(atl),
+                      do: :modal_conditional_roles_unresolved,
+                      else: :modal_conditional_signature_detected
+                    )
+                ),
               span: span,
               role_indices: roles,
               unresolved_roles: unresolved,
@@ -247,65 +425,89 @@ defmodule Core.Semantic.SentenceMeaning do
         end
 
       %{span: {first, last}, roles: roles} when is_map(roles) ->
-        atl = Enum.find(constituents, fn constituent ->
-          Map.get(constituent, :id) == :wh_aux_topic_question and
-            Map.get(constituent, :span) == {first, last} and
-            Map.get(constituent, :status) == :resolved
-        end)
+        atl =
+          Enum.find(constituents, fn constituent ->
+            Map.get(constituent, :id) == :wh_aux_topic_question and
+              Map.get(constituent, :span) == {first, last} and
+              Map.get(constituent, :status) == :resolved
+          end)
 
         required = [:wh, :auxiliary, :subject, :predicate, :preposition]
-        missing_frame = Enum.reject(required, &(is_integer(Map.get(roles, &1))))
+        missing_frame = Enum.reject(required, &is_integer(Map.get(roles, &1)))
         atl_roles = if is_map(atl), do: Map.get(atl, :roles) || %{}, else: %{}
-        missing_atl = Enum.reject(required, fn key ->
-          match?(%{sense_id: id} when is_binary(id), Map.get(atl_roles, key))
-        end)
+
+        missing_atl =
+          Enum.reject(required, fn key ->
+            match?(%{sense_id: id} when is_binary(id), Map.get(atl_roles, key))
+          end)
+
         prep = Map.get(roles, :preposition)
+
         topic_span =
           if is_integer(prep), do: last - prep, else: nil
 
         surface_gaps =
-          if is_map(atl) and missing_frame == [] and missing_atl == [] and last > prep and topic_span <= @max_topic_tokens do
-            indices = Enum.map(required, &Map.fetch!(roles, &1)) ++
-              Enum.to_list((prep + 1)..last)
+          if is_map(atl) and missing_frame == [] and missing_atl == [] and last > prep and
+               topic_span <= @max_topic_tokens do
+            indices =
+              Enum.map(required, &Map.fetch!(roles, &1)) ++
+                Enum.to_list((prep + 1)..last)
+
             Enum.filter(indices, &(not match?({:ok, _}, surface_at(indexed, &1))))
           else
             []
           end
 
         cond do
-          is_nil(atl) -> %{status: :atl_constituent_unresolved}
-          missing_frame != [] -> %{status: :missing_grammar_roles, roles: missing_frame}
-          missing_atl != [] -> %{status: :missing_atl_role_senses, roles: missing_atl}
+          is_nil(atl) ->
+            %{status: :atl_constituent_unresolved}
+
+          missing_frame != [] ->
+            %{status: :missing_grammar_roles, roles: missing_frame}
+
+          missing_atl != [] ->
+            %{status: :missing_atl_role_senses, roles: missing_atl}
+
           not (is_integer(prep) and last > prep and topic_span <= @max_topic_tokens) ->
             %{status: :topic_span_out_of_bounds, span_tokens: topic_span}
+
           surface_gaps != [] and
-              match?({:ok, _}, question_topic_surface(indexed, prep + 1, last, Map.get(si, :sentence))) ->
+              match?(
+                {:ok, _},
+                question_topic_surface(indexed, prep + 1, last, Map.get(si, :sentence))
+              ) ->
             %{status: :punctuation_gap_witnessed, indices: Enum.take(surface_gaps, 16)}
+
           surface_gaps != [] ->
-            %{status: :missing_token_surfaces,
+            %{
+              status: :missing_token_surfaces,
               indices: Enum.take(surface_gaps, 16),
               available_indices: indexed |> Map.keys() |> Enum.sort() |> Enum.take(64),
-              missing_context: Enum.map(Enum.take(surface_gaps, 16), fn index ->
-                left = Map.get(indexed, index - 1)
-                right = Map.get(indexed, index + 1)
+              missing_context:
+                Enum.map(Enum.take(surface_gaps, 16), fn index ->
+                  left = Map.get(indexed, index - 1)
+                  right = Map.get(indexed, index + 1)
 
-                between =
-                  if is_binary(left) and is_binary(right) and is_binary(Map.get(si, :sentence)) do
-                    expression = Regex.compile!(
-                      Regex.escape(left) <> "(.{0,80}?)" <> Regex.escape(right), "ius"
-                    )
+                  between =
+                    if is_binary(left) and is_binary(right) and is_binary(Map.get(si, :sentence)) do
+                      expression =
+                        Regex.compile!(
+                          Regex.escape(left) <> "(.{0,80}?)" <> Regex.escape(right),
+                          "ius"
+                        )
 
-                    case Regex.run(expression, Map.get(si, :sentence)) do
-                      [_, gap] -> gap
-                      _ -> nil
+                      case Regex.run(expression, Map.get(si, :sentence)) do
+                        [_, gap] -> gap
+                        _ -> nil
+                      end
+                    else
+                      nil
                     end
-                  else
-                    nil
-                  end
 
-                %{index: index, preceding: left, following: right,
-                  original_between: between}
-              end)}
+                  %{index: index, preceding: left, following: right, original_between: between}
+                end)
+            }
+
           true ->
             %{status: :eligible_for_composition, note: :inspect_remaining_guards}
         end
@@ -321,9 +523,15 @@ defmodule Core.Semantic.SentenceMeaning do
   # This is a question about a relation, NOT evidence that the action occurred.
   # The complete Core syntax signature, resolved ATL roles and independent POS
   # adjudication must agree before we issue a structural interpretation.
-  @object_question_evidence [:wh_fronted, :auxiliary_inversion,
-    :bounded_determiner_surface, :attested_nominal_subject,
-    :lexical_verb_available, :question_punctuation, :contiguous_surface]
+  @object_question_evidence [
+    :wh_fronted,
+    :auxiliary_inversion,
+    :bounded_determiner_surface,
+    :attested_nominal_subject,
+    :lexical_verb_available,
+    :question_punctuation,
+    :contiguous_surface
+  ]
 
   defp object_question(si, sentence, frames, constituents, indexed)
        when is_binary(sentence) and is_list(frames) and is_list(constituents) and
@@ -332,14 +540,24 @@ defmodule Core.Semantic.SentenceMeaning do
          Enum.sort(Map.keys(indexed)) == Enum.to_list(0..4) do
       questions =
         Enum.filter(frames, fn
-          %{id: :wh_aux_object_question, source: :core_syntax,
-            span: {0, 4}, roles: %{
-              wh: 0, auxiliary: 1, subject_determiner: 2,
-              subject_head: 3, predicate: 4}, evidence: evidence}
+          %{
+            id: :wh_aux_object_question,
+            source: :core_syntax,
+            span: {0, 4},
+            roles: %{
+              wh: 0,
+              auxiliary: 1,
+              subject_determiner: 2,
+              subject_head: 3,
+              predicate: 4
+            },
+            evidence: evidence
+          }
           when is_list(evidence) ->
             Enum.all?(@object_question_evidence, &(&1 in evidence))
 
-          _ -> false
+          _ ->
+            false
         end)
 
       case questions do
@@ -360,11 +578,14 @@ defmodule Core.Semantic.SentenceMeaning do
   end
 
   defp compose_object_question(si, sentence, _frame, constituents, indexed) do
-    question_constituents = Enum.filter(constituents, fn
-      %{id: :wh_aux_object_question, span: {0, 4}, status: :resolved,
-        unresolved_roles: []} -> true
-      _ -> false
-    end)
+    question_constituents =
+      Enum.filter(constituents, fn
+        %{id: :wh_aux_object_question, span: {0, 4}, status: :resolved, unresolved_roles: []} ->
+          true
+
+        _ ->
+          false
+      end)
 
     role_competition =
       case Map.get(si, :role_competition) do
@@ -379,22 +600,42 @@ defmodule Core.Semantic.SentenceMeaning do
       end
 
     with [atl] <- question_constituents,
-         true <- Map.get(role_competition, :source) ==
-                   :core_syntax_and_attested_dictionary_pos,
-         %{status: :supported, pos: "noun", role: :subject_head,
-           basis: :determined_subject_in_wh_aux_question} <- Map.get(grammar_roles, 3),
-         %{status: :supported, pos: "verb", role: :predicate,
-           basis: :predicate_in_wh_aux_question} <- Map.get(grammar_roles, 4),
-         %{wh: wh, auxiliary: auxiliary, subject_determiner: determiner,
-           subject_head: subject, predicate: predicate} <- atl.roles,
-         true <- Enum.all?([wh, auxiliary, determiner, subject, predicate], fn
-           %{token_index: index, sense_id: id} when is_integer(index) and
-             is_binary(id) -> not String.ends_with?(id, "|fallback")
-           _ -> false
-         end),
-         true <- wh.token_index == 0 and auxiliary.token_index == 1 and
-                   determiner.token_index == 2 and subject.token_index == 3 and
-                   predicate.token_index == 4,
+         true <-
+           Map.get(role_competition, :source) ==
+             :core_syntax_and_attested_dictionary_pos,
+         %{
+           status: :supported,
+           pos: "noun",
+           role: :subject_head,
+           basis: :determined_subject_in_wh_aux_question
+         } <- Map.get(grammar_roles, 3),
+         %{
+           status: :supported,
+           pos: "verb",
+           role: :predicate,
+           basis: :predicate_in_wh_aux_question
+         } <- Map.get(grammar_roles, 4),
+         %{
+           wh: wh,
+           auxiliary: auxiliary,
+           subject_determiner: determiner,
+           subject_head: subject,
+           predicate: predicate
+         } <- atl.roles,
+         true <-
+           Enum.all?([wh, auxiliary, determiner, subject, predicate], fn
+             %{token_index: index, sense_id: id}
+             when is_integer(index) and
+                    is_binary(id) ->
+               not String.ends_with?(id, "|fallback")
+
+             _ ->
+               false
+           end),
+         true <-
+           wh.token_index == 0 and auxiliary.token_index == 1 and
+             determiner.token_index == 2 and subject.token_index == 3 and
+             predicate.token_index == 4,
          true <- object_roles_agree_with_winners?(si, atl.roles),
          {:ok, wh_surface} <- surface_at(indexed, 0),
          {:ok, auxiliary_surface} <- surface_at(indexed, 1),
@@ -406,23 +647,29 @@ defmodule Core.Semantic.SentenceMeaning do
          true <- String.downcase(reconstructed) == normalize_object_question(sentence) do
       roles = %{
         question_word: %{surface: wh_surface, token_index: 0, sense_id: wh.sense_id},
-        auxiliary: %{surface: auxiliary_surface, token_index: 1,
-          sense_id: auxiliary.sense_id},
-        subject: %{surface: subject_surface, span: {2, 3},
+        auxiliary: %{surface: auxiliary_surface, token_index: 1, sense_id: auxiliary.sense_id},
+        subject: %{
+          surface: subject_surface,
+          span: {2, 3},
           determiner_sense_id: determiner.sense_id,
           head_sense_id: subject.sense_id,
-          grounding_status: :structurally_bound_not_lexically_verified},
-        predicate: %{surface: predicate_surface, token_index: 4,
+          grounding_status: :structurally_bound_not_lexically_verified
+        },
+        predicate: %{
+          surface: predicate_surface,
+          token_index: 4,
           sense_id: predicate.sense_id,
-          grounding_status: :selected_not_contextually_verified},
+          grounding_status: :selected_not_contextually_verified
+        },
         object: %{role: :patient, status: :unbound}
       }
 
       meaning = %{
         version: 1,
         sentence: sentence,
-        definition: "The speaker asks for the object of predicate '#{predicate_surface}' " <>
-          "with subject '#{subject_surface}'.",
+        definition:
+          "The speaker asks for the object of predicate '#{predicate_surface}' " <>
+            "with subject '#{subject_surface}'.",
         kind: :wh_object_question,
         status: :structurally_interpreted,
         speech_act: :request_information,
@@ -449,6 +696,7 @@ defmodule Core.Semantic.SentenceMeaning do
   defp object_roles_agree_with_winners?(si, roles) do
     atl = Map.get(si, :atl_slate) || %{}
     winners = Map.get(atl, :winners)
+
     selections =
       case Map.get(si, :semantic_choices) do
         selected when is_list(selected) -> selected
@@ -466,7 +714,8 @@ defmodule Core.Semantic.SentenceMeaning do
                 (Map.get(selected, :id) || Map.get(selected, :chosen_id)) == sense_id
             end) == 1
 
-        _ -> false
+        _ ->
+          false
       end)
   end
 
@@ -475,45 +724,74 @@ defmodule Core.Semantic.SentenceMeaning do
   # lexical :understood and from any persistence acknowledgement.
   defp participant_meaning(si, sentence) when is_binary(sentence) do
     case EpisodicProjection.validated_participant(si) do
-      %{source_frame: frame, relation: relation,
-        value: patient, participants: %{
-          "actor" => actor, "predicate" => lemma,
-          "surface_predicate" => surface, "patient" => stored_patient,
+      %{
+        source_frame: frame,
+        relation: relation,
+        value: patient,
+        participants: %{
+          "actor" => actor,
+          "predicate" => lemma,
+          "surface_predicate" => surface,
+          "patient" => stored_patient,
           "tense" => tense
-        }} = event
-        when frame in [:finite_present_svo, :finite_past_svo] ->
+        }
+      } = event
+      when frame in [:finite_present_svo, :finite_past_svo] ->
         if ((frame == :finite_present_svo and tense == "present") or
-             (frame == :finite_past_svo and tense == "past")) and
+              (frame == :finite_past_svo and tense == "past")) and
              relation == "verb_" <> lemma and patient == stored_patient and
              participant_surface?([actor, lemma, surface, patient]) do
           roles = %{
             actor: surface_role(actor),
-            predicate: %{surface: surface, lemma: lemma,
-              grounding_status: :selected_not_contextually_verified},
+            predicate: %{
+              surface: surface,
+              lemma: lemma,
+              grounding_status: :selected_not_contextually_verified
+            },
             patient: surface_role(patient)
           }
 
-          participant_frame(sentence, event, :action, roles,
-            "The speaker reports that #{actor} #{surface} #{patient}.")
+          participant_frame(
+            sentence,
+            event,
+            :action,
+            roles,
+            "The speaker reports that #{actor} #{surface} #{patient}."
+          )
         end
 
-      %{source_frame: :progressive_spatial, relation: "spatial_state",
-        value: location, participants: %{
-          "actor" => actor, "predicate" => predicate, "aspect" => "progressive",
-          "position" => position, "location" => stored_location
-        }} = event ->
+      %{
+        source_frame: :progressive_spatial,
+        relation: "spatial_state",
+        value: location,
+        participants: %{
+          "actor" => actor,
+          "predicate" => predicate,
+          "aspect" => "progressive",
+          "position" => position,
+          "location" => stored_location
+        }
+      } = event ->
         if location == stored_location and
              participant_surface?([actor, predicate, position, location]) do
           roles = %{
             actor: surface_role(actor),
-            predicate: %{surface: predicate, aspect: :progressive,
-              grounding_status: :attested_form_not_sense_verified},
+            predicate: %{
+              surface: predicate,
+              aspect: :progressive,
+              grounding_status: :attested_form_not_sense_verified
+            },
             position: surface_role(position),
             location: surface_role(location)
           }
 
-          participant_frame(sentence, event, :spatial, roles,
-            "The speaker reports that #{actor} is #{predicate} #{position} #{location}.")
+          participant_frame(
+            sentence,
+            event,
+            :spatial,
+            roles,
+            "The speaker reports that #{actor} is #{predicate} #{position} #{location}."
+          )
         end
 
       _ ->
@@ -559,81 +837,119 @@ defmodule Core.Semantic.SentenceMeaning do
 
   defp compose_question(
          %{span: {start, last}, roles: roles},
-         atl, signatures, indexed, sentence
+         atl,
+         signatures,
+         indexed,
+         sentence
        )
        when is_integer(start) and is_integer(last) and is_map(roles) and
               is_map(atl) and is_map(indexed) do
-    with %{wh: wh, auxiliary: auxiliary, subject: subject,
-           predicate: predicate, preposition: prep} <- roles,
+    with %{
+           wh: wh,
+           auxiliary: auxiliary,
+           subject: subject,
+           predicate: predicate,
+           preposition: prep
+         } <- roles,
          true <- Enum.all?([wh, auxiliary, subject, predicate, prep], &is_integer/1),
          true <- last > prep and last - prep <= @max_topic_tokens,
-         %{wh: %{sense_id: wh_id},
+         %{
+           wh: %{sense_id: wh_id},
            auxiliary: %{sense_id: aux_id},
            subject: %{sense_id: subject_id},
            predicate: %{sense_id: predicate_id},
-           preposition: %{sense_id: prep_id}} <- atl.roles,
-         true <- Enum.all?([wh_id, aux_id, subject_id, predicate_id, prep_id],
-           &is_binary/1),
+           preposition: %{sense_id: prep_id}
+         } <- atl.roles,
+         true <-
+           Enum.all?(
+             [wh_id, aux_id, subject_id, predicate_id, prep_id],
+             &is_binary/1
+           ),
          {:ok, topic} <- question_topic_surface(indexed, prep + 1, last, sentence),
          {:ok, wh_text} <- surface_at(indexed, wh),
          {:ok, aux_text} <- surface_at(indexed, auxiliary),
          {:ok, subject_text} <- surface_at(indexed, subject),
          {:ok, predicate_text} <- surface_at(indexed, predicate),
          {:ok, prep_text} <- surface_at(indexed, prep) do
-
       possessive =
         Enum.find_value(signatures, fn
-          %{id: :possessive_noun_phrase,
+          %{
+            id: :possessive_noun_phrase,
             span: {owner_start, owner_end},
             surface_possessor: owner,
-            roles: %{possessor: pos_index}}
+            roles: %{possessor: pos_index}
+          }
           when is_binary(owner) and owner_start > prep and
-               owner_end <= last and pos_index == owner_start ->
-            %{possessor: owner, token_index: pos_index,
+                 owner_end <= last and pos_index == owner_start ->
+            %{
+              possessor: owner,
+              token_index: pos_index,
               relation: :genitive_nominal_modifier,
-              grounding_status: :unverified}
+              grounding_status: :unverified
+            }
 
-          _ -> nil
+          _ ->
+            nil
         end)
 
       negation =
         case Map.get(roles, :negation) do
-          n when is_integer(n) -> case surface_at(indexed, n) do {:ok, text} -> text; _ -> nil end
-          _ -> nil
+          n when is_integer(n) ->
+            case surface_at(indexed, n) do
+              {:ok, text} -> text
+              _ -> nil
+            end
+
+          _ ->
+            nil
         end
 
       pred_modifier =
         case Map.get(roles, :predicate_modifier) do
-          n when is_integer(n) -> case surface_at(indexed, n) do {:ok, text} -> text; _ -> nil end
-          _ -> nil
+          n when is_integer(n) ->
+            case surface_at(indexed, n) do
+              {:ok, text} -> text
+              _ -> nil
+            end
+
+          _ ->
+            nil
         end
 
       wh_modifier =
         case Map.get(roles, :wh_modifier) do
-          n when is_integer(n) -> case surface_at(indexed, n) do {:ok, text} -> text; _ -> nil end
-          _ -> nil
+          n when is_integer(n) ->
+            case surface_at(indexed, n) do
+              {:ok, text} -> text
+              _ -> nil
+            end
+
+          _ ->
+            nil
         end
 
       definition =
         definition(%{
-          question: wh_text, auxiliary: aux_text, subject: subject_text,
-          predicate: predicate_text, preposition: prep_text, topic: topic,
-          negation: negation, predicate_modifier: pred_modifier,
+          question: wh_text,
+          auxiliary: aux_text,
+          subject: subject_text,
+          predicate: predicate_text,
+          preposition: prep_text,
+          topic: topic,
+          negation: negation,
+          predicate_modifier: pred_modifier,
           wh_modifier: wh_modifier
         })
 
       negative_auxiliary? = negative_auxiliary?(aux_text)
-      polarity = if(is_binary(negation) or negative_auxiliary?,
-        do: :negative, else: :positive)
+      polarity = if(is_binary(negation) or negative_auxiliary?, do: :negative, else: :positive)
 
       operators = %{
-        polarity: %{value: polarity, scope: :predicate,
-          source: :sentence_signature_and_atl},
+        polarity: %{value: polarity, scope: :predicate, source: :sentence_signature_and_atl},
         auxiliary_negation?: negative_auxiliary?,
         negation: optional_role(roles, atl.roles, indexed, :negation),
         question_modifier: optional_role(roles, atl.roles, indexed, :wh_modifier),
-        predicate_modifier:
-          optional_role(roles, atl.roles, indexed, :predicate_modifier)
+        predicate_modifier: optional_role(roles, atl.roles, indexed, :predicate_modifier)
       }
 
       %{
@@ -646,20 +962,23 @@ defmodule Core.Semantic.SentenceMeaning do
         polarity: polarity,
         operators: operators,
         roles: %{
-          question_word: %{surface: wh_text, token_index: wh,
-            sense_id: wh_id},
-          auxiliary: %{surface: aux_text, token_index: auxiliary,
-            sense_id: aux_id},
-          subject: %{surface: subject_text, token_index: subject,
+          question_word: %{surface: wh_text, token_index: wh, sense_id: wh_id},
+          auxiliary: %{surface: aux_text, token_index: auxiliary, sense_id: aux_id},
+          subject: %{
+            surface: subject_text,
+            token_index: subject,
             sense_id: subject_id,
-            reference: if(String.downcase(subject_text) == "you",
-              do: :addressee, else: :unspecified)},
-          predicate: %{surface: predicate_text, token_index: predicate,
-            sense_id: predicate_id},
-          preposition: %{surface: prep_text, token_index: prep,
-            sense_id: prep_id},
-          topic: %{surface: topic, span: {prep + 1, last},
-            possession: possessive, grounding_status: :not_fully_verified}
+            reference:
+              if(String.downcase(subject_text) == "you", do: :addressee, else: :unspecified)
+          },
+          predicate: %{surface: predicate_text, token_index: predicate, sense_id: predicate_id},
+          preposition: %{surface: prep_text, token_index: prep, sense_id: prep_id},
+          topic: %{
+            surface: topic,
+            span: {prep + 1, last},
+            possession: possessive,
+            grounding_status: :not_fully_verified
+          }
         },
         unresolved: if(possessive, do: [:topic_possessor_lexical_grounding], else: []),
         grounding: %{
@@ -683,29 +1002,42 @@ defmodule Core.Semantic.SentenceMeaning do
       {index, %{token_index: resolved_index, sense_id: id}}
       when is_integer(index) and index == resolved_index and is_binary(id) ->
         case surface_at(tokens, index) do
-          {:ok, surface} -> %{
-            surface: surface, token_index: index, sense_id: id,
-            grounding_status: :selected_not_contextually_verified
-          }
-          _ -> nil
+          {:ok, surface} ->
+            %{
+              surface: surface,
+              token_index: index,
+              sense_id: id,
+              grounding_status: :selected_not_contextually_verified
+            }
+
+          _ ->
+            nil
         end
 
-      _ -> nil
+      _ ->
+        nil
     end
   end
 
   defp negative_auxiliary?(surface) when is_binary(surface) do
     word = String.downcase(surface)
+
     String.contains?(word, "n't") or String.contains?(word, "n’t") or
       word == "cannot"
   end
 
   defp negative_auxiliary?(_), do: false
 
-
-
-  defp definition(%{question: question, auxiliary: aux, subject: subject,
-                     predicate: predicate, preposition: prep, topic: topic} = parts) do
+  defp definition(
+         %{
+           question: question,
+           auxiliary: aux,
+           subject: subject,
+           predicate: predicate,
+           preposition: prep,
+           topic: topic
+         } = parts
+       ) do
     subject_low = String.downcase(subject)
     wh_modifier = Map.get(parts, :wh_modifier)
     negation = Map.get(parts, :negation)
@@ -719,8 +1051,10 @@ defmodule Core.Semantic.SentenceMeaning do
       # no separate lexical proposition. Do not try to inflect 3rd-person verbs.
       clause =
         if is_negative do
-          Enum.reject([subject, aux, negation, modifier, predicate, prep, topic],
-            &is_nil/1)
+          Enum.reject(
+            [subject, aux, negation, modifier, predicate, prep, topic],
+            &is_nil/1
+          )
         else
           Enum.reject([subject, modifier, predicate, prep, topic], &is_nil/1)
         end
@@ -765,7 +1099,8 @@ defmodule Core.Semantic.SentenceMeaning do
           cleaned -> {:ok, cleaned}
         end
 
-      _ -> :error
+      _ ->
+        :error
     end
   end
 
@@ -783,10 +1118,12 @@ defmodule Core.Semantic.SentenceMeaning do
       Enum.all?(gaps, fn index ->
         with {:ok, left} <- surface_at(indexed, index - 1),
              {:ok, right} <- surface_at(indexed, index + 1) do
-          pattern = Regex.compile!(
-            Regex.escape(left) <> ~S(\s*\p{P}+\s*) <> Regex.escape(right),
-            "iu"
-          )
+          pattern =
+            Regex.compile!(
+              Regex.escape(left) <> ~S(\s*\p{P}+\s*) <> Regex.escape(right),
+              "iu"
+            )
+
           Regex.match?(pattern, sentence)
         else
           _ -> false
