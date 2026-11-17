@@ -780,6 +780,10 @@ Deliverables:
 - [ ] Ensure all WM ingress paths obey the same canonical gate.
 - [ ] Ensure Hippocampus/recall ingress obeys the canonical gate.
 - [ ] Ensure Curiosity/Thalamus/DLPFC ingress obeys the canonical gate.
+- [x] Add production-source AST writer-inventory tripwire, a documented
+  writer review list, and synthetic unreviewed-writer regression tests
+  (local execution pending; docs/operational_v1_wm_ingress_inventory.md).
+  This guards recognized source patterns and is not exhaustive runtime proof.
 - [ ] Tests proving no path bypasses the canonical gate.
 - [ ] Tests proving self-state modulation cannot bypass hard evidence/rule gates.
 - [ ] Preserve bounded scores and telemetry across all gate paths.
