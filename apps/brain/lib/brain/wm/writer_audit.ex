@@ -12,7 +12,11 @@ defmodule Brain.WM.WriterAudit do
     "apps/brain/lib/brain/pipeline/lifg_stage1.ex" => %{map_put: 1},
     "apps/brain/lib/brain/wm/gate.ex" => %{map_put: 1},
     "apps/brain/lib/brain/wm/policy.ex" => %{map_put: 2},
-    "apps/brain/lib/brain/wm/admission.ex" => %{working_memory_upsert: 2}
+    "apps/brain/lib/brain/wm/admission.ex" => %{working_memory_upsert: 2},
+    # A literal empty-map default in LiveView component assigns, not a
+    # Brain GenServer state mutation. Keep it listed, never silently ignore it.
+    "apps/symbrella_web/lib/symbrella_web/components/brain/brain_panels.ex" =>
+      %{wm_empty_map_default: 1}
   }
 
   @doc "Reviewed mutation counts by production module. Changes require explicit audit."
@@ -82,8 +86,12 @@ defmodule Brain.WM.WriterAudit do
         end)
 
       if observed == @expected do
+        default_count = Enum.count(events, &(&1.kind == :wm_empty_map_default))
+
         {:ok, %{status: :reviewed_static_inventory, files: map_size(@expected),
-                recognized_writes: length(events), events: events,
+                recognized_writes: length(events) - default_count,
+                reviewed_empty_map_defaults: default_count,
+                inspected_operations: length(events), events: events,
                 dynamic_bypass_excluded?: true, runtime_coverage_proven?: false}}
       else
         {:error, {:writer_inventory_changed, %{expected: @expected,
@@ -106,6 +114,13 @@ defmodule Brain.WM.WriterAudit do
     path = alias_parts(mod)
 
     cond do
+      # Distinguish an empty-map default assignment from replacing or
+      # inserting active Brain memory. This form remains on the allowlist;
+      # adding it to another module still fails verification.
+      path == [:Map] and function == :put_new and
+          wm_key_argument?(args) and empty_map_default?(args) ->
+        :wm_empty_map_default
+
       path == [:Map] and function in
           [:put, :put_new, :replace, :replace!, :update, :update!] and
           wm_key_argument?(args) ->
@@ -126,6 +141,13 @@ defmodule Brain.WM.WriterAudit do
   defp wm_key_argument?([_map, :wm | _]), do: true
   defp wm_key_argument?([:wm | _]), do: true
   defp wm_key_argument?(_), do: false
+
+  # Literal %{}/0 defaults, both direct and piped forms. The AST alone
+  # cannot prove the receiving map is a UI assign; only the reviewed path
+  # establishes why this specific occurrence is non-runtime.
+  defp empty_map_default?([_map, :wm, {:%{}, _, []}]), do: true
+  defp empty_map_default?([:wm, {:%{}, _, []}]), do: true
+  defp empty_map_default?(_), do: false
 
   defp alias_parts({:__aliases__, _, parts}) when is_list(parts), do: parts
   defp alias_parts(_), do: []
