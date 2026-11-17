@@ -13,7 +13,9 @@ case WriterAudit.verify(root) do
   {:ok, report} ->
     IO.puts("=== Phase 9A - Working Memory source-writer inventory ===")
     IO.puts("Status: #{report.status}")
-    IO.puts("Recognized production write sites: #{report.recognized_writes}")
+    IO.puts("Recognized Brain WM write operations: #{report.recognized_writes}")
+    IO.puts("Reviewed non-runtime empty-map defaults: #{report.reviewed_empty_map_defaults}")
+    IO.puts("Inspected WM-key operations: #{report.inspected_operations}")
     IO.puts("Reviewed modules: #{report.files}")
 
     Enum.each(report.events, fn item ->
