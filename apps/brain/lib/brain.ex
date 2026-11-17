@@ -243,6 +243,15 @@ defmodule Brain do
   def handle_call({:configure_wm, opts}, _from, state) do
     cfg2 = merge_wm_opts(state.wm_cfg, Map.new(opts))
     wm2 = WorkingMemory.trim(state.wm, cfg2.capacity)
+    removed = max(length(state.wm) - length(wm2), 0)
+
+    # Configuration changes can evict existing items. Report that retention
+    # mutation explicitly; it must never masquerade as new gate admission.
+    if removed > 0 do
+      emit_wm_update(cfg2.capacity, length(wm2), 0, removed, :configure_wm)
+      _ = safe_mood_update_wm(wm2)
+    end
+
     {:reply, :ok, %{state | wm_cfg: cfg2, wm: wm2}}
   end
 
