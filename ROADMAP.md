@@ -784,6 +784,9 @@ Deliverables:
   writer review list, and synthetic unreviewed-writer regression tests
   (local execution pending; docs/operational_v1_wm_ingress_inventory.md).
   This guards recognized source patterns and is not exhaustive runtime proof.
+- [x] Add runtime mutation-path assertions for Brain WM configuration eviction,
+  defocus, and Stage1 LIFG ingress; capacity eviction now emits removal-only
+  telemetry (local tests pending; see docs/operational_v1_wm_ingress_inventory.md).
 - [ ] Tests proving no path bypasses the canonical gate.
 - [ ] Tests proving self-state modulation cannot bypass hard evidence/rule gates.
 - [ ] Preserve bounded scores and telemetry across all gate paths.
