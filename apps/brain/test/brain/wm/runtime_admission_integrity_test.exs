@@ -134,7 +134,7 @@ defmodule Brain.WM.RuntimeAdmissionIntegrityTest do
     ids = ["#{prefix}-a", "#{prefix}-b"]
 
     wm = Brain.focus(Enum.map(ids, fn id ->
-      %{id: id, lemma: "candidate", score: 1.0, source: :intent}
+      %{id: id, lemma: id, score: 1.0, source: :intent}
     end))
 
     assert Enum.all?(ids, fn id -> Enum.any?(wm, &(&1.id == id)) end)
