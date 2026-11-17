@@ -325,12 +325,24 @@ defmodule Brain.BasalGanglia do
   defp fallback_id?(id) when is_binary(id), do: String.ends_with?(id, "|phrase|fallback")
   defp fallback_id?(_), do: false
 
+  @lexical_sense_id ~r/\A[^|\s]{1,128}\|[^|\s]{1,64}\|[0-9]+\z/u
+
   defp evidence_floor_for(cand, cfg) do
-    case source_key(Map.get(cand, :source)) do
-      "lifg" -> cfg.lifg_min_score
-      _ -> cfg.evidence_floor
+    # The generic evidence floor is always a floor, not a bypassable
+    # alternative. Dictionary-shaped sense IDs face the lexical floor
+    # regardless of a caller-supplied :source label.
+    if source_key(Map.get(cand, :source)) == "lifg" or
+         lexical_sense_id?(Map.get(cand, :id)) do
+      max(cfg.evidence_floor, cfg.lifg_min_score)
+    else
+      cfg.evidence_floor
     end
   end
+
+  defp lexical_sense_id?(id) when is_binary(id),
+    do: Regex.match?(@lexical_sense_id, id)
+
+  defp lexical_sense_id?(_), do: false
 
   defp source_bonus(boosts, source) when is_map(boosts) do
     source_key = source_key(source)
