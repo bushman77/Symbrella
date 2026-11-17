@@ -124,6 +124,101 @@ defmodule Brain.WM.RuntimeAdmissionIntegrityTest do
     refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
   end
 
+  test "configuration eviction only removes items and issues no new admission" do
+    original_cfg = Brain.snapshot_wm().cfg
+    on_exit(fn -> Brain.configure_wm(Map.to_list(original_cfg)) end)
+
+    assert :ok = Brain.configure_wm(capacity: 4)
+
+    prefix = "config-retention-#{System.unique_integer([:positive])}"
+    ids = ["#{prefix}-a", "#{prefix}-b"]
+
+    wm = Brain.focus(Enum.map(ids, fn id ->
+      %{id: id, lemma: "candidate", score: 1.0, source: :intent}
+    end))
+
+    assert Enum.all?(ids, fn id -> Enum.any?(wm, &(&1.id == id)) end)
+    assert_receive {:admission_event, [:brain, :gate, :decision], _,
+                    %{id: first, gate: :basal_ganglia, decision: decision}}
+    assert first in ids
+    assert decision in [:allow, :boost]
+    assert_receive {:admission_event, [:brain, :gate, :decision], _,
+                    %{id: second, gate: :basal_ganglia, decision: second_decision}}
+    assert second in ids
+    assert second != first
+    assert second_decision in [:allow, :boost]
+    assert_receive {:admission_event, [:brain, :wm, :update], %{added: added}, _}
+    assert added >= 2
+
+    assert :ok = Brain.configure_wm(capacity: 1)
+    snapshot = Brain.snapshot_wm()
+    assert snapshot.cfg.capacity == 1
+    assert length(snapshot.wm) == 1
+    assert hd(snapshot.wm).id in ids
+
+    assert_receive {:admission_event, [:brain, :wm, :update],
+                    %{size: 1, added: 0, removed: 1, capacity: 1},
+                    %{reason: :configure_wm}}
+    refute_receive {:admission_event, [:brain, :gate, :decision], _, _}, 30
+  end
+
+  test "defocus removes an admitted item without creating a second gate decision" do
+    id = "removal-only-#{System.unique_integer([:positive])}"
+    assert Enum.any?(Brain.focus([%{
+      id: id, lemma: "retention", score: 1.0, source: :intent
+    }]), &(&1.id == id))
+
+    assert_receive {:admission_event, [:brain, :gate, :decision], _,
+                    %{id: ^id, gate: :basal_ganglia, decision: decision}}
+    assert decision in [:allow, :boost]
+    assert_receive {:admission_event, [:brain, :wm, :update], %{added: 1}, _}
+
+    assert :ok = Brain.defocus(id)
+    refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
+
+    assert_receive {:admission_event, [:brain, :wm, :update],
+                    %{added: 0, removed: removed}, %{reason: :defocus}}
+    assert removed >= 1
+    refute_receive {:admission_event, [:brain, :gate, :decision], _, _}, 30
+  end
+
+  test "Stage1 with gating disabled makes no WM insertion, enabled path emits BG evidence" do
+    id = "Hello there|phrase|greeting"
+    si = %{
+      sentence: "Hello there",
+      tokens: [
+        %{index: 0, phrase: "Hello there", span: {0, 11},
+          kind: :word, pos: "phrase", n: 2, mw: true}
+      ],
+      sense_candidates: %{
+        0 => [%{id: id, lemma: "Hello there", pos: "phrase",
+                mw: true, score: 1.0}]
+      }
+    }
+
+    assert {:ok, _} = Brain.lifg_stage1(si, [],
+      gate_into_wm: false, scores: :all)
+    refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
+    refute_receive {:admission_event, [:brain, :gate, :decision], _, _}, 30
+    refute_receive {:admission_event, [:brain, :wm, :update], _, _}, 30
+
+    assert {:ok, %{choices: choices}} = Brain.lifg_stage1(si, [],
+      gate_into_wm: true, scores: :all, lifg_min_score: 0.6)
+    assert Enum.any?(choices, &(Map.get(&1, :chosen_id) == id))
+
+    assert_receive {:admission_event, [:brain, :gate, :decision],
+                    %{score: gate_score},
+                    %{id: ^id, source: :lifg, gate: :basal_ganglia,
+                      decision: decision}}, 1_000
+    assert gate_score >= 0.6
+    assert decision in [:allow, :boost]
+
+    assert_receive {:admission_event, [:brain, :wm, :update],
+                    %{added: added}, %{reason: :gate_from_lifg}}, 1_000
+    assert added >= 1
+    assert Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
+  end
+
   test "Stage2 linguistic commitment cannot bypass a stricter BG admission gate" do
     id = "stage2-block-#{System.unique_integer([:positive])}|noun|0"
 
