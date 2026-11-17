@@ -101,6 +101,7 @@ defmodule Brain.WM.Admission do
       Map.get(cand, :kind) == :comprehension_frame and
       is_map(context) and Map.get(context, :schema) == 1 and
       Map.get(context, :verification) == :conversation_context_only and
+      Map.get(context, :factual_authority?, false) == false and
       is_map(attn) and Map.get(attn, :scope) == :session and
       Map.get(attn, :verification) == :conversation_context_only and
       fresh_frame?(context, now)
