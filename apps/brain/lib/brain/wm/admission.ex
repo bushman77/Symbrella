@@ -51,31 +51,107 @@ defmodule Brain.WM.Admission do
   end
 
   defp admit_candidate(cand, {wm_acc, added, removed}, now, cfg, attn, self_state) do
-    {decision, score} = BasalGanglia.decide(wm_acc, cand, attn, cfg)
     self_state_bias = BasalGanglia.self_state_bias(self_state)
 
-    emit_gate_decision(cand, decision, score, self_state_bias, self_state)
+    # A source label alone never establishes a trusted semantic or conversation
+    # frame. Fail closed before scoring malformed privileged-source candidates.
+    # These checks validate structure, NOT independent proof authenticity.
+    if scoped_source_valid?(cand, now) do
+      {decision, score} = BasalGanglia.decide(wm_acc, cand, attn, cfg)
+      emit_gate_decision(cand, decision, score, self_state_bias, self_state)
 
-    case decision do
-      :block ->
-        {wm_acc, added, removed}
+      case decision do
+        :block ->
+          {wm_acc, added, removed}
 
-      :allow ->
-        item = WorkingMemory.normalize(cand, now, activation: score)
-        {WorkingMemory.upsert(wm_acc, item, cfg), added + 1, removed}
+        :allow ->
+          item = WorkingMemory.normalize(cand, now, activation: score)
+          {WorkingMemory.upsert(wm_acc, item, cfg), added + 1, removed}
 
-      :boost ->
-        item = WorkingMemory.normalize(cand, now, activation: min(score + 0.2, 1.0))
-        {WorkingMemory.upsert(wm_acc, item, cfg), added + 1, removed}
+        :boost ->
+          item = WorkingMemory.normalize(cand, now, activation: min(score + 0.2, 1.0))
+          {WorkingMemory.upsert(wm_acc, item, cfg), added + 1, removed}
+      end
+    else
+      emit_gate_decision(cand, :block, 0.0, self_state_bias, self_state,
+        :invalid_scoped_source_evidence)
+
+      {wm_acc, added, removed}
     end
   end
+
+  @scoped_id_suffix ~r/\A[0-9a-f]{32}\z/
+  @max_frame_age_ms 60_000
+
+  defp scoped_source_valid?(%{source: source} = cand, now) do
+    case scoped_source_key(source) do
+      "comprehension" -> comprehension_frame?(cand, now)
+      "verified_semantics" -> verified_semantic_frame?(cand, now)
+      _ -> true
+    end
+  end
+
+  defp scoped_source_valid?(_, _now), do: true
+
+  defp comprehension_frame?(cand, now) do
+    context = Map.get(cand, :context)
+    attn = if is_map(context), do: Map.get(context, :attention), else: nil
+
+    scoped_id?(Map.get(cand, :id), "comprehension") and
+      Map.get(cand, :kind) == :comprehension_frame and
+      is_map(context) and Map.get(context, :schema) == 1 and
+      Map.get(context, :verification) == :conversation_context_only and
+      is_map(attn) and Map.get(attn, :scope) == :session and
+      Map.get(attn, :verification) == :conversation_context_only and
+      fresh_frame?(context, now)
+  end
+
+  defp verified_semantic_frame?(cand, now) do
+    context = Map.get(cand, :context)
+    ids = if is_map(context), do: Map.get(context, :parent_proof_ids), else: nil
+
+    scoped_id?(Map.get(cand, :id), "verified_semantics") and
+      Map.get(cand, :kind) == :verified_semantic_frame and
+      Map.get(cand, :reason) == :source_revalidated_symbolic_comparison and
+      is_map(context) and Map.get(context, :schema) == 1 and
+      Map.get(context, :kind) == :verified_semantic_frame and
+      Map.get(context, :verification) == :source_supported and
+      Map.get(context, :proof_source) == :consolidated_conclusions and
+      Map.get(context, :factual_authority?) == false and
+      is_list(ids) and length(ids) in 1..2 and
+      Enum.all?(ids, &(is_integer(&1) and &1 > 0)) and
+      length(Enum.uniq(ids)) == length(ids) and
+      fresh_frame?(context, now)
+  end
+
+  defp scoped_id?(id, prefix) when is_binary(id) do
+    case String.split(id, ":", parts: 2) do
+      [^prefix, suffix] -> Regex.match?(@scoped_id_suffix, suffix)
+      _ -> false
+    end
+  end
+
+  defp scoped_id?(_, _), do: false
+
+  defp fresh_frame?(context, now) do
+    case Map.get(context, :updated_at_ms) do
+      ts when is_integer(ts) -> ts > 0 and ts <= now and now - ts <= @max_frame_age_ms
+      _ -> false
+    end
+  end
+
+  defp scoped_source_key(value) when is_atom(value), do: Atom.to_string(value)
+  defp scoped_source_key(value) when is_binary(value),
+    do: value |> String.trim() |> String.trim_leading(":")
+  defp scoped_source_key(_), do: ""
 
   defp trim_and_count({wm_tmp, added, removed}, capacity) do
     wm_trim = WorkingMemory.trim(wm_tmp, capacity)
     {wm_trim, added, removed + max(length(wm_tmp) - length(wm_trim), 0)}
   end
 
-  defp emit_gate_decision(cand, decision, score, self_state_bias, self_state) do
+  defp emit_gate_decision(cand, decision, score, self_state_bias, self_state,
+                      reason \\ nil) do
     :telemetry.execute(
       @gate_event,
       %{
@@ -88,7 +164,8 @@ defmodule Brain.WM.Admission do
         id: Map.get(cand, :id),
         token_index: Map.get(cand, :token_index),
         self_state_applied?: not is_nil(self_state),
-        gate: :basal_ganglia
+        gate: :basal_ganglia,
+        reason: reason
       }
     )
   end
