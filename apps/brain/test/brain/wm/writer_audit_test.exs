@@ -18,11 +18,14 @@ defmodule Brain.WM.WriterAuditTest do
     assert Enum.count(report.events, &(&1.kind == :map_update)) == 4
     assert Enum.all?(report.events, &(&1.line > 0))
 
-    assert WriterAudit.expected() ==
-      Enum.group_by(report.events, & &1.path)
+    observed =
+      report.events
+      |> Enum.group_by(& &1.path)
       |> Map.new(fn {path, rows} ->
         {path, Enum.frequencies_by(rows, & &1.kind)}
       end)
+
+    assert WriterAudit.expected() == observed
   end
 
   test "scanner detects direct and piped map writes, map updates, and upserts" do
