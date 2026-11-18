@@ -55,4 +55,32 @@ defmodule SymbrellaWeb.Components.Brain.AtlasEvidenceTest do
                is_binary(edge.call)
            end)
   end
+  test "bus receipts are distinct from telemetry and retain no envelope payload" do
+    env = %{kind: :ml_turn, region: "lifg", turn_id: "private", text: "do not retain"}
+    [observed] = AtlasEvidence.capture_bus([], env, @nodes, 1_700_000_000_000)
+
+    assert observed.region == :lifg
+    assert observed.kind == ":ml_turn"
+    assert observed.seen_at == "22:13:20 UTC"
+    refute Map.has_key?(observed, :turn_id)
+    refute Map.has_key?(observed, :text)
+
+    assert AtlasEvidence.capture_bus([], %{kind: :telemetry, event: @topic}, @nodes, 0) == []
+
+    [unattributed] =
+      AtlasEvidence.capture_bus([], %{kind: :ml_turn, region: :unknown}, @nodes, 0)
+
+    assert unattributed.region == nil
+  end
+
+  test "bus receipt history is bounded" do
+    events =
+      Enum.reduce(1..60, [], fn ms, acc ->
+        AtlasEvidence.capture_bus(acc, %{kind: :ml_turn}, @nodes, ms)
+      end)
+
+    assert length(events) == 40
+    assert hd(events).at_ms == 60
+    assert List.last(events).at_ms == 21
+  end
 end
