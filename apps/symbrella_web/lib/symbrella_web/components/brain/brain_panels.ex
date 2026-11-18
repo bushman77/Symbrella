@@ -37,6 +37,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       |> Map.put_new(:brain_view, :anatomy)
       |> Map.put_new(:atlas_nodes, [])
       |> Map.put_new(:atlas_layer, :conceptual)
+      |> Map.put_new(:atlas_display, :graph)
       |> Map.put_new(:atlas_dependencies, [])
       |> Map.put_new(:atlas_events, [])
       |> Map.put_new(:atlas_bus_events, [])
@@ -96,6 +97,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         nodes={@atlas_nodes}
         selected={@selected}
         layer={@atlas_layer}
+        display={@atlas_display}
         dependencies={@atlas_dependencies}
         events={@atlas_events}
         bus_events={@atlas_bus_events}
