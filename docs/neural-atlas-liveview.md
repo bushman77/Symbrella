@@ -79,15 +79,24 @@ The inspector offers six independent layers:
    These receipts do **not** prove which module/function executed.
 6. **Turn trace:** `Core.CognitiveTrace` instruments real, ordered
    symbolic chat worker calls, and `CognitiveTraceStore` retains bounded,
-   turn-correlated stage timings and evidence counters. Region highlights
-   are limited to specifically instrumented operations and do not imply
-   propagation along the faint conceptual links. See
-   [Cognitive Trace v1](cognitive-trace-v1.md) for contracts and tests.
+   turn-correlated stage timings and evidence counters. The P-002 executive
+   panel now shows Prefrontal planner call status, validated/merged controls,
+   shadow-scoring usage and live-versus-shadow action comparison for the
+   **selected turn**. The Prefrontal inspector summarizes all planners;
+   selecting DLPFC, FPC, DMPFC, VMPFC or Salience reveals that region's
+   recorded contribution. The graph counts explicitly observed planner calls,
+   excluding unavailable modules. These observations never create new runtime
+   edges or prove that shadow recommendations affected live execution.
+   See [Cognitive Trace v1](cognitive-trace-v1.md) for contracts and tests.
 
-The two observation buffers are per connected LiveView and each holds up to
-40 receipt summaries. No event payloads, user text, or neural cell state are
-written to either buffer. Refreshing/reconnecting starts a new observation
-window; no historical completeness is implied.
+Telemetry and Bus observation buffers are per connected LiveView and each holds
+up to 40 receipt summaries. The separate CognitiveTraceStore is supervised,
+shared in memory and bounded to 20 turn IDs, 40 receipts per turn, and ten
+minutes of history. Trace records contain only allowlisted, sanitized metadata;
+no user text, raw event payload, or neural cell state is stored in that buffer.
+Refreshing/reconnecting resets LiveView observation windows but can still
+display recent trace-store entries until expiration; historical completeness
+is never implied.
 
 Existing Brain.Cell activation visualizations and snapshots remain separate
 from this evidence model.
@@ -99,6 +108,7 @@ From the umbrella root:
 ```sh
 mix test apps/symbrella_web/test/symbrella_web/components/neural_atlas_test.exs \
   apps/symbrella_web/test/symbrella_web/components/neural_atlas_graph_test.exs \
+  apps/symbrella_web/test/symbrella_web/components/executive_trace_panel_test.exs \
   apps/symbrella_web/test/symbrella_web/components/atlas_evidence_test.exs
 ```
 
