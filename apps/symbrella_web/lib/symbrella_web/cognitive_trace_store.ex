@@ -71,9 +71,9 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
 
   @doc false
   def ingest(state, measurements, metadata) when is_map(state) and is_map(measurements) and is_map(metadata) do
-    with "turn-" <> suffix = id <- Map.get(metadata, :trace_id),
-         true <- byte_size(suffix) in 1..72,
-         true <- String.match?(suffix, ~r/\A[0-9a-f]+\z/),
+    with id when is_binary(id) <- Map.get(metadata, :trace_id),
+         true <- byte_size(id) in 6..77,
+         true <- Regex.match?(~r/\Aturn-[0-9a-f]+\z/, id),
          stage when stage in @stages <- Map.get(metadata, :stage),
          status when status in [:started, :ok, :error] <- Map.get(metadata, :status),
          duration when is_integer(duration) and duration >= 0 <- Map.get(measurements, :duration_us),
