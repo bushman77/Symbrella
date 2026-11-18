@@ -58,26 +58,67 @@ defmodule Brain.ControlSignals do
           salience_boost: float() | nil
         }
 
-  @doc "Right-biased merge of partial maps/structs into a %Brain.ControlSignals{}"
+  @known_keys [
+    :policy, :max_retries, :top_k, :branch_budget, :switch_after_ms,
+    :utility_prior, :explore_rate, :confidence_scale, :acc_conflict_gain,
+    :salience_boost
+  ]
+  @numeric_keys [
+    :max_retries, :top_k, :branch_budget, :switch_after_ms,
+    :utility_prior, :explore_rate, :confidence_scale, :acc_conflict_gain,
+    :salience_boost
+  ]
+  @integer_keys [:max_retries, :top_k, :branch_budget, :switch_after_ms]
+  @policies [:strict_mwe, :loose_single, :balanced]
+
+  @doc """
+  Keep only recognized, correctly typed, non-nil planner recommendations.
+  Nil means *no opinion* and cannot erase an earlier planner's recommendation.
+  Unknown or malformed keys are ignored, never promoted into the control contract.
+  """
+  @spec normalize_part(map() | t() | keyword() | term()) :: map()
+  def normalize_part(part) do
+    values =
+      cond do
+        is_struct(part) -> Map.from_struct(part)
+        is_map(part) -> part
+        is_list(part) ->
+          Enum.reduce(part, %{}, fn
+            {key, value}, acc when is_atom(key) -> Map.put(acc, key, value)
+            _, acc -> acc
+          end)
+        true -> %{}
+      end
+
+    Enum.reduce(@known_keys, %{}, fn key, acc ->
+      case Map.fetch(values, key) do
+        {:ok, value} ->
+          if valid_part_value?(key, value),
+            do: Map.put(acc, key, value),
+            else: acc
+
+        :error -> acc
+      end
+    end)
+  end
+
+  @doc "Right-biased merge of valid non-nil recommendations into a canonical struct."
   @spec merge([map() | t()]) :: t()
   def merge(parts) when is_list(parts) do
-    base = %__MODULE__{} |> Map.from_struct()
-
     merged =
-      Enum.reduce(parts, base, fn part, acc ->
-        part_map =
-          cond do
-            is_struct(part) -> Map.from_struct(part)
-            is_map(part) -> part
-            is_list(part) -> Map.new(part)
-            true -> %{}
-          end
-
-        Map.merge(acc, part_map, fn _k, _v1, v2 -> v2 end)
+      Enum.reduce(parts, %{}, fn part, acc ->
+        Map.merge(acc, normalize_part(part))
       end)
 
     struct!(__MODULE__, merged)
   end
+
+  defp valid_part_value?(:policy, value), do: value in @policies
+  defp valid_part_value?(key, value) when key in @integer_keys,
+    do: is_integer(value)
+  defp valid_part_value?(key, value) when key in @numeric_keys,
+    do: is_number(value)
+  defp valid_part_value?(_key, _value), do: false
 
   @doc """
   Clamp numeric fields into sane ranges:
