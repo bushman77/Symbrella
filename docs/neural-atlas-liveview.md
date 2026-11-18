@@ -17,17 +17,23 @@ views use the same `select-region` event and selected-region inspector.
 The graph has stable, presentation-only coordinates for known regions, plus a
 deterministic fallback for newly registered keys. Coordinates are inspired by
 brain anatomy but do not claim anatomical precision or biological neurons.
-Curved conceptual edges are derived only from registry `:related` entries
-and deduplicated as undirected pairs. Directed, dashed BEAM edges use
-`AtlasEvidence.dependencies/1` results. Observed telemetry and Bus receipts
-highlight nodes and show session counts; **neither produces inter-region edges**.
+Curved conceptual edges use registry `:related` entries, which now also
+include separately documented source-backed adjacency, and are deduplicated
+as undirected navigation edges. **Source topology** presents the exact
+reviewed `Registry.source_relations/0` witnesses with grouping, configured
+planner, explicit function-call, and telemetry-subscription types. These are
+source declarations, not observed execution. Directed, dashed BEAM edges still
+derive from compiled imports via `AtlasEvidence.dependencies/1`.
+Observed telemetry and Bus receipts highlight nodes and show session counts;
+**neither produces inter-region edges**.
 
 Every registered module is represented by one small violet satellite dot attached
 to its region hub. The spoke means **registry membership**, not a function call,
 runtime activation, or a separate biological neuron. Regions with zero registered
 modules have no satellites, even if their underlying implementation may exist.
 
-On BEAM, telemetry and Bus layers, the graph retains faint dotted conceptual
+On Source topology, BEAM, telemetry, Bus and Turn trace layers, the graph
+retains faint dotted conceptual
 links for geographic context. They are explicitly labeled as registry navigation
 metadata, **not** observed calls or inferred signal traffic. Telemetry and
 Bus observations are marked by amber rings and counts but are not animated
@@ -39,34 +45,39 @@ the selectable nodes. Buttons have accessible names, keyboard focus, and
 explicit `aria-pressed` values. Narrow screens can scroll horizontally.
 At very wide layouts, the selected-region inspector sits to the right.
 
-The graph does **not** yet support zooming, panning, or timestamped execution
-span correlation. Those are independent follow-up milestones.
+The graph does **not** yet support zooming, panning, or verified propagation
+along source-backed edges. Turn Trace v1 has correlated stage timings but
+cannot infer cross-process causal routes from uninstrumented calls.
 
 ## Registry and evidence provenance
 
 `SymbrellaWeb.Region.Registry` is the authority for registered region keys,
 module membership, documented conceptual links and telemetry topic names.
 
-The inspector offers four independent layers:
+The inspector offers six independent layers:
 
-1. **Conceptual links:** registry-owned `:related` metadata. These are
-   navigation aids, not verified connections or observed calls.
-2. **BEAM references:** `AtlasEvidence.dependencies/1` reads the `imports`
+1. **Conceptual links:** registry-owned `:related` metadata, including
+   source-backed navigational adjacency. Not proof of execution.
+2. **Source topology:** reviewed source declarations from
+   `Region.Registry.source_relations/0`, with precise relation kinds and
+   implementation witnesses. Grouping and configured planner relationships
+   are distinguished from direct calls and telemetry subscriptions.
+3. **BEAM references:** `AtlasEvidence.dependencies/1` reads the `imports`
    chunk from compiled registered module BEAM files and retains static
    references between different registered regions. This is direct remote
    call evidence at compile time, **not** runtime execution evidence.
    Dynamic dispatch, inter-process messages, references to unregistered
    modules, and source code that did not compile are outside its scope.
-3. **Live telemetry:** `AtlasEvidence.capture/4` filters `brain:blackboard`
+4. **Live telemetry:** `AtlasEvidence.capture/4` filters `brain:blackboard`
    messages to registered `:telemetry` event topics. Matching receipts
    show the topic, receiving region(s), and time received by the page.
    A registered topic need not have fired; an observed topic does not prove
    synaptic activation or a complete causal trace.
-4. **Bus events:** `AtlasEvidence.capture_bus/4` records non-telemetry
+5. **Bus events:** `AtlasEvidence.capture_bus/4` records non-telemetry
    `brain:blackboard` message kinds and an explicitly claimed registered
    region when present. Unattributed messages remain unattributed.
    These receipts do **not** prove which module/function executed.
-5. **Turn trace:** `Core.CognitiveTrace` instruments real, ordered
+6. **Turn trace:** `Core.CognitiveTrace` instruments real, ordered
    symbolic chat worker calls, and `CognitiveTraceStore` retains bounded,
    turn-correlated stage timings and evidence counters. Region highlights
    are limited to specifically instrumented operations and do not imply
