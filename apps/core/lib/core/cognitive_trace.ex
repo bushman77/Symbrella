@@ -221,7 +221,7 @@ defmodule Core.CognitiveTrace do
                    adjusted >= 0.0 and adjusted <= 1.0 and
                    delta >= -0.121 and delta <= 0.121 do
                 [%{action: action, baseline: baseline, proposed: adjusted,
-                   delta: delta, keys: control_keys(Map.get(comparison, :applied_keys))}]
+                   delta: delta}]
               else
                 []
               end
