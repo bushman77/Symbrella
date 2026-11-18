@@ -199,6 +199,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     assert html =~ ~s(aria-pressed="true")
     assert html =~ "position: absolute; left: 39.0%; top: 65.0%; width: 88px;"
     assert html =~ "transform: translate(-50%, -50%);"
+    # Tailwind 4's translate property would otherwise compound the inline transform.
+    refute html =~ "-translate-x-1/2"
+    refute html =~ "-translate-y-1/2"
     assert html =~ ~s(viewBox="0 0 1000 600")
     assert html =~ ~s(data-role="registered-module")
   end
