@@ -166,6 +166,25 @@ defmodule Core.Response.AttachTest do
     assert si.decision_lineage.delivery_status == :not_observed
   end
 
+  test "a missing initial action is not misreported as reconciled" do
+    winner = %{
+      token_index: 0, id: "hello|interjection|1", lemma: "hello",
+      pos: "interjection", score: 0.16, source: :active_cells
+    }
+
+    si = Attach.maybe_build_response_plan(%{
+      sentence: "Hello Symbrella.", intent: :greet, confidence: 0.80,
+      semantic_choices: [winner], lifg_choices: [winner],
+      selected_action: nil, trace: []
+    }, response: :auto)
+
+    assert si.selected_action == :answer_user
+    assert si.decision_lineage.initial_action == nil
+    assert si.decision_lineage.final_action == :answer_user
+    assert si.decision_lineage.reconciliation == :not_recorded
+    assert si.decision_lineage.reason == :initial_action_unavailable
+  end
+
   test "disabled response planning preserves a protected action and existing receipts" do
     initial_meta = %{
       selected: :safe_support,
