@@ -130,6 +130,42 @@ defmodule Core.Response.AttachTest do
     assert si.decision_lineage.delivery_status == :not_observed
   end
 
+  test "a protected live action survives enabled social response planning" do
+    winner = %{
+      token_index: 0, id: "hello|interjection|1", lemma: "hello",
+      pos: "interjection", score: 0.16, source: :active_cells
+    }
+
+    action_meta = %{
+      selected: :safe_support,
+      selected_candidate: %{reason: :support_requested},
+      safety_gate: :approved
+    }
+    original_decision = %Core.Agency.Decision{
+      trace_id: "agency|protected|1",
+      selected_action: :safe_support
+    }
+
+    si = Attach.maybe_build_response_plan(%{
+      sentence: "Hello Symbrella.", intent: :greet, confidence: 0.80,
+      semantic_choices: [winner], lifg_choices: [winner],
+      selected_action: :safe_support,
+      action_meta: action_meta, agency_decision: original_decision,
+      agency_commands: [], agency_command_results: [], trace: []
+    }, response: :auto)
+
+    assert is_map(si.response_meta)
+    assert si.selected_action == :safe_support
+    assert si.action_meta == action_meta
+    assert si.agency_decision == original_decision
+    assert si.decision_lineage.initial_action == :safe_support
+    assert si.decision_lineage.final_action == :safe_support
+    assert si.decision_lineage.initial_decision_trace_id == "agency|protected|1"
+    assert si.decision_lineage.final_decision_trace_id == "agency|protected|1"
+    assert si.decision_lineage.reconciliation == :unchanged
+    assert si.decision_lineage.delivery_status == :not_observed
+  end
+
   test "disabled response planning preserves a protected action and existing receipts" do
     initial_meta = %{
       selected: :safe_support,
