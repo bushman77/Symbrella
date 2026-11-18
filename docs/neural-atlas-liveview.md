@@ -121,12 +121,30 @@ is never implied.
 Existing Brain.Cell activation visualizations and snapshots remain separate
 from this evidence model.
 
+## P-005: streamlined Brain dashboard
+
+The bottom **All Regions — Live Status** grid has been removed from the
+`/brain` page. The LiveView no longer collects
+`BrainRuntime.all_region_status/0` on mount or every selected-region refresh.
+The repeated Live State and Module Status process cards have also been removed
+from the dashboard, and the selected-region configuration no longer displays
+a PID/queue/current-function column.
+
+The selected region's actual runtime configuration (including LIFG thresholds
+and weights), region snapshot, working memory, blackboard, mood, neuronal
+activity chart, Neural Atlas, and Cognitive Trace are preserved. The underlying
+region processes, diagnostic component functions, and on-demand plain-text
+Brain report are unchanged. The text report can still include OTP diagnostic
+status when explicitly requested; the background UI no longer polls all
+regions merely to render redundant process cards.
+
 ## Verification
 
 From the umbrella root:
 
 ```sh
-mix test apps/symbrella_web/test/symbrella_web/components/neural_atlas_test.exs \
+mix test apps/symbrella_web/test/symbrella_web/components/brain_report_copy_test.exs \
+  apps/symbrella_web/test/symbrella_web/components/neural_atlas_test.exs \
   apps/symbrella_web/test/symbrella_web/components/neural_atlas_graph_test.exs \
   apps/symbrella_web/test/symbrella_web/components/executive_trace_panel_test.exs \
   apps/symbrella_web/test/symbrella_web/components/atlas_evidence_test.exs
