@@ -63,6 +63,7 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:brain_view, fn -> :atlas end)
       |> assign_new(:atlas_nodes, fn -> NeuralAtlas.regions() end)
       |> assign_new(:atlas_layer, fn -> :conceptual end)
+      |> assign_new(:atlas_display, fn -> :graph end)
       |> assign_new(:atlas_dependencies, fn -> AtlasEvidence.dependencies(NeuralAtlas.regions()) end)
       |> assign_new(:atlas_events, fn -> [] end)
       |> assign_new(:atlas_bus_events, fn -> [] end)
@@ -260,6 +261,16 @@ defmodule SymbrellaWeb.BrainLive do
     send(self(), :refresh_selected)
     {:noreply, assign(socket, :selected, sel)}
   end
+
+  # Graph is the primary atlas view; list remains keyboard/touch friendly.
+  @impl true
+  def handle_event("atlas-display", %{"display" => display}, socket)
+      when display in ["graph", "list"] do
+    selected = if display == "list", do: :list, else: :graph
+    {:noreply, assign(socket, :atlas_display, selected)}
+  end
+
+  def handle_event("atlas-display", _params, socket), do: {:noreply, socket}
 
   # Switch evidence layers without changing Brain execution.
   @impl true
