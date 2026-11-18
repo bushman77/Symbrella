@@ -80,7 +80,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
       nodes: nodes, selected: :lifg, layer: :dependencies, dependencies: dependencies)
 
     assert html =~ "atlas-layer-dependencies"
-    assert html =~ "aria-pressed=\\"true\\""
+    assert html =~ "aria-pressed=\"true\""
     assert html =~ "atlas-outgoing-references"
     assert html =~ "Brain.ATL.resolve/1"
     assert html =~ "Inspect ATL"
