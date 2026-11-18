@@ -47,6 +47,50 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     assert NeuralAtlasGraph.edges(@nodes, :bus, dependencies) == []
   end
 
+  test "registered module satellites are computed from region metadata only" do
+    satellites = NeuralAtlasGraph.satellites(@nodes)
+
+    assert length(satellites) == 3
+    assert Enum.map(satellites, & &1.module) |> Enum.sort() ==
+             ["Brain.ATL", "Brain.LIFG", "Brain.PMTG"]
+    assert Enum.all?(satellites, &(&1.region in [:lifg, :atl, :pmtg]))
+    assert Enum.all?(satellites, &(&1.x != &1.hub_x or &1.y != &1.hub_y))
+
+    no_modules = [%{key: :atl, label: "ATL", subtitle: "", modules: [], related: []}]
+    assert NeuralAtlasGraph.satellites(no_modules) == []
+  end
+
+  test "visual module spokes come from registry membership, not invented calls" do
+    html = render_component(&NeuralAtlasGraph.graph/1, nodes: @nodes, selected: :lifg)
+
+    assert html =~ ~s(data-role="registered-module")
+    assert html =~ ~s(data-module="Brain.LIFG")
+    assert html =~ ~s(data-region="lifg")
+    assert html =~ "spokes = membership"
+    refute html =~ ~s(data-edge-kind="beam")
+  end
+
+  test "telemetry keeps a labeled conceptual scaffold without fabricating runtime edges" do
+    html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @nodes, selected: :lifg, layer: :telemetry)
+
+    assert html =~ ~s(data-edge-kind="conceptual-context")
+    assert html =~ "Faint dotted links = conceptual reference only"
+    refute html =~ ~s(data-edge-kind="beam")
+    refute html =~ ~s(data-edge-kind="conceptual")
+  end
+
+  test "BEAM links render as directed evidence over separate conceptual context" do
+    dependencies = [%{from: :lifg, to: :atl, call: "resolve/1"}]
+
+    html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @nodes, selected: :lifg, layer: :dependencies, dependencies: dependencies)
+
+    assert html =~ ~s(data-edge-kind="beam")
+    assert html =~ ~s(data-edge-kind="conceptual-context")
+    assert html =~ "compiled references"
+  end
+
   test "graph renders keyboard-focusable, selectable HTML buttons above SVG wires" do
     html = render_component(&NeuralAtlasGraph.graph/1, nodes: @nodes, selected: :lifg)
 
