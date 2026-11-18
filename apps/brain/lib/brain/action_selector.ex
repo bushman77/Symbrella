@@ -10,6 +10,10 @@ defmodule Brain.ActionSelector do
   """
 
   @version "action_selector.v1"
+  @shadow_version "prefrontal_shadow.v1"
+  @shadow_max_delta 0.12
+
+  alias Brain.ControlSignals
 
   @type action ::
           :answer_user
@@ -65,6 +69,124 @@ defmodule Brain.ActionSelector do
   end
 
   def select(_ctx, _opts), do: select(%{}, [])
+
+  @doc """
+  Score the *existing* candidates with bounded, advisory prefrontal controls.
+
+  This is a read-only comparison. It never executes actions, generates new
+  candidates, writes memory, or changes the caller's selected result.
+  Protected health/safety/memory outcomes are deliberately not re-ranked.
+  """
+  @spec shadow_compare(map(), result()) :: map()
+  def shadow_compare(%{} = ctx, %{candidates: candidates, selected: selected} = live)
+      when is_list(candidates) do
+    signals =
+      ctx
+      |> map_get(:control_signals, %{})
+      |> ControlSignals.normalize_part()
+      |> then(&ControlSignals.combine([&1]))
+      |> Map.from_struct()
+      |> ControlSignals.normalize_part()
+
+    protected =
+      selected in [:safe_support, :refuse_or_redirect, :store_memory] or
+        map_get(ctx, :intent) in [:health_support, :illicit_request, :abuse, :insult, :memory_write] or
+        map_get(map_get(ctx, :symbolic_frame, %{}), :type) == :health_support_event or
+        self_harm_risk?(map_get(ctx, :text))
+
+    cond do
+      protected ->
+        shadow_skipped(live, signals, :protected_live_decision)
+
+      map_size(signals) == 0 ->
+        shadow_skipped(live, signals, :no_valid_controls)
+
+      true ->
+        considered =
+          Enum.map(candidates, fn candidate ->
+            {delta, keys} = shadow_delta(candidate.action, signals)
+            bounded_delta = max(-@shadow_max_delta, min(@shadow_max_delta, delta))
+            adjusted = clamp01(candidate.score + bounded_delta)
+
+            %{
+              action: candidate.action,
+              baseline_score: candidate.score,
+              shadow_score: adjusted,
+              delta: adjusted - candidate.score,
+              applied_keys: if(abs(adjusted - candidate.score) > 0.000001, do: keys, else: [])
+            }
+          end)
+
+        shadow_top = Enum.max_by(considered, & &1.shadow_score, fn ->
+          %{action: selected, shadow_score: live.confidence}
+        end)
+
+        applied = considered |> Enum.flat_map(& &1.applied_keys) |> Enum.uniq() |> Enum.sort()
+
+        %{
+          version: @shadow_version,
+          status: :evaluated,
+          reason: :bounded_candidate_modulation,
+          live_selected: selected,
+          shadow_selected: shadow_top.action,
+          changed?: shadow_top.action != selected,
+          shadow_confidence: shadow_top.shadow_score,
+          applied_keys: applied,
+          unused_keys: Map.keys(signals) -- applied,
+          adjustments: considered
+        }
+    end
+  end
+
+  def shadow_compare(_ctx, live), do: shadow_skipped(live, %{}, :invalid_context)
+
+  defp shadow_skipped(live, signals, reason) do
+    selected = if is_map(live), do: Map.get(live, :selected), else: nil
+    confidence = if is_map(live), do: Map.get(live, :confidence, 0.0), else: 0.0
+
+    %{
+      version: @shadow_version,
+      status: :skipped,
+      reason: reason,
+      live_selected: selected,
+      shadow_selected: selected,
+      changed?: false,
+      shadow_confidence: confidence,
+      applied_keys: [],
+      unused_keys: Map.keys(signals),
+      adjustments: []
+    }
+  end
+
+  defp shadow_delta(:answer_user, signals) do
+    optional_delta(signals, :utility_prior, fn value -> 0.10 * (value - 0.5) end)
+  end
+
+  defp shadow_delta(:ask_clarifying_question, signals) do
+    {confidence_delta, confidence_keys} =
+      optional_delta(signals, :confidence_scale, fn value -> 0.10 * (1.0 - value) end)
+
+    {branch_delta, branch_keys} =
+      optional_delta(signals, :branch_budget, fn value -> 0.01 * value end)
+
+    {confidence_delta + branch_delta, confidence_keys ++ branch_keys}
+  end
+
+  defp shadow_delta(:self_check, signals),
+    do: optional_delta(signals, :salience_boost, fn value -> 0.08 * value end)
+
+  defp shadow_delta(:observe_silently, signals),
+    do: optional_delta(signals, :explore_rate, fn value -> 0.06 * (0.5 - value) end)
+
+  # Memory admission and safety decisions are not candidates for shadow modulation.
+  defp shadow_delta(_action, _signals), do: {0.0, []}
+
+  defp optional_delta(signals, key, fun) do
+    case Map.fetch(signals, key) do
+      {:ok, value} when is_number(value) -> {fun.(value), [key]}
+      _ -> {0.0, []}
+    end
+  end
 
   # ─────────────────────── candidate generation ───────────────────────
 
