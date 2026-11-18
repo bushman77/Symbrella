@@ -39,8 +39,8 @@ defmodule Core.SemanticInput do
   @type token :: term()
   @type cell :: term()
 
-  # Version 11 adds the separate, conditional finite-past locative derivation field.
-  @contract_v 12
+  # Version 13 adds bounded, optional action decision-lineage metadata.
+  @contract_v 13
 
   @list_fields MapSet.new([
                  :tokens,
@@ -102,6 +102,7 @@ defmodule Core.SemanticInput do
                 :discourse_context,
                 :wm_context,
                 :action_meta,
+                :decision_lineage,
                 :emotion,
                 :appraisal,
                 :mood,
@@ -360,6 +361,7 @@ defmodule Core.SemanticInput do
             selected_action: nil,
             action_candidates: nil,
             action_meta: nil,
+            decision_lineage: nil,
             agency_decision: nil,
             agency_commands: nil,
             agency_command_results: nil,
