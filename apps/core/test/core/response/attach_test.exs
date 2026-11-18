@@ -38,7 +38,12 @@ defmodule Core.Response.AttachTest do
         }
       ],
       confidence: 0.75,
-      safety_gate: :approved
+      safety_gate: :approved,
+      prefrontal_shadow: %{
+        status: :evaluated,
+        shadow_selected: :observe_silently,
+        applied_keys: [:utility_prior]
+      }
     }
 
     si =
@@ -63,6 +68,21 @@ defmodule Core.Response.AttachTest do
     assert si.response_meta.agent_selected_action == :answer_user
     assert si.response_meta.agent_action_meta.selected == :answer_user
     assert %Core.Agency.Decision{selected_action: :answer_user} = si.response_meta.agency_decision
+
+    lineage = si.decision_lineage
+    assert lineage.v == 1
+    assert lineage.initial_action == :ask_clarifying_question
+    assert lineage.final_action == :answer_user
+    assert lineage.reconciliation == :reconciled
+    assert lineage.reason == :social_intent_reconciliation
+    assert lineage.initial_safety_gate == :approved
+    assert lineage.final_safety_gate == :approved
+    assert lineage.shadow_action == :observe_silently
+    assert lineage.shadow_status == :evaluated
+    assert lineage.shadow_applied_keys == [:utility_prior]
+    assert lineage.delivery_status == :not_observed
+    assert lineage.initial_command_statuses == []
+    assert lineage.final_command_statuses == []
   end
 
 
@@ -103,6 +123,41 @@ defmodule Core.Response.AttachTest do
     assert si.response_meta.response_reflection.addressee == :self
     assert si.response_meta.response_reflection.vocative.resolution == :assistant_identity
     assert si.response_meta.response_reflection.semantic_verified? == false
+    assert si.decision_lineage.initial_action == :answer_user
+    assert si.decision_lineage.final_action == :answer_user
+    assert si.decision_lineage.reconciliation == :unchanged
+    assert si.decision_lineage.reason == :action_preserved
+    assert si.decision_lineage.delivery_status == :not_observed
+  end
+
+  test "disabled response planning preserves a protected action and existing receipts" do
+    initial_meta = %{
+      selected: :safe_support,
+      selected_candidate: %{reason: :safety_state_check},
+      safety_gate: :approved,
+      prefrontal_shadow: %{status: :skipped, shadow_selected: :safe_support,
+        applied_keys: []}
+    }
+    receipt = %{status: :deferred, reason: :permission_required}
+    original = %{
+      intent: :health_support, selected_action: :safe_support,
+      action_meta: initial_meta, agency_command_results: [receipt],
+      response_meta: nil, trace: []
+    }
+
+    final = Attach.maybe_build_response_plan(original, response: :off)
+
+    assert final.selected_action == original.selected_action
+    assert final.action_meta == original.action_meta
+    assert final.agency_command_results == original.agency_command_results
+    assert final.response_meta == nil
+    assert final.decision_lineage.initial_action == :safe_support
+    assert final.decision_lineage.final_action == :safe_support
+    assert final.decision_lineage.reconciliation == :not_planned
+    assert final.decision_lineage.reason == :response_disabled
+    assert final.decision_lineage.initial_command_statuses == [:deferred]
+    assert final.decision_lineage.final_command_statuses == [:deferred]
+    assert final.decision_lineage.delivery_status == :not_observed
   end
 
 end
