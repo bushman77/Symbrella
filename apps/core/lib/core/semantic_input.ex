@@ -40,7 +40,7 @@ defmodule Core.SemanticInput do
   @type cell :: term()
 
   # Version 11 adds the separate, conditional finite-past locative derivation field.
-  @contract_v 11
+  @contract_v 12
 
   @list_fields MapSet.new([
                  :tokens,
@@ -108,7 +108,8 @@ defmodule Core.SemanticInput do
                 :self_monitor,
                 :self_memory_recall,
                 :self_continuity,
-                :frame
+                :frame,
+                :integration_audit
               ])
 
   @atom_fields MapSet.new([
@@ -379,7 +380,8 @@ defmodule Core.SemanticInput do
             frame: nil,
             frame_ts_ms: nil,
             frame_seq: nil,
-            frame_run_id: nil
+            frame_run_id: nil,
+            integration_audit: nil
 
   @doc """
   Version of the SemanticInput carrier contract.

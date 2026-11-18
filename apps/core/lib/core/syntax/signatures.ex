@@ -87,6 +87,7 @@ defmodule Core.Syntax.Signatures do
        wh_modal_conditional_questions(si, nodes) ++
        progressive_locatives(nodes) ++
        finite_past_locatives(nodes) ++
+       finite_past_named_directionals(nodes) ++
        progressive_lexical_gaps(nodes) ++
        anaphoric_progressive_locatives(nodes) ++
        finite_present_svo(nodes) ++
@@ -1034,6 +1035,69 @@ defmodule Core.Syntax.Signatures do
       else
         []
       end
+    end)
+  end
+
+  # A possible named subject followed by a finite-past
+  # predicate and a directional destination phrase.
+  #
+  # This is grammatical evidence only. It does not prove
+  # a specific name sense, movement, or arrival.
+  defp finite_past_named_directionals(nodes) do
+    nodes
+    |> Enum.chunk_every(5, 1, :discard)
+    |> Enum.flat_map(fn
+      [subject, predicate, prep, det, destination] = segment ->
+        contiguous? =
+          Enum.map(segment, & &1.index) ==
+            Enum.to_list(subject.index..(subject.index + 4))
+
+        supported? =
+          contiguous? and
+            pos?(subject, "proper_noun") and
+            Regex.match?(
+              ~r/\A\p{Lu}\p{L}+\z/u,
+              subject.surface
+            ) and
+            pos?(predicate, "verb") and
+            form?(predicate, :simple_past) and
+            prep.word == "to" and
+            pos?(prep, "preposition") and
+            pos?(det, "determiner") and
+            pos?(destination, "noun") and
+            valid_surface?(segment)
+
+        if supported? do
+          [
+            signature(
+              :finite_past_named_directional_candidate,
+              {subject.index, destination.index},
+              %{
+                subject_head: subject.index,
+                predicate: predicate.index,
+                preposition: prep.index,
+                destination_determiner: det.index,
+                destination_head: destination.index
+              },
+              %{
+                subject_head: [:pos_proper_noun],
+                predicate: [:simple_past],
+                preposition: [:pos_preposition],
+                destination_determiner: [:pos_determiner],
+                destination_head: [:pos_noun]
+              },
+              [
+                :contiguous_surface,
+                :attested_proper_noun_alternative,
+                :attested_simple_past_verb,
+                :attested_directional_preposition,
+                :attested_destination_phrase
+              ]
+            )
+          ]
+        else
+          []
+        end
     end)
   end
 

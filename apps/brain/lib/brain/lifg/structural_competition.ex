@@ -19,11 +19,11 @@ defmodule Brain.LIFG.StructuralCompetition do
   @min_margin 0.12
 
   @constituent_ids MapSet.new([
-    :noun_phrase,
-    :prepositional_phrase,
-    :possessive_noun_phrase,
-    :verb_particle_construction
-  ])
+                     :noun_phrase,
+                     :prepositional_phrase,
+                     :possessive_noun_phrase,
+                     :verb_particle_construction
+                   ])
 
   @type outcome :: map()
 
@@ -62,15 +62,16 @@ defmodule Brain.LIFG.StructuralCompetition do
     }
   end
 
-  def resolve(_), do: %{
-    version: 1,
-    source: :invalid_input,
-    status: :no_complete_candidate,
-    preferred: nil,
-    candidates: [],
-    discrimination_margin: nil,
-    factual_authority?: false
-  }
+  def resolve(_),
+    do: %{
+      version: 1,
+      source: :invalid_input,
+      status: :no_complete_candidate,
+      preferred: nil,
+      candidates: [],
+      discrimination_margin: nil,
+      factual_authority?: false
+    }
 
   defp base_indices(tokens) when is_list(tokens) do
     tokens
@@ -79,7 +80,9 @@ defmodule Brain.LIFG.StructuralCompetition do
       when is_integer(index) and index >= 0 and is_binary(phrase) ->
         Map.get(token, :n, 1) == 1 and
           Map.get(token, :kind) not in [:punct, "punct"]
-      _ -> false
+
+      _ ->
+        false
     end)
     |> Enum.map(& &1.index)
     |> Enum.sort()
@@ -90,10 +93,15 @@ defmodule Brain.LIFG.StructuralCompetition do
   # Only a complete two-modifier NP may compete as a nominal utterance;
   # nested and shorter noun phrases remain constituent evidence.
   defp complete_clause?(
-         %{id: :noun_phrase, source: :core_syntax,
+         %{
+           id: :noun_phrase,
+           source: :core_syntax,
            span: {0, span_last},
            roles: %{modifier_1: first, modifier_2: second, head: head} = roles,
-           required_features: required, evidence: evidence}, last
+           required_features: required,
+           evidence: evidence
+         },
+         last
        )
        when is_map(required) and is_list(evidence) do
     determiner = Map.get(roles, :determiner)
@@ -112,16 +120,18 @@ defmodule Brain.LIFG.StructuralCompetition do
   end
 
   defp complete_clause?(
-         %{id: id, source: :core_syntax, span: {0, span_last},
-           roles: roles, evidence: evidence}, last
+         %{id: id, source: :core_syntax, span: {0, span_last}, roles: roles, evidence: evidence},
+         last
        )
        when is_atom(id) and is_map(roles) and is_list(evidence) do
     span_last == last and not MapSet.member?(@constituent_ids, id) and
       evidence != [] and map_size(roles) >= 2 and
       Enum.all?(Map.values(roles), &(is_integer(&1) and &1 >= 0 and &1 <= last)) and
       Enum.any?([:predicate, :verb], &Map.has_key?(roles, &1)) and
-      Enum.any?([:subject, :subject_head, :wh, :object_head, :lexical_target],
-        &Map.has_key?(roles, &1))
+      Enum.any?(
+        [:subject, :subject_head, :wh, :object_head, :lexical_target],
+        &Map.has_key?(roles, &1)
+      )
   end
 
   defp complete_clause?(_, _), do: false
@@ -146,16 +156,25 @@ defmodule Brain.LIFG.StructuralCompetition do
                 choice
                 |> Map.get(:id, Map.get(choice, :chosen_id))
                 |> id_pos()
-              _ -> nil
+
+              _ ->
+                nil
             end
 
-          [%{role: role, token_index: index, expected_pos: permitted,
-             selected_pos: actual,
-             status: cond do
-               is_nil(actual) -> :unresolved
-               actual in permitted -> :compatible
-               true -> :conflict
-             end}]
+          [
+            %{
+              role: role,
+              token_index: index,
+              expected_pos: permitted,
+              selected_pos: actual,
+              status:
+                cond do
+                  is_nil(actual) -> :unresolved
+                  actual in permitted -> :compatible
+                  true -> :conflict
+                end
+            }
+          ]
         else
           []
         end
@@ -173,7 +192,9 @@ defmodule Brain.LIFG.StructuralCompetition do
         %{id: id, span: {first, last}} ->
           MapSet.member?(@constituent_ids, id) and
             first >= elem(signature.span, 0) and last <= elem(signature.span, 1)
-        _ -> false
+
+        _ ->
+          false
       end)
       |> Enum.map(&%{construction: &1.id, span: &1.span})
       |> Enum.uniq()
@@ -221,6 +242,7 @@ defmodule Brain.LIFG.StructuralCompetition do
     |> Enum.flat_map(fn
       :pos_noun -> ["noun"]
       :pos_common_noun -> ["noun"]
+      :pos_proper_noun -> ["proper_noun"]
       :pos_noun_or_pronoun -> ["noun", "pronoun"]
       :pos_pronoun -> ["pronoun"]
       :pos_verb -> ["verb"]

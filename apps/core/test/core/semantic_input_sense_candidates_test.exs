@@ -7,7 +7,7 @@ defmodule Core.SemanticInputSenseCandidatesTest do
 
   describe "contract helpers" do
     test "exposes a versioned field contract" do
-      assert SI.contract_version() == 11
+      assert SI.contract_version() == 12
       assert :sentence_signatures in SI.contract_fields()
       assert :lexical_focus in SI.contract_fields()
       assert :structural_competition in SI.contract_fields()
