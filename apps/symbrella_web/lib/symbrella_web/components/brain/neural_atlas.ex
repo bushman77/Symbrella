@@ -8,6 +8,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
   use SymbrellaWeb, :html
 
   alias SymbrellaWeb.Region.Registry
+  alias SymbrellaWeb.Components.Brain.NeuralAtlasGraph
 
   @spec regions() :: list(map())
   def regions do
@@ -34,6 +35,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
   attr :nodes, :list, required: true
   attr :selected, :atom, required: true
   attr :layer, :atom, default: :conceptual
+  attr :display, :atom, default: :graph
   attr :dependencies, :list, default: []
   attr :events, :list, default: []
   attr :bus_events, :list, default: []
@@ -123,8 +125,36 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         <% end %>
       </p>
 
-      <div class="grid gap-5 lg:grid-cols-2">
-        <div id="atlas-region-grid" class="grid gap-3 sm:grid-cols-2">
+      <nav id="atlas-display-modes" aria-label="Neural Atlas display mode"
+        class="mb-4 flex flex-wrap items-center gap-2">
+        <button :for={{mode, title} <- [{:graph, "Network graph"}, {:list, "Region list"}]}
+          type="button" id={"atlas-display-#{mode}"
+          }
+          phx-click="atlas-display" phx-value-display={mode}
+          aria-pressed={to_string(@display == mode)}
+          class={[
+            "min-h-11 rounded-lg border px-4 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-300",
+            @display == mode && "border-emerald-300 bg-emerald-950 text-white",
+            @display != mode && "border-zinc-700 text-zinc-300 hover:border-cyan-500"
+          ]}>
+          {title}
+        </button>
+        <span class="text-xs text-zinc-400">
+          Choose any node to inspect its registered modules and evidence.
+        </span>
+      </nav>
+
+      <div class={["grid gap-5", @display == :list && "lg:grid-cols-2"]}>
+        <NeuralAtlasGraph.graph :if={@display == :graph}
+          nodes={@nodes}
+          selected={@selected}
+          layer={@layer}
+          dependencies={@dependencies}
+          events={@events}
+          bus_events={@bus_events}
+        />
+
+        <div :if={@display == :list} id="atlas-region-grid" class="grid gap-3 sm:grid-cols-2">
           <button :for={node <- @nodes} id={"atlas-region-#{node.key}"}
             type="button" phx-click="select-region" phx-value-region={node.key}
             aria-pressed={to_string(@selected == node.key)}
