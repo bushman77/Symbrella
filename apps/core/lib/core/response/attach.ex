@@ -75,11 +75,14 @@ defmodule Core.Response.Attach do
 
   @spec maybe_build_response_plan(SemanticInput.t() | map(), opts()) :: SemanticInput.t() | map()
   def maybe_build_response_plan(%{} = si, opts) do
-    case Keyword.get(opts, :response, :auto) do
-      :off -> si
-      false -> si
-      _ -> build_and_attach(si, opts)
-    end
+    {result, attempted?} =
+      case Keyword.get(opts, :response, :auto) do
+        :off -> {si, false}
+        false -> {si, false}
+        _ -> {build_and_attach(si, opts), true}
+      end
+
+    attach_decision_lineage(si, result, attempted?)
   end
 
   def maybe_build_response_plan(other, _opts), do: other
@@ -406,6 +409,70 @@ defmodule Core.Response.Attach do
       end
     end)
   end
+
+  # Observational bookkeeping only. The response plan and its existing
+  # decision/permission behavior have already completed by this point.
+  defp attach_decision_lineage(original, result, attempted?) do
+    previous = si_get(original, :decision_lineage)
+    prior = if is_map(previous), do: previous, else: %{}
+    initial_meta = si_get(original, :action_meta)
+    initial_meta = if is_map(initial_meta), do: initial_meta, else: %{}
+    shadow = Map.get(initial_meta, :prefrontal_shadow)
+    shadow = if is_map(shadow), do: shadow, else: %{}
+
+    initial = Map.get(prior, :initial_action, si_get(original, :selected_action))
+    final = si_get(result, :selected_action)
+    completed? = attempted? and is_map(si_get(result, :response_meta))
+
+    {reconciliation, reason} =
+      cond do
+        not attempted? -> {:not_planned, :response_disabled}
+        not completed? -> {:not_planned, :response_unavailable}
+        initial != final -> {:reconciled, :social_intent_reconciliation}
+        true -> {:unchanged, :action_preserved}
+      end
+
+    lineage =
+      prior
+      |> Map.put(:v, 1)
+      |> Map.put(:initial_action, initial)
+      |> Map.put(:final_action, final)
+      |> Map.put_new(:initial_safety_gate, Map.get(initial_meta, :safety_gate))
+      |> Map.put(:final_safety_gate, result |> si_get(:action_meta) |> safety_gate())
+      |> Map.put_new(:initial_decision_trace_id, decision_trace_id(original))
+      |> Map.put(:final_decision_trace_id, decision_trace_id(result))
+      |> Map.put_new(:shadow_action, Map.get(shadow, :shadow_selected))
+      |> Map.put_new(:shadow_status, Map.get(shadow, :status))
+      |> Map.put_new(:shadow_applied_keys, Map.get(shadow, :applied_keys, []))
+      |> Map.put_new(:initial_command_statuses, command_statuses(si_get(original, :agency_command_results)))
+      |> Map.put(:final_command_statuses, command_statuses(si_get(result, :agency_command_results)))
+      |> Map.put(:reconciliation, reconciliation)
+      |> Map.put(:reason, reason)
+      |> Map.put(:delivery_status, :not_observed)
+
+    si_put(result, :decision_lineage, lineage)
+  end
+
+  defp safety_gate(%{} = meta), do: Map.get(meta, :safety_gate)
+  defp safety_gate(_), do: nil
+
+  defp decision_trace_id(si) do
+    case si_get(si, :agency_decision) do
+      %{trace_id: id} when is_binary(id) -> id
+      _ -> nil
+    end
+  end
+
+  defp command_statuses(results) when is_list(results) do
+    results
+    |> Enum.take(12)
+    |> Enum.map(fn
+      %{status: status} when is_atom(status) -> status
+      _ -> :unknown
+    end)
+  end
+
+  defp command_statuses(_), do: []
 
   defp reconcile_action_selection(si, meta, mood_like) when is_map(si) and is_map(meta) do
     if stale_social_action_selection?(si, meta) do
