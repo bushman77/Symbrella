@@ -92,9 +92,15 @@ defmodule SymbrellaWeb.Components.Brain.AtlasEvidence do
 
   def capture_bus(events, env, nodes, at_ms)
       when is_list(events) and is_map(env) and is_list(nodes) and is_integer(at_ms) do
-    kind = Map.get(env, :kind, Map.get(env, "kind"))
+    kind =
+      case Map.get(env, :kind, Map.get(env, "kind")) do
+        value when is_atom(value) -> inspect(value)
+        value when is_binary(value) and byte_size(value) <= 64 ->
+          if Regex.match?(~r/\\A[a-zA-Z0-9_:.\\-]+\\z/, value), do: value, else: nil
+        _ -> nil
+      end
 
-    if (is_atom(kind) or is_binary(kind)) and kind not in [:telemetry, "telemetry"] do
+    if is_binary(kind) and kind not in [":telemetry", "telemetry"] do
       registered = Enum.map(nodes, & &1.key)
       claimed = Map.get(env, :region, Map.get(env, "region"))
 
@@ -104,7 +110,7 @@ defmodule SymbrellaWeb.Components.Brain.AtlasEvidence do
         end)
 
       observed = %{
-        kind: inspect(kind),
+        kind: kind,
         region: region,
         at_ms: at_ms,
         seen_at:
