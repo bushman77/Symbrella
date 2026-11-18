@@ -107,4 +107,25 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
     assert html =~ "[:brain, :lifg]"
     assert html =~ "A received event is an observation"
   end
+  test "bus layer separates region-attributed events from unattributed messages" do
+    nodes = [
+      %{key: :lifg, label: "LIFG", subtitle: "Lexical", description: "Lexical",
+        modules: [Brain.LIFG], telemetry: [], related: []}
+    ]
+
+    bus_events = [
+      %{region: :lifg, kind: ":ml_turn", at_ms: 1, seen_at: "00:00:00 UTC"},
+      %{region: nil, kind: ":pipeline", at_ms: 2, seen_at: "00:00:00 UTC"}
+    ]
+
+    html = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :lifg, layer: :bus, bus_events: bus_events)
+
+    assert html =~ "atlas-layer-bus"
+    assert html =~ "atlas-observed-bus"
+    assert html =~ ":ml_turn"
+    assert html =~ ":pipeline"
+    assert html =~ "no region attribution"
+    assert html =~ "not verified function executions"
+  end
 end
