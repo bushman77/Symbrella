@@ -400,7 +400,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     assert html =~ "LIFG"
     assert html =~ "Prefrontal"
 
-    empty = %{trace_id: "turn-no-activity", events: []}
+    empty = %{trace_id: "turn-no-activity", status: :completed, events: []}
     quiet = render_component(&NeuralAtlas.panel/1,
       nodes: @trace_nodes, selected: :atl, layer: :trace,
       traces: [empty, @completed_turn], trace_id: empty.trace_id)
