@@ -20,6 +20,7 @@ defmodule SymbrellaWeb.BrainLive do
 
   alias SymbrellaWeb.BrainHTML
   alias SymbrellaWeb.Components.Brain.NeuralAtlas
+  alias SymbrellaWeb.Components.Brain.AtlasEvidence
   alias SymbrellaWeb.BrainRuntime
   alias SymbrellaWeb.SocialBrainActivity
   alias SymbrellaWeb.Components.Brain.ActivationTrend
@@ -61,6 +62,9 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:svg_base, fn -> load_brain_svg() end)
       |> assign_new(:brain_view, fn -> :atlas end)
       |> assign_new(:atlas_nodes, fn -> NeuralAtlas.regions() end)
+      |> assign_new(:atlas_layer, fn -> :conceptual end)
+      |> assign_new(:atlas_dependencies, fn -> AtlasEvidence.dependencies(NeuralAtlas.regions()) end)
+      |> assign_new(:atlas_events, fn -> [] end)
       |> assign_new(:bb_filter, fn -> "" end)
       |> assign_new(:wm, fn -> %{} end)
       |> assign_new(:activation_samples, fn -> [] end)
@@ -255,6 +259,22 @@ defmodule SymbrellaWeb.BrainLive do
     send(self(), :refresh_selected)
     {:noreply, assign(socket, :selected, sel)}
   end
+
+  # Switch evidence layers without changing Brain execution.
+  @impl true
+  def handle_event("atlas-layer", %{"layer" => layer}, socket)
+      when layer in ["conceptual", "dependencies", "telemetry"] do
+    selected =
+      case layer do
+        "dependencies" -> :dependencies
+        "telemetry" -> :telemetry
+        _ -> :conceptual
+      end
+
+    {:noreply, assign(socket, :atlas_layer, selected)}
+  end
+
+  def handle_event("atlas-layer", _params, socket), do: {:noreply, socket}
 
   # Preserve the anatomical diagram and all current live diagnostics.
   @impl true
@@ -802,6 +822,11 @@ defmodule SymbrellaWeb.BrainLive do
       |> maybe_refresh_wm_on_wm_update(env)
 
     bb_event = wrap_bb_event(env)
+
+    socket =
+      update(socket, :atlas_events, fn events ->
+        AtlasEvidence.capture(events, env, socket.assigns.atlas_nodes)
+      end)
 
     {:noreply,
      update(socket, :region_state, fn st ->
