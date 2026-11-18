@@ -42,8 +42,28 @@ establish continuing activity.
 
 The graph uses SVG for non-interactive edges and ordinary HTML buttons for
 the selectable nodes. Buttons have accessible names, keyboard focus, and
-explicit `aria-pressed` values. Narrow screens can scroll horizontally.
-At very wide layouts, the selected-region inspector sits to the right.
+explicit `aria-pressed` values. At very wide layouts, the selected-region
+inspector sits to the right.
+
+### P-003: Mobile graph canvas
+
+The graph's inner canvas has an explicit `height: 600px` and
+`min-width: 1000px` in inline styles, independent of Tailwind arbitrary
+utilities (such as `h-[600px]`). This prevents the absolutely positioned
+SVG and region buttons from collapsing into a zero-height container when
+an arbitrary utility is absent from compiled CSS.
+
+The outer `atlas-network-viewport` remains bounded to the screen width
+and horizontally scrollable on touch devices. It is a keyboard-focusable
+`role="region"` landmark with an accessible label. A small-screen
+instruction says to swipe sideways and tap a region. SVG positioning and
+button dimensions also include inline fallbacks; graph coordinates, visual
+evidence semantics, desktop sizing and the selected-region inspector are
+unchanged.
+
+Rendered-component tests assert the width/height contract, accessible
+scrolling container, selectable nodes and all evidence layers. These are
+markup regression tests; device/browser verification is still required.
 
 The graph does **not** yet support zooming, panning, or verified propagation
 along source-backed edges. Turn Trace v1 has correlated stage timings but
