@@ -33,6 +33,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
     assert html =~ "atlas-region-atl"
     assert html =~ "phx-click=\"select-region\""
     assert html =~ "aria-pressed=\"true\""
+    assert html =~ "aria-pressed=\"false\""
     assert html =~ "Lexical sense selection with evidence guards"
     assert html =~ "Brain.LIFG"
     assert html =~ "conceptual navigation"
@@ -45,5 +46,20 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
     assert Enum.any?(nodes, &(&1.key == :lifg))
     assert Enum.all?(nodes, &is_atom(&1.key))
     assert Enum.all?(nodes, &is_list(&1.modules))
+  end
+
+  test "conceptual links come from the registry and point to registered regions" do
+    alias SymbrellaWeb.Region.Registry
+
+    nodes = NeuralAtlas.regions()
+    keys = MapSet.new(Enum.map(nodes, & &1.key))
+    lifg = Enum.find(nodes, &(&1.key == :lifg))
+
+    assert :atl in Registry.defn(:lifg).related
+    assert lifg.related == Registry.defn(:lifg).related
+
+    assert Enum.all?(nodes, fn node ->
+             Enum.all?(node.related, &MapSet.member?(keys, &1))
+           end)
   end
 end
