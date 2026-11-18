@@ -7,7 +7,8 @@ defmodule SymbrellaWeb.Application do
     app_children = [
       SymbrellaWeb.Telemetry,
       SymbrellaWeb.ChatHistory,
-      SymbrellaWeb.SocialBrainActivity
+      SymbrellaWeb.SocialBrainActivity,
+      SymbrellaWeb.CognitiveTraceStore
     ] ++ maybe_shadow_child() ++ [SymbrellaWeb.Endpoint]
 
     children = maybe_pubsub_child() ++ app_children
