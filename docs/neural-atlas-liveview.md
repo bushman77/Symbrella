@@ -33,12 +33,40 @@ runtime activation, or a separate biological neuron. Regions with zero registere
 modules have no satellites, even if their underlying implementation may exist.
 
 On Source topology, BEAM, telemetry, Bus and Turn trace layers, the graph
-retains faint dotted conceptual
-links for geographic context. They are explicitly labeled as registry navigation
-metadata, **not** observed calls or inferred signal traffic. Telemetry and
-Bus observations are marked by amber rings and counts but are not animated
-continuously: a receipt observed earlier in the connected session does not
-establish continuing activity.
+retains faint dotted conceptual links for geographic context. They are
+explicitly labeled as registry navigation metadata, **not** observed calls or
+inferred signal traffic. Telemetry and Bus observations are marked by amber
+rings and counts but are not animated continuously: a receipt observed earlier
+in the connected session does not establish continuing activity.
+
+### P-004: Turn trace connections
+
+The selected Turn trace now draws **two classes of observed relationships**.
+They are generated exclusively from the *selected turn's* sanitized,
+completed Cognitive Trace receipts:
+
+- **Solid amber, directed edges** from **Prefrontal** to each registered
+  DLPFC, VMPFC, FPC, DMPFC or Salience planner whose aggregation receipt
+  reports an attempted invocation (statuses `:produced`, `:no_opinion`,
+  `:failed` or `:rejected`). An `:unavailable` planner has not been
+  invoked and cannot produce an active edge. The graph does not claim a
+  planner successfully influenced the live action.
+- **Dashed cyan, directed edges** connect *successive completed instrumented
+  region stages*, e.g. LIFG → ATL → Prefrontal → Hippocampus in a full
+  observed turn. The arrow denotes the **order of completed region stages**,
+  not a direct function call, causal message, or synaptic activation.
+  Started, failed or uninstrumented stages do not count.
+
+Both kinds retain the faint, dotted conceptual scaffold as separate context.
+Each drawn link also appears under **Observed turn connections** in the
+selected region's inspector with its actual evidentiary meaning. The graph
+has no continuous animation, no invented BEAM calls, and no proof that a
+control recommendation was followed live. A stale or expired selected trace
+shows no turn-specific edges instead of silently selecting unrelated data.
+
+Rendered tests cover both link types, unavailable and failed stages, no
+fabrication from conceptual adjacency, selected-turn switching, inspector
+provenance and the previously repaired mobile scrolling canvas.
 
 The graph uses SVG for non-interactive edges and ordinary HTML buttons for
 the selectable nodes. Buttons have accessible names, keyboard focus, and
@@ -66,7 +94,8 @@ scrolling container, selectable nodes and all evidence layers. These are
 markup regression tests; device/browser verification is still required.
 
 The graph does **not** yet support zooming, panning, or verified propagation
-along source-backed edges. Turn Trace v1 has correlated stage timings but
+along arbitrary source-backed edges. P-004 correlates a small set of
+explicitly reported planner invocations and completed region stages, but it
 cannot infer cross-process causal routes from uninstrumented calls.
 
 ## Registry and evidence provenance
@@ -105,8 +134,10 @@ The inspector offers six independent layers:
    **selected turn**. The Prefrontal inspector summarizes all planners;
    selecting DLPFC, FPC, DMPFC, VMPFC or Salience reveals that region's
    recorded contribution. The graph counts explicitly observed planner calls,
-   excluding unavailable modules. These observations never create new runtime
-   edges or prove that shadow recommendations affected live execution.
+   excluding unavailable modules. **P-004** now draws separately styled edges
+   for reported planner invocations and successive completed region stages.
+   These are bounded, turn-specific observations, **not** inferred causal
+   propagation or proof that shadow recommendations affected live execution.
    See [Cognitive Trace v1](cognitive-trace-v1.md) for contracts and tests.
 
 Telemetry and Bus observation buffers are per connected LiveView and each holds
