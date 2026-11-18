@@ -25,6 +25,7 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
     phase_7_planning: "7 · WM and response planning",
     prefrontal_control: "Prefrontal · Planner computation",
     action_selection: "Executive · Live and shadow selection",
+    response_planning: "Executive · Final planned decision",
     phase_8_memory: "8 · Experience and memory",
     hippocampus_persist: "Hippocampus · Persistence decision"
   }
