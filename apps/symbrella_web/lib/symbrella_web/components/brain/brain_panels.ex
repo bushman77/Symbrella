@@ -34,7 +34,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       |> Map.put_new(:region_status, %{})
       |> Map.put_new(:region_tweaks, %{})
       |> Map.put_new(:svg_base, nil)
-      |> Map.put_new(:brain_view, :atlas)
+      |> Map.put_new(:brain_view, :anatomy)
       |> Map.put_new(:atlas_nodes, [])
       |> Map.put_new(:bb_filter, "")
       |> Map.put_new(:wm, %{})
