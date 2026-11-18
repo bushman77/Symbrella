@@ -366,6 +366,30 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     refute html =~ ~s(data-edge-kind="beam")
   end
 
+  test "selected-region inspector explains stage order without claiming a direct call" do
+    alias SymbrellaWeb.Components.Brain.NeuralAtlas
+
+    html = render_component(&NeuralAtlas.panel/1,
+      nodes: @trace_nodes, selected: :atl, layer: :trace,
+      traces: [@completed_turn], trace_id: @completed_turn.trace_id)
+
+    assert html =~ ~s(id="atlas-region-trace-connections")
+    assert html =~ ~s(data-trace-edge-kind="stage_order")
+    assert html =~ "Successive completed region stages"
+    assert html =~ "order only, not a direct call"
+    assert html =~ "LIFG"
+    assert html =~ "Prefrontal"
+
+    empty = %{trace_id: "turn-no-activity", events: []}
+    quiet = render_component(&NeuralAtlas.panel/1,
+      nodes: @trace_nodes, selected: :atl, layer: :trace,
+      traces: [empty, @completed_turn], trace_id: empty.trace_id)
+
+    assert quiet =~ "No observed connections for this region in the selected turn."
+    refute quiet =~ ~s(data-trace-edge-kind="stage_order")
+    refute quiet =~ ~s(data-trace-edge-kind="planner_invocation")
+  end
+
   test "choosing another turn replaces all active links while keeping conceptual context" do
     quiet = %{trace_id: "turn-quiet", events: [
       %{stage: :lifg_selection, region: :lifg, status: :ok, evidence: %{}}
