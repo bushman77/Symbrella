@@ -132,6 +132,9 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanel do
               Proposed keys: {if entry.proposed_keys == [], do: "none",
                 else: Enum.join(entry.proposed_keys, ", ")}
             </p>
+            <p :if={entry.superseded_keys != []} class="mt-1 text-xs text-rose-200">
+              Superseded or not merged: {Enum.join(entry.superseded_keys, ", ")}
+            </p>
             <p class="mt-1 text-xs text-emerald-200">
               Merged controls:
               {if merged_values(@executive, entry) == [],
@@ -211,11 +214,23 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanel do
           {if @executive.has_prefrontal?, do: "observed", else: "not observed"}
         </p>
         <p class="mt-1">Planner receipts: {length(@executive.planners)}</p>
-        <p class="mt-1">Live vs shadow:
+        <ul id="atlas-prefrontal-planner-summary" class="mt-2 space-y-1">
+          <li :for={planner <- @executive.planners}
+            class="flex flex-wrap justify-between gap-2">
+            <span>{region_name(planner.region)}</span>
+            <span>{computation(planner.status)}</span>
+          </li>
+        </ul>
+        <p class="mt-2">Live vs shadow:
           {case @executive.shadow do
             %{shadow_status: status} -> status
             _ -> "not recorded"
           end}
+        </p>
+        <p :if={is_map(@executive.shadow)} class="mt-1">
+          Live {@executive.shadow.live_action} ·
+          shadow {@executive.shadow.shadow_action} ·
+          changed proposal {@executive.shadow.changed}
         </p>
       </div>
       <div :if={@entry != nil} class="mt-2 text-xs">
