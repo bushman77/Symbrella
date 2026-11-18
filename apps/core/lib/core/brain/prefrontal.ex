@@ -13,12 +13,16 @@ defmodule Core.Brain.Prefrontal do
       si
     else
       ctx = context_from_si(si, opts)
-      signals = prefrontal_signals(ctx)
+      report = prefrontal_report(ctx)
+      signals = report.signals
 
       prefrontal = %{
-        version: 1,
+        version: 2,
         ctx: ctx,
-        signals: signals
+        signals: signals,
+        planners: report.planners,
+        provenance: report.provenance,
+        feedback_quality: :heuristic_proxy
       }
 
       si
@@ -34,7 +38,10 @@ defmodule Core.Brain.Prefrontal do
           top_k: Map.get(signals, :top_k),
           max_retries: Map.get(signals, :max_retries),
           branch_budget: Map.get(signals, :branch_budget),
-          switch_after_ms: Map.get(signals, :switch_after_ms)
+          switch_after_ms: Map.get(signals, :switch_after_ms),
+          planner_statuses: Enum.map(report.planners, &Map.take(&1, [:planner, :status, :reason])),
+          merged_keys: report.provenance |> Map.keys() |> Enum.sort(),
+          feedback_quality: :heuristic_proxy
         }
       )
     end
@@ -64,17 +71,21 @@ defmodule Core.Brain.Prefrontal do
     }
   end
 
-  defp prefrontal_signals(ctx) do
+  defp prefrontal_report(ctx) do
     if Code.ensure_loaded?(Brain.Prefrontal) and
-         function_exported?(Brain.Prefrontal, :signals_map, 1) do
-      Brain.Prefrontal.signals_map(ctx)
+         function_exported?(Brain.Prefrontal, :report, 1) do
+      Brain.Prefrontal.report(ctx)
     else
-      %{}
+      unavailable_report()
     end
   rescue
-    _ -> %{}
+    _ -> unavailable_report()
   catch
-    _, _ -> %{}
+    _, _ -> unavailable_report()
+  end
+
+  defp unavailable_report do
+    %{signals: %{}, planners: [], provenance: %{}}
   end
 
   defp trace_scores(signals) do
