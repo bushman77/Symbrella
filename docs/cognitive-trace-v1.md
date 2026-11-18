@@ -25,8 +25,9 @@ and a wall-clock observation timestamp. It is *not* a neural firing event.
 - Phase 4: grammar and competition, with separately timed LIFG and ATL calls
 - Phase 5: semantic composition
 - Phase 6: comprehension summary and speech-act binding, each separately timed
-- Phase 7: working memory, explicitly timed Prefrontal planner aggregation and
-  ActionSelector execution (including read-only shadow comparison), and response planning
+- Phase 7: working memory, explicitly timed Prefrontal planner aggregation,
+  ActionSelector execution (including read-only shadow comparison), and a
+  separately timed post-response-planning decision-lineage receipt
 - Phase 8: experience and memory, including qualified Hippocampus persistence
 
 Phase spans include nested operations; **summing phase and nested durations
@@ -100,6 +101,37 @@ routes or prove that a recommendation improved comprehension.
 More precise causal edges will require explicit parent/child span IDs and
 instrumented message send/receive boundaries.
 
+### P-006: Initial-to-final decision lineage
+
+`Core.Brain.ActionSelection.attach/2` now writes an optional
+`SemanticInput.decision_lineage` map, retaining the initial selected action,
+its safety gate, a bounded initial shadow recommendation, an initial agency
+decision ID (internal only), and command-receipt statuses. The existing
+`Core.Response.Attach` reconciliation path can replace action metadata on
+recognized social turns. It now preserves the earlier summary while marking
+the final selected action and whether the response planner reconciled it
+(`:reconciled`), retained it (`:unchanged`), or was not completed
+(`:not_planned`). The SemanticInput optional-field contract is v13.
+
+`Core.CognitiveTrace` emits a `:response_planning` receipt from the
+existing Phase 7 route under the **same turn ID**. Both the Core emitter and
+`CognitiveTraceStore` independently allowlist action atoms, reconciliation
+reason/status, shadow-control keys, safety-gate enums, and up to 12 command
+status atoms. They never retain user text, reply text, candidate payloads,
+internal decision IDs or command bodies. Missing/legacy turns remain
+explicitly unobserved.
+
+The executive panel now shows **Initial live selection → Final planned action**,
+with the reconciliation reason and any initial/final command receipts.
+A command receipt of `:executed` is a reported execution, **not proof of
+the intended outcome**. A planned response is never presented as delivered;
+delivery remains `:not_observed` without independent evidence.
+
+P-006 changes **observability only**. It does not alter the selector's
+live action scores, safety/permission enforcement, command dispatch,
+response text, or memory admission. It also does **not** make a shadow
+recommendation authoritative.
+
 This is **not** a distributed tracer. Internally spawned, uninstrumented
 processes are not automatically included. The dashboard never attributes
 a Telemetry or Bus receipt to a chat turn without a matching turn-scoped span.
@@ -109,7 +141,10 @@ a Telemetry or Bus receipt to a chat turn without a matching turn-scoped span.
 From the umbrella root:
 
 ```sh
-mix test apps/core/test/core/cognitive_trace_test.exs
+mix test apps/core/test/core/cognitive_trace_test.exs \
+  apps/core/test/core/brain/action_selection_test.exs \
+  apps/core/test/core/response/attach_test.exs \
+  apps/core/test/core/semantic_input_sense_candidates_test.exs
 mix test apps/symbrella_web/test/symbrella_web/cognitive_trace_store_test.exs \
   apps/symbrella_web/test/symbrella_web/components/cognitive_trace_panel_test.exs \
   apps/symbrella_web/test/symbrella_web/components/executive_trace_panel_test.exs \
