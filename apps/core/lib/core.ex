@@ -302,7 +302,7 @@ defmodule Core do
     |> StateDump.capture(:action_selection)
     |> Core.Brain.WM.focus_prompt_topics(opts)
     |> StateDump.capture(:working_memory)
-    |> maybe_build_response_plan(opts)
+    |> CognitiveTrace.step(:response_planning, &maybe_build_response_plan(&1, opts))
     |> StateDump.capture(:response_plan)
   end
 
