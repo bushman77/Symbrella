@@ -256,7 +256,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
             <path :for={edge <- @wires} d={edge.path}
               data-edge-kind={
                 cond do
-                  assigns.layer == :source -> "source-#{edge.kind}"
+                  @layer == :source -> "source-#{edge.kind}"
                   edge.directed -> "beam"
                   true -> "conceptual"
                 end
@@ -333,7 +333,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
               class="relative mt-1 text-[10px] font-semibold text-amber-200">
               {node.observed} seen
             </span>
-            <span :if={@layer in [:conceptual, :dependencies]}
+            <span :if={@layer in [:conceptual, :dependencies, :source]}
               class="absolute -bottom-2 rounded-full border border-slate-600 bg-slate-950 px-2 py-0.5 text-[10px] font-semibold text-violet-200">
               {length(node.modules)} mod
             </span>
