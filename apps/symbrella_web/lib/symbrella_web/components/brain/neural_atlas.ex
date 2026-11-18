@@ -33,14 +33,33 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
 
   attr :nodes, :list, required: true
   attr :selected, :atom, required: true
+  attr :layer, :atom, default: :conceptual
+  attr :dependencies, :list, default: []
+  attr :events, :list, default: []
 
   def panel(assigns) do
     current = Enum.find(assigns.nodes, &(&1.key == assigns.selected))
-    linked = if current, do: current.related, else: []
+
+    linked =
+      (case assigns.layer do
+         :dependencies ->
+           for edge <- assigns.dependencies, edge.from == assigns.selected, do: edge.to
+
+         :telemetry ->
+           for event <- assigns.events, region <- event.regions, do: region
+
+         _ ->
+           if current, do: current.related, else: []
+       end)
+      |> Enum.uniq()
+
     assigns =
       assigns
       |> assign(:current, current)
       |> assign(:linked, linked)
+      |> assign(:outgoing, Enum.filter(assigns.dependencies, &(&1.from == assigns.selected)))
+      |> assign(:incoming, Enum.filter(assigns.dependencies, &(&1.to == assigns.selected)))
+      |> assign(:observations, Enum.filter(assigns.events, &(assigns.selected in &1.regions)))
 
     ~H"""
     <section id="brain-neural-atlas"
@@ -52,11 +71,45 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         </p>
         <h2 class="mt-1 text-2xl font-semibold">Symbrella Neural Atlas</h2>
         <p class="mt-2 text-sm leading-relaxed text-zinc-300">
-          Select a cognitive-inspired region to explore its registered Elixir modules
-          and related regions. Connections are conceptual navigation, not measured
-          neural firing or verified execution dependencies.
+          Explore registered regions through documented associations, compiled BEAM references
+          and observed telemetry. Each layer represents a different level of evidence.
         </p>
       </div>
+
+      <nav id="atlas-evidence-layers" aria-label="Neural Atlas evidence layers"
+        class="mb-4 flex flex-wrap gap-2">
+        <button :for={{layer, name} <- [
+            {:conceptual, "Conceptual links"},
+            {:dependencies, "BEAM references"},
+            {:telemetry, "Live telemetry"}
+          ]}
+          type="button"
+          id={"atlas-layer-#{layer}"}
+          phx-click="atlas-layer"
+          phx-value-layer={layer}
+          aria-pressed={to_string(@layer == layer)}
+          class={[
+            "min-h-11 rounded-lg border px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-300",
+            @layer == layer && "border-emerald-400 bg-emerald-950 text-emerald-100",
+            @layer != layer && "border-zinc-700 text-zinc-300 hover:border-cyan-500"
+          ]}>
+          {name}
+        </button>
+      </nav>
+
+      <p id="atlas-layer-explanation" class="mb-4 text-xs leading-relaxed text-zinc-400">
+        <%= case @layer do %>
+          <% :dependencies -> %>
+            BEAM imports are static references to external functions between registered modules.
+            They do not establish execution order, dynamic dispatch, or calls that actually ran.
+          <% :telemetry -> %>
+            Only registered telemetry topics received by this connected page are shown.
+            A received event is an observation, not proof of neural firing or a complete execution trace.
+          <% _ -> %>
+            Region associations are documented navigation links, not measured neural firing
+            or verified execution dependencies.
+        <% end %>
+      </p>
 
       <div class="grid gap-5 lg:grid-cols-2">
         <div id="atlas-region-grid" class="grid gap-3 sm:grid-cols-2">
@@ -79,6 +132,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             <span class="mt-1 block text-xs leading-relaxed text-zinc-300">
               {node.subtitle}
             </span>
+            <span :if={@layer == :telemetry and node.key in @linked}
+              class="mt-2 inline-block text-xs font-semibold text-emerald-300">
+              Observed this session
+            </span>
           </button>
         </div>
 
@@ -88,9 +145,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             <p class="mt-2 text-sm leading-relaxed text-zinc-200">
               {@current.description}
             </p>
-            <h4 class="mt-5 text-sm font-semibold text-zinc-100">
-              Registered modules
-            </h4>
+
+            <h4 class="mt-5 text-sm font-semibold text-zinc-100">Registered modules</h4>
             <ul class="mt-2 space-y-2">
               <li :for={mod <- @current.modules}
                 class="break-all rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-xs text-cyan-200">
@@ -100,19 +156,68 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             <p :if={@current.modules == []} class="mt-2 text-xs text-zinc-400">
               No modules registered for this region.
             </p>
-            <h4 class="mt-5 text-sm font-semibold text-zinc-100">
-              Related regions
-            </h4>
-            <div class="mt-2 flex flex-wrap gap-2">
-              <button :for={key <- @linked} type="button"
-                phx-click="select-region" phx-value-region={key}
-                class="min-h-11 rounded-lg border border-cyan-700 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-950">
-                {Registry.label_for(key)}
-              </button>
-            </div>
-            <p :if={@linked == []} class="mt-2 text-xs text-zinc-400">
-              No conceptual links documented.
-            </p>
+
+            <%= if @layer == :conceptual do %>
+              <h4 class="mt-5 text-sm font-semibold text-zinc-100">Related regions</h4>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <button :for={key <- @linked} type="button"
+                  phx-click="select-region" phx-value-region={key}
+                  class="min-h-11 rounded-lg border border-cyan-700 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-950">
+                  {Registry.label_for(key)}
+                </button>
+              </div>
+              <p :if={@linked == []} class="mt-2 text-xs text-zinc-400">
+                No conceptual links documented.
+              </p>
+            <% end %>
+
+            <%= if @layer == :dependencies do %>
+              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+                Outgoing static references ({length(@outgoing)})
+              </h4>
+              <ul id="atlas-outgoing-references" class="mt-2 space-y-2">
+                <li :for={edge <- @outgoing}
+                  class="break-all rounded-lg border border-zinc-700 p-2 text-xs text-cyan-200">
+                  <span class="block font-mono">{edge.source} → {edge.target}.{edge.call}</span>
+                  <button type="button" phx-click="select-region" phx-value-region={edge.to}
+                    class="mt-1 min-h-11 rounded border border-cyan-700 px-3 py-2 text-emerald-200">
+                    Inspect {Registry.label_for(edge.to)}
+                  </button>
+                </li>
+              </ul>
+              <p :if={@outgoing == []} class="mt-2 text-xs text-zinc-400">
+                No cross-region BEAM references found. Dynamic calls and messages are not covered.
+              </p>
+              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+                Incoming static references ({length(@incoming)})
+              </h4>
+              <ul class="mt-2 space-y-2">
+                <li :for={edge <- @incoming}
+                  class="break-all font-mono text-xs text-zinc-300">
+                  {edge.source} → {edge.target}.{edge.call}
+                </li>
+              </ul>
+              <p :if={@incoming == []} class="mt-2 text-xs text-zinc-400">
+                No incoming cross-region BEAM references found.
+              </p>
+            <% end %>
+
+            <%= if @layer == :telemetry do %>
+              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+                Received topic events ({length(@observations)})
+              </h4>
+              <ul id="atlas-observed-telemetry" class="mt-2 max-h-64 space-y-2 overflow-y-auto">
+                <li :for={event <- @observations}
+                  class="break-all rounded-lg border border-zinc-700 px-3 py-2 text-xs">
+                  <time class="text-emerald-200">{event.seen_at}</time>
+                  <span class="block font-mono text-cyan-200">{event.topic}</span>
+                </li>
+              </ul>
+              <p :if={@observations == []} class="mt-2 text-xs text-zinc-400">
+                No matching registered telemetry observed since this page connected.
+              </p>
+            <% end %>
+
             <h4 class="mt-5 text-sm font-semibold text-zinc-100">
               Registered telemetry topics
             </h4>
@@ -129,8 +234,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         </aside>
       </div>
       <p class="mt-5 border-t border-zinc-700 pt-3 text-xs leading-relaxed text-zinc-400">
-        The anatomical map, region runtime status, memory, blackboard and mood
-        remain available elsewhere on this page. Region links are for exploration only.
+        The anatomical map, runtime status, memory, blackboard and mood remain available
+        elsewhere on this page. Evidence layers are read-only.
       </p>
     </section>
     """
