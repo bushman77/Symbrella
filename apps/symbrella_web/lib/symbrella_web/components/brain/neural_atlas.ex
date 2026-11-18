@@ -47,11 +47,28 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
     current = Enum.find(assigns.nodes, &(&1.key == assigns.selected))
     trace = Enum.find(assigns.traces, &(&1.trace_id == assigns.trace_id)) || List.first(assigns.traces)
     trace_steps = if trace, do: trace.events, else: []
+    keys = MapSet.new(Enum.map(assigns.nodes, & &1.key))
+
+    source_relations =
+      Registry.source_relations()
+      |> Enum.filter(fn edge ->
+        MapSet.member?(keys, edge.from) and MapSet.member?(keys, edge.to)
+      end)
+
+    source_for_selected =
+      Enum.filter(source_relations, fn edge ->
+        edge.from == assigns.selected or edge.to == assigns.selected
+      end)
 
     linked =
       (case assigns.layer do
          :dependencies ->
            for edge <- assigns.dependencies, edge.from == assigns.selected, do: edge.to
+
+         :source ->
+           for edge <- source_for_selected do
+             if edge.from == assigns.selected, do: edge.to, else: edge.from
+           end
 
          :telemetry ->
            for event <- assigns.events, region <- event.regions, do: region
@@ -71,6 +88,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
     assigns =
       assigns
       |> assign(:current, current)
+      |> assign(:source_relations, source_relations)
+      |> assign(:source_for_selected, source_for_selected)
       |> assign(:trace, trace)
       |> assign(:trace_steps, trace_steps)
       |> assign(:region_trace_steps, Enum.filter(trace_steps, &(&1.region == assigns.selected)))
@@ -102,6 +121,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         class="mb-4 flex flex-wrap gap-2">
         <button :for={{layer, name} <- [
             {:conceptual, "Conceptual links"},
+            {:source, "Source topology"},
             {:dependencies, "BEAM references"},
             {:telemetry, "Live telemetry"},
             {:bus, "Bus events"},
@@ -123,6 +143,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
 
       <p id="atlas-layer-explanation" class="mb-4 text-sm leading-relaxed text-zinc-400">
         <%= case @layer do %>
+          <% :source -> %>
+            Source topology displays documented grouping, configured planner references,
+            explicit function calls and telemetry subscriptions. These are source-backed
+            architecture declarations, not evidence that execution occurred.
           <% :dependencies -> %>
             BEAM imports are static references to external functions between registered modules.
             They do not establish execution order, dynamic dispatch, or calls that actually ran.
@@ -170,6 +194,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
           selected={@selected}
           layer={@layer}
           dependencies={@dependencies}
+          sources={@source_relations}
           events={@events}
           bus_events={@bus_events}
           trace={@trace}
@@ -231,6 +256,31 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
               </div>
               <p :if={@linked == []} class="mt-2 text-xs text-zinc-400">
                 No conceptual links documented.
+              </p>
+            <% end %>
+
+            <%= if @layer == :source do %>
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
+                Source-backed relationships ({length(@source_for_selected)})
+              </h4>
+              <ul id="atlas-source-relations" class="mt-2 space-y-3">
+                <li :for={edge <- @source_for_selected}
+                  class="rounded-lg border border-violet-700/60 bg-zinc-950 p-3 text-sm">
+                  <p class="font-semibold text-violet-200">
+                    {edge.kind |> Atom.to_string() |> String.replace("_", " ")}
+                  </p>
+                  <button type="button" phx-click="select-region"
+                    phx-value-region={if edge.from == @selected, do: edge.to, else: edge.from}
+                    class="mt-1 min-h-11 rounded-lg border border-cyan-700 px-3 py-2 text-cyan-200 hover:bg-cyan-950">
+                    {Registry.label_for(if edge.from == @selected, do: edge.to, else: edge.from)}
+                  </button>
+                  <p class="mt-2 break-words font-mono text-xs text-zinc-300">
+                    {edge.source}
+                  </p>
+                </li>
+              </ul>
+              <p :if={@source_for_selected == []} class="mt-2 text-sm text-zinc-400">
+                No source-backed links recorded for this region.
               </p>
             <% end %>
 
