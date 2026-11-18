@@ -128,4 +128,28 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
     assert html =~ "no region attribution"
     assert html =~ "not verified function executions"
   end
+  test "graph is the primary view while the existing cards remain an optional list" do
+    nodes = [
+      %{key: :lifg, label: "LIFG", subtitle: "Lexical", description: "Lexical",
+        modules: [Brain.LIFG], telemetry: [], related: [:atl]},
+      %{key: :atl, label: "ATL", subtitle: "Integration", description: "Integration",
+        modules: [Brain.ATL], telemetry: [], related: [:lifg]}
+    ]
+
+    graph = render_component(&NeuralAtlas.panel/1, nodes: nodes, selected: :lifg)
+    list = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :lifg, display: :list)
+
+    assert graph =~ ~s(id="atlas-network-graph")
+    assert graph =~ ~s(id="atlas-display-graph")
+    assert graph =~ ~s(id="atlas-region-lifg")
+    assert graph =~ ~s(phx-click="atlas-display")
+    refute graph =~ ~s(id="atlas-region-grid")
+
+    assert list =~ ~s(id="atlas-region-grid")
+    assert list =~ ~s(id="atlas-region-lifg")
+    refute list =~ ~s(id="atlas-network-graph")
+    assert list =~ "Registered modules"
+  end
+
 end
