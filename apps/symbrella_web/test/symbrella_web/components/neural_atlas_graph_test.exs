@@ -243,27 +243,47 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
       related: [:atl], telemetry: []}
   ]
 
+  # Mirror CognitiveTraceStore's sanitized, timed event contract. These
+  # complete receipts are also rendered by NeuralAtlas and its nested panels.
   @completed_turn %{
     trace_id: "turn-aabbcc",
+    status: :completed,
     events: [
       %{stage: :lifg_selection, region: :lifg, status: :ok,
-        evidence: %{choices: 3}},
+        duration_us: 2_000, at_ms: 1_000, evidence: %{choices: 3}},
       %{stage: :atl_integration, region: :atl, status: :ok,
-        evidence: %{slate_present: true}},
+        duration_us: 1_000, at_ms: 1_002, evidence: %{slate_present: true}},
       %{stage: :prefrontal_control, region: :prefrontal, status: :ok,
+        duration_us: 1_500, at_ms: 1_004,
         evidence: %{
-          available: true,
+          available: true, feedback_quality: :heuristic_proxy,
+          controls: %{top_k: 4},
           planners: [
-            %{region: :dlpfc, status: :produced},
-            %{region: :fpc, status: :no_opinion},
-            %{region: :vmpfc, status: :failed},
-            %{region: :dmpfc, status: :unavailable},
-            %{region: :salience, status: :rejected}
+            %{region: :dlpfc, status: :produced, reason: :validated,
+              proposed_keys: [:top_k], merged_keys: [:top_k],
+              superseded_keys: []},
+            %{region: :fpc, status: :no_opinion, reason: :empty_result,
+              proposed_keys: [], merged_keys: [], superseded_keys: []},
+            %{region: :vmpfc, status: :failed, reason: :planner_exception,
+              proposed_keys: [], merged_keys: [], superseded_keys: []},
+            %{region: :dmpfc, status: :unavailable, reason: :module_not_loaded,
+              proposed_keys: [], merged_keys: [], superseded_keys: []},
+            %{region: :salience, status: :rejected,
+              reason: :no_valid_control_values,
+              proposed_keys: [], merged_keys: [], superseded_keys: []}
           ]
         }},
-      %{stage: :action_selection, region: nil, status: :ok, evidence: %{}},
+      %{stage: :action_selection, region: nil, status: :ok,
+        duration_us: 500, at_ms: 1_006,
+        evidence: %{
+          shadow_status: :evaluated,
+          shadow_reason: :bounded_candidate_modulation,
+          live_action: :answer_user, shadow_action: :answer_user,
+          changed: false, applied_keys: [], unused_keys: [:top_k],
+          applied_sources: [], adjustments: []
+        }},
       %{stage: :hippocampus_persist, region: :hippocampus,
-        status: :ok, evidence: %{}}
+        status: :ok, duration_us: 600, at_ms: 1_008, evidence: %{}}
     ]
   }
 
