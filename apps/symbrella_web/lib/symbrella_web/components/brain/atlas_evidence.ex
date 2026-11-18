@@ -84,6 +84,43 @@ defmodule SymbrellaWeb.Components.Brain.AtlasEvidence do
 
   def capture(events, _env, _nodes, _at_ms), do: events
 
+  @doc """
+  Stores non-telemetry Brain.Bus receipt metadata without retaining payloads.
+  A region is attached only when the envelope explicitly names a registered key.
+  """
+  def capture_bus(events, env, nodes, at_ms \\ System.system_time(:millisecond))
+
+  def capture_bus(events, env, nodes, at_ms)
+      when is_list(events) and is_map(env) and is_list(nodes) and is_integer(at_ms) do
+    kind = Map.get(env, :kind, Map.get(env, "kind"))
+
+    if (is_atom(kind) or is_binary(kind)) and kind not in [:telemetry, "telemetry"] do
+      registered = Enum.map(nodes, & &1.key)
+      claimed = Map.get(env, :region, Map.get(env, "region"))
+
+      region =
+        Enum.find(registered, fn key ->
+          claimed == key or claimed == Atom.to_string(key)
+        end)
+
+      observed = %{
+        kind: inspect(kind),
+        region: region,
+        at_ms: at_ms,
+        seen_at:
+          at_ms
+          |> DateTime.from_unix!(:millisecond)
+          |> Calendar.strftime("%H:%M:%S UTC")
+      }
+
+      [observed | events] |> Enum.take(@max_events)
+    else
+      events
+    end
+  end
+
+  def capture_bus(events, _env, _nodes, _at_ms), do: events
+
   defp imports(mod) do
     with true <- Code.ensure_loaded?(mod),
          path when is_list(path) <- :code.which(mod),
