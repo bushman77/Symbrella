@@ -208,12 +208,23 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
       |> assign(:received, Enum.sum(Map.values(observed)))
 
     ~H"""
-    <div id="atlas-network-graph" class="min-w-0" data-layer={@layer}>
-      <div class="overflow-x-auto rounded-2xl border border-cyan-700/50 bg-[#050d19] shadow-[inset_0_0_70px_rgba(6,182,212,0.06)]">
-        <div class="relative h-[600px] min-w-[940px] overflow-hidden"
-          role="group" aria-label="Selectable Symbrella cognitive-region network">
+    <div id="atlas-network-graph" class="min-w-0" data-layer={@layer}
+      style="min-width: 0; width: 100%;">
+      <p id="atlas-mobile-scroll-hint" class="mb-2 text-xs text-cyan-200 sm:hidden">
+        Swipe sideways to explore the network. Tap any region to inspect it.
+      </p>
+      <div id="atlas-network-viewport"
+        class="overflow-x-auto rounded-2xl border border-cyan-700/50 bg-[#050d19] shadow-[inset_0_0_70px_rgba(6,182,212,0.06)]"
+        role="region" tabindex="0"
+        aria-label="Scrollable Symbrella cognitive-region network"
+        aria-describedby="atlas-mobile-scroll-hint"
+        style="max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;">
+        <div id="atlas-network-canvas" class="relative overflow-hidden"
+          role="group" aria-label="Selectable Symbrella cognitive-region network"
+          style="position: relative; width: 100%; min-width: 1000px; height: 600px; overflow: hidden;">
           <svg class="pointer-events-none absolute inset-0 h-full w-full"
             viewBox="0 0 1000 600" preserveAspectRatio="none"
+            style="pointer-events: none; position: absolute; inset: 0; width: 100%; height: 100%;"
             aria-hidden="true">
             <defs>
               <pattern id="atlas-network-grid-pattern" width="40" height="40"
@@ -315,7 +326,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
             aria-pressed={to_string(@selected == node.key)}
             aria-label={"Inspect #{node.label} cognitive region"}
             title={"#{node.label} — #{node.subtitle}"}
-            style={"left: #{node.left}; top: #{node.top};"}
+            style={"position: absolute; left: #{node.left}; top: #{node.top}; width: 88px; height: 88px; transform: translate(-50%, -50%);"}
             class={[
               "absolute z-10 flex h-[88px] w-[88px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-2 px-2 text-center shadow-xl transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-white/80 motion-reduce:transition-none",
               @selected == node.key && "border-emerald-300 bg-emerald-900 text-white shadow-emerald-400/40 ring-4 ring-emerald-500/30",
