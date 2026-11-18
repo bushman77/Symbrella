@@ -38,6 +38,15 @@ defmodule Core.Brain.ActionSelectionTest do
     assert out.agency_commands == []
     assert out.agency_command_results == []
 
+    assert out.decision_lineage.initial_action == :safe_support
+    assert out.decision_lineage.final_action == :safe_support
+    assert out.decision_lineage.initial_decision_trace_id == trace_id
+    assert out.decision_lineage.final_decision_trace_id == trace_id
+    assert out.decision_lineage.shadow_status in [:evaluated, :skipped, :failed, :disabled]
+    assert out.decision_lineage.reconciliation == :pending
+    assert out.decision_lineage.initial_command_statuses == []
+    assert out.decision_lineage.delivery_status == :not_observed
+
     assert Enum.any?(out.trace, fn
              %{
                stage: :action_selection,
@@ -77,6 +86,12 @@ defmodule Core.Brain.ActionSelectionTest do
                reason: :permission_required
              }
            ] = out.agency_command_results
+
+    # The original command result is recorded as deferred, not as a
+    # successful memory write or proof of final action delivery.
+    assert out.decision_lineage.initial_command_statuses == [:deferred]
+    assert out.decision_lineage.final_command_statuses == [:deferred]
+    assert out.decision_lineage.initial_action == :store_memory
   end
 
   test "Core action selection routes recognized SVO statements as conversation" do
