@@ -128,6 +128,41 @@ defmodule SymbrellaWeb.CognitiveTraceStoreTest do
     refute inspect(action.evidence) =~ "NEVER KEEP ME"
   end
 
+  test "decision lineage is allowlisted through the store without command or reply payloads" do
+    raw = %{
+      initial_action: :ask_clarifying_question,
+      final_action: :answer_user,
+      initial_safety_gate: :approved,
+      final_safety_gate: :approved,
+      reconciliation: :reconciled,
+      reason: :social_intent_reconciliation,
+      shadow_action: :observe_silently,
+      shadow_status: :evaluated,
+      shadow_applied_keys: [:utility_prior, :secret_control],
+      initial_command_statuses: [:deferred, :secret_status],
+      final_command_statuses: [],
+      delivery_status: :delivered,
+      response_text: "PRIVATE REPLY",
+      user_text: "PRIVATE INPUT",
+      initial_decision_trace_id: "PRIVATE DECISION ID"
+    }
+
+    {_, trace} = record(state(), "turn-dec1510", :response_planning, :ok, 100, raw)
+    [event] = trace.events
+    assert event.stage == :response_planning
+    assert event.region == nil
+    assert event.evidence.initial_action == :ask_clarifying_question
+    assert event.evidence.final_action == :answer_user
+    assert event.evidence.reconciliation == :reconciled
+    assert event.evidence.reason == :social_intent_reconciliation
+    assert event.evidence.shadow_applied_keys == [:utility_prior]
+    assert event.evidence.initial_command_statuses == [:deferred, :unknown]
+    assert event.evidence.final_command_statuses == []
+    assert event.evidence.delivery_status == :not_observed
+    refute inspect(event) =~ "PRIVATE"
+    refute Map.has_key?(event.evidence, :initial_decision_trace_id)
+  end
+
   test "empty executive reports are explicitly marked unavailable" do
     {_, trace} =
       record(state(), "turn-001122", :prefrontal_control, :ok, 100,
