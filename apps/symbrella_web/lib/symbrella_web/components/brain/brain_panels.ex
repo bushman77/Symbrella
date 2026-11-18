@@ -174,18 +174,6 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         </div>
       </div>
       
-    <!-- Live state + Module Status -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div data-brain-report-section="Live Region State">
-        <SymbrellaWeb.BrainHTML.live_state_panel
-          state={Map.merge(@region_status || %{}, %{state: @snapshot})}
-        />
-        </div>
-        <div data-brain-report-section="Module Status">
-          <SymbrellaWeb.BrainHTML.module_status_panel status={@region_status} selected={@selected} />
-        </div>
-      </div>
-      
     <!-- Mood only -->
       <div class="grid grid-cols-1">
         <div data-brain-report-section="Current Mood and Neuromodulators">
