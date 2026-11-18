@@ -19,6 +19,7 @@ defmodule SymbrellaWeb.BrainLive do
   use SymbrellaWeb, :live_view
 
   alias SymbrellaWeb.BrainHTML
+  alias SymbrellaWeb.Components.Brain.NeuralAtlas
   alias SymbrellaWeb.BrainRuntime
   alias SymbrellaWeb.SocialBrainActivity
   alias SymbrellaWeb.Components.Brain.ActivationTrend
@@ -58,6 +59,8 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:auto, fn -> false end)
       |> assign_new(:clock, fn -> %{} end)
       |> assign_new(:svg_base, fn -> load_brain_svg() end)
+      |> assign_new(:brain_view, fn -> :atlas end)
+      |> assign_new(:atlas_nodes, fn -> NeuralAtlas.regions() end)
       |> assign_new(:bb_filter, fn -> "" end)
       |> assign_new(:wm, fn -> %{} end)
       |> assign_new(:activation_samples, fn -> [] end)
@@ -252,6 +255,14 @@ defmodule SymbrellaWeb.BrainLive do
     send(self(), :refresh_selected)
     {:noreply, assign(socket, :selected, sel)}
   end
+
+  # Preserve the anatomical diagram and all current live diagnostics.
+  @impl true
+  def handle_event("brain-view", %{"view" => "atlas"}, socket),
+    do: {:noreply, assign(socket, :brain_view, :atlas)}
+
+  def handle_event("brain-view", %{"view" => "anatomy"}, socket),
+    do: {:noreply, assign(socket, :brain_view, :anatomy)}
 
   @impl true
   def handle_event("refresh", _params, socket) do
