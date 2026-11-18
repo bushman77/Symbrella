@@ -10,6 +10,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
   alias SymbrellaWeb.Region.Registry
   alias SymbrellaWeb.Components.Brain.NeuralAtlasGraph
   alias SymbrellaWeb.Components.Brain.CognitiveTracePanel
+  alias SymbrellaWeb.Components.Brain.ExecutiveTracePanel
 
   @spec regions() :: list(map())
   def regions do
@@ -47,6 +48,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
     current = Enum.find(assigns.nodes, &(&1.key == assigns.selected))
     trace = Enum.find(assigns.traces, &(&1.trace_id == assigns.trace_id)) || List.first(assigns.traces)
     trace_steps = if trace, do: trace.events, else: []
+    executive = ExecutiveTracePanel.report(trace)
     keys = MapSet.new(Enum.map(assigns.nodes, & &1.key))
 
     source_relations =
@@ -77,8 +79,16 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
            for event <- assigns.bus_events, not is_nil(event.region), do: event.region
 
          :trace ->
-           for event <- trace_steps, event.status == :ok, not is_nil(event.region),
-             do: event.region
+           stage_regions =
+             for event <- trace_steps, event.status == :ok, not is_nil(event.region),
+               do: event.region
+
+           planner_regions =
+             for planner <- executive.planners,
+                 planner.status in [:produced, :no_opinion, :failed, :rejected],
+                 do: planner.region
+
+           stage_regions ++ planner_regions
 
          _ ->
            if current, do: current.related, else: []
@@ -91,6 +101,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
       |> assign(:source_relations, source_relations)
       |> assign(:source_for_selected, source_for_selected)
       |> assign(:trace, trace)
+      |> assign(:executive, executive)
       |> assign(:trace_steps, trace_steps)
       |> assign(:region_trace_steps, Enum.filter(trace_steps, &(&1.region == assigns.selected)))
       |> assign(:linked, linked)
@@ -371,8 +382,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
                 </li>
               </ul>
               <p :if={@region_trace_steps == []} class="mt-2 text-xs text-zinc-400">
-                No explicitly instrumented operations for this region in the selected turn.
+                No directly timed stage for this region in the selected turn.
+                Planner calls, when reported, are listed separately below.
               </p>
+              <ExecutiveTracePanel.inspector executive={@executive} region={@selected} />
             <% end %>
 
             <h4 class="mt-5 text-base font-semibold text-zinc-100">
@@ -392,6 +405,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
       </div>
       <CognitiveTracePanel.panel :if={@layer == :trace}
         trace={@trace} traces={@traces} />
+      <ExecutiveTracePanel.panel :if={@layer == :trace} trace={@trace} />
 
       <p class="mt-5 border-t border-zinc-700 pt-3 text-xs leading-relaxed text-zinc-400">
         The anatomical map, runtime status, memory, blackboard and mood remain available
