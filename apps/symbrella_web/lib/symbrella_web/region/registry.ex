@@ -43,6 +43,21 @@ defmodule SymbrellaWeb.Region.Registry do
     related: []
   }
 
+  # Source-verified architecture relationships. These describe the implementation
+  # structure, *not* proof that a function executed during a chat turn.
+  # :planner_reference is a dynamically dispatched configured planner.
+  # :telemetry_subscription is a declared listener, not a signal receipt.
+  @source_relations [
+    %{from: :frontal, to: :prefrontal, kind: :grouping, source: "Brain.Frontal.status/0"},
+    %{from: :prefrontal, to: :dlpfc, kind: :planner_reference, source: "Brain.Prefrontal.@planners: Brain.DLPFC.Policy.choose_policy/1"},
+    %{from: :prefrontal, to: :vmpfc, kind: :planner_reference, source: "Brain.Prefrontal.@planners: Brain.VmPFC.compute_utility/1"},
+    %{from: :prefrontal, to: :fpc, kind: :planner_reference, source: "Brain.Prefrontal.@planners: Brain.FPC.plan_branches/1"},
+    %{from: :prefrontal, to: :dmpfc, kind: :planner_reference, source: "Brain.Prefrontal.@planners: Brain.DmPFC.calibrate_confidence/1"},
+    %{from: :prefrontal, to: :ofc, kind: :grouping, source: "Brain.Prefrontal.status/0 children"},
+    %{from: :lifg, to: :cerebellum, kind: :direct_call, source: "Brain.LIFG.Stage1.cereb_calibrate/4 → Brain.Cerebellum.calibrate_scores/4"},
+    %{from: :dlpfc, to: :thalamus, kind: :telemetry_subscription, source: "Brain.DLPFC.init/1 subscribes to [:brain, :thalamus, :curiosity, :decision]"}
+  ]
+
   # Registry-owned meta. These values override module-provided meta (if any).
   @meta_by_key %{
     lifg: %{
@@ -142,9 +157,62 @@ defmodule SymbrellaWeb.Region.Registry do
       telemetry: [[:brain, :gate, :decision]],
       config_examples: []
     },
-    # Conceptual atlas links live with registry metadata, not in the view.
-    atl: %{related: [:lifg, :temporal, :hippocampus]},
-    prefrontal: %{related: [:acc, :salience, :basal_ganglia]},
+    # Existing conceptual associations remain distinct from source references.
+    atl: %{related: [:lifg, :temporal, :hippocampus],
+      modules: [Brain.ATL, Core.Brain.ATL]},
+    frontal: %{
+      subtitle: "Frontal Grouping",
+      desc: "Pure grouping facade; child regions hold the actual cognitive state.",
+      modules: [Brain.Frontal]
+    },
+    prefrontal: %{
+      related: [:acc, :salience, :basal_ganglia],
+      subtitle: "Prefrontal Control Aggregator",
+      desc: "Pure planner aggregation; consults available policy, utility, branch and calibration modules via guarded dynamic dispatch.",
+      modules: [Brain.Prefrontal, Core.Brain.Prefrontal]
+    },
+    fpc: %{
+      subtitle: "Branch and Switch Planning",
+      desc: "Stateless planner for alternate branch budget and switching delay.",
+      modules: [Brain.FPC],
+      telemetry: [[:brain, :fpc, :branch]]
+    },
+    dlpfc: %{
+      subtitle: "Goal and Curiosity Control",
+      desc: "Observes Thalamus decisions and curiosity proposals; execution is gated by configuration.",
+      modules: [Brain.DLPFC, Brain.DLPFC.Policy],
+      telemetry: [[:brain, :dlpfc, :proposal_cached], [:brain, :dlpfc, :heard]]
+    },
+    vmpfc: %{
+      subtitle: "Utility and Exploration",
+      desc: "Pure planner for longer-horizon utility and exploration rates.",
+      modules: [Brain.VmPFC],
+      telemetry: [[:brain, :vmpfc, :utility]]
+    },
+    dmpfc: %{
+      subtitle: "Confidence Calibration",
+      desc: "Pure performance monitor for confidence scale and conflict sensitivity.",
+      modules: [Brain.DmPFC],
+      telemetry: [[:brain, :dmpfc, :calibration]]
+    },
+    ofc: %{
+      subtitle: "Proposal Value Estimation",
+      desc: "Curiosity proposal valuation informed by mood; listens to proposal and mood telemetry.",
+      modules: [Brain.OFC],
+      telemetry: [[:brain, :ofc, :value]]
+    },
+    cerebellum: %{
+      subtitle: "LIFG Score Calibration",
+      desc: "Candidate score calibration and bounded online learning in support of LIFG Stage 1.",
+      modules: [Brain.Cerebellum],
+      telemetry: [[:brain, :cerebellum, :lifg, :predict], [:brain, :cerebellum, :lifg, :learn]]
+    },
+    temporal: %{
+      subtitle: "Temporal Context Window",
+      desc: "Runtime temporal context window with push, prune and status telemetry.",
+      modules: [Brain.Temporal],
+      telemetry: [[:brain, :temporal, :pushed], [:brain, :temporal, :pruned], [:brain, :temporal, :status]]
+    },
     amygdala: %{related: [:salience, :hippocampus]},
     bg: %{
       subtitle: "Action Selection",
@@ -171,6 +239,9 @@ defmodule SymbrellaWeb.Region.Registry do
   def keys, do: Map.keys(by_key_map())
   def available?(key), do: Map.has_key?(by_key_map(), key)
   def module_for(key), do: Map.get(by_key_map(), key)
+
+  @doc "Declared source-backed relationships, not observed runtime execution."
+  def source_relations, do: @source_relations
 
   # Safe definition fetch (with sensible defaults if a module is missing).
   # If a region module implements defn/0 we use it directly; otherwise we
@@ -202,6 +273,7 @@ defmodule SymbrellaWeb.Region.Registry do
     |> ensure_identity(key)
     |> ensure_meta_defaults()
     |> apply_meta_override(key)
+    |> include_source_neighbors(key)
   end
 
   def mask_keys, do: Map.keys(mask_paths())
@@ -332,6 +404,17 @@ defmodule SymbrellaWeb.Region.Registry do
         %{}
 
     Map.merge(defn, meta)
+  end
+
+  defp include_source_neighbors(%{} = defn, key) do
+    neighbors =
+      for %{from: from, to: to} <- @source_relations,
+          other = if(from == key, do: to, else: if(to == key, do: from, else: nil)),
+          not is_nil(other),
+          do: other
+
+    related = (List.wrap(Map.get(defn, :related, [])) ++ neighbors) |> Enum.uniq()
+    Map.put(defn, :related, related)
   end
 
   defp alias_key(:bg), do: :basal_ganglia
