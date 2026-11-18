@@ -24,7 +24,7 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
     speech_act_binding: "Social speech-act binding",
     phase_7_planning: "7 · WM and response planning",
     phase_8_memory: "8 · Experience and memory",
-    hippocampus_persist: "Hippocampus · Qualified persistence"
+    hippocampus_persist: "Hippocampus · Persistence decision"
   }
 
   @doc "Return a human-readable stage label without executing user data."
@@ -68,7 +68,7 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
       aria-label="Instrumented cognitive turn execution">
       <h3 class="text-lg font-semibold text-emerald-200">Cognitive Trace v1</h3>
       <p class="mt-1 text-sm leading-relaxed text-zinc-300">
-        Verified function entry/return boundaries for chat worker turns.
+        Timed, instrumented function calls in actual chat worker turns.
         Durations include nested operations. An executed stage does not establish
         successful comprehension; degraded summaries remain explicitly visible.
       </p>
