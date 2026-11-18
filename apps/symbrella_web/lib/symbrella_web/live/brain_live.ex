@@ -65,6 +65,7 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:atlas_layer, fn -> :conceptual end)
       |> assign_new(:atlas_dependencies, fn -> AtlasEvidence.dependencies(NeuralAtlas.regions()) end)
       |> assign_new(:atlas_events, fn -> [] end)
+      |> assign_new(:atlas_bus_events, fn -> [] end)
       |> assign_new(:bb_filter, fn -> "" end)
       |> assign_new(:wm, fn -> %{} end)
       |> assign_new(:activation_samples, fn -> [] end)
@@ -263,11 +264,12 @@ defmodule SymbrellaWeb.BrainLive do
   # Switch evidence layers without changing Brain execution.
   @impl true
   def handle_event("atlas-layer", %{"layer" => layer}, socket)
-      when layer in ["conceptual", "dependencies", "telemetry"] do
+      when layer in ["conceptual", "dependencies", "telemetry", "bus"] do
     selected =
       case layer do
         "dependencies" -> :dependencies
         "telemetry" -> :telemetry
+        "bus" -> :bus
         _ -> :conceptual
       end
 
@@ -824,8 +826,12 @@ defmodule SymbrellaWeb.BrainLive do
     bb_event = wrap_bb_event(env)
 
     socket =
-      update(socket, :atlas_events, fn events ->
+      socket
+      |> update(:atlas_events, fn events ->
         AtlasEvidence.capture(events, env, socket.assigns.atlas_nodes)
+      end)
+      |> update(:atlas_bus_events, fn events ->
+        AtlasEvidence.capture_bus(events, env, socket.assigns.atlas_nodes)
       end)
 
     {:noreply,
