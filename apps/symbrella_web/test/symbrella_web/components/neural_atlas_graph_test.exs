@@ -219,4 +219,171 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     end
   end
 
+  @trace_nodes @nodes ++ [
+    %{key: :prefrontal, label: "Prefrontal", subtitle: "Planner aggregation",
+      description: "Executive", modules: [Brain.Prefrontal],
+      related: [:dlpfc, :fpc, :vmpfc, :dmpfc], telemetry: []},
+    %{key: :dlpfc, label: "DLPFC", subtitle: "Policy",
+      description: "Policy", modules: [Brain.DLPFC.Policy],
+      related: [:prefrontal], telemetry: []},
+    %{key: :fpc, label: "FPC", subtitle: "Branching",
+      description: "Branching", modules: [Brain.FPC],
+      related: [:prefrontal], telemetry: []},
+    %{key: :vmpfc, label: "VMPFC", subtitle: "Utility",
+      description: "Utility", modules: [Brain.VmPFC],
+      related: [:prefrontal], telemetry: []},
+    %{key: :dmpfc, label: "DMPFC", subtitle: "Confidence",
+      description: "Confidence", modules: [Brain.DmPFC],
+      related: [:prefrontal], telemetry: []},
+    %{key: :salience, label: "Salience", subtitle: "Attention",
+      description: "Attention", modules: [Brain.Salience],
+      related: [:prefrontal], telemetry: []},
+    %{key: :hippocampus, label: "Hippocampus", subtitle: "Memory",
+      description: "Memory", modules: [Brain.Hippocampus],
+      related: [:atl], telemetry: []}
+  ]
+
+  @completed_turn %{
+    trace_id: "turn-aabbcc",
+    events: [
+      %{stage: :lifg_selection, region: :lifg, status: :ok,
+        evidence: %{choices: 3}},
+      %{stage: :atl_integration, region: :atl, status: :ok,
+        evidence: %{slate_present: true}},
+      %{stage: :prefrontal_control, region: :prefrontal, status: :ok,
+        evidence: %{
+          available: true,
+          planners: [
+            %{region: :dlpfc, status: :produced},
+            %{region: :fpc, status: :no_opinion},
+            %{region: :vmpfc, status: :failed},
+            %{region: :dmpfc, status: :unavailable},
+            %{region: :salience, status: :rejected}
+          ]
+        }},
+      %{stage: :action_selection, region: nil, status: :ok, evidence: %{}},
+      %{stage: :hippocampus_persist, region: :hippocampus,
+        status: :ok, evidence: %{}}
+    ]
+  }
+
+  test "reported Prefrontal planner invocations become edges, unavailable planners do not" do
+    edges = NeuralAtlasGraph.edges(@trace_nodes, :trace, @completed_turn)
+
+    invocations = Enum.filter(edges, &(&1.kind == :planner_invocation))
+    assert length(invocations) == 4
+    assert Enum.all?(invocations, &(&1.from == :prefrontal and &1.directed))
+
+    assert Enum.any?(invocations, &(&1.to == :dlpfc and &1.status == :produced))
+    assert Enum.any?(invocations, &(&1.to == :fpc and &1.status == :no_opinion))
+    assert Enum.any?(invocations, &(&1.to == :vmpfc and &1.status == :failed))
+    assert Enum.any?(invocations, &(&1.to == :salience and &1.status == :rejected))
+    refute Enum.any?(invocations, &(&1.to == :dmpfc))
+
+    # Planner provenance does not imply execution of its recommendation.
+    refute Enum.any?(invocations, &Map.has_key?(&1, :live_action_applied))
+  end
+
+  test "completed region stages form order-only links, not claimed direct calls" do
+    edges = NeuralAtlasGraph.edges(@trace_nodes, :trace, @completed_turn)
+    order = Enum.filter(edges, &(&1.kind == :stage_order))
+
+    assert Enum.map(order, &{&1.from, &1.to}) == [
+      {:lifg, :atl},
+      {:atl, :prefrontal},
+      {:prefrontal, :hippocampus}
+    ]
+    assert Enum.all?(order, &(&1.directed and is_atom(&1.from_stage) and
+                                is_atom(&1.to_stage)))
+    refute Enum.any?(order, &Map.has_key?(&1, :status))
+  end
+
+  test "trace edges require successful source stages and explicit planner reports" do
+    empty = %{trace_id: "turn-empty", events: []}
+    assert NeuralAtlasGraph.edges(@trace_nodes, :trace, empty) == []
+    assert NeuralAtlasGraph.edges(@trace_nodes, :trace, nil) == []
+
+    # A started or failed stage is not a completed-stage edge.
+    incomplete = %{trace_id: "turn-incomplete", events: [
+      %{stage: :lifg_selection, region: :lifg, status: :started},
+      %{stage: :atl_integration, region: :atl, status: :error},
+      %{stage: :prefrontal_control, region: :prefrontal, status: :error,
+        evidence: %{available: true, planners: [%{region: :dlpfc, status: :produced}]}},
+      %{stage: :hippocampus_persist, region: :hippocampus, status: :started}
+    ]}
+
+    assert NeuralAtlasGraph.edges(@trace_nodes, :trace, incomplete) == []
+
+    unavailable = %{trace_id: "turn-unavailable", events: [
+      %{stage: :prefrontal_control, region: :prefrontal, status: :ok,
+        evidence: %{available: false,
+          planners: [%{region: :dlpfc, status: :produced}]}}
+    ]}
+    assert NeuralAtlasGraph.edges(@trace_nodes, :trace, unavailable) == []
+  end
+
+  test "observations cannot fabricate links between unrelated registered regions" do
+    unknown = %{trace_id: "turn-unknown", events: [
+      %{stage: :invented, region: :fpc, status: :ok},
+      %{stage: :lifg_selection, region: :lifg, status: :ok},
+      %{stage: :atl_integration, region: :unregistered, status: :ok},
+      %{stage: :prefrontal_control, region: :prefrontal, status: :ok,
+        evidence: %{available: true, planners: [
+          %{region: :dmpfc, status: :unavailable},
+          %{region: :bad_region, status: :produced}
+        ]}}
+    ]}
+
+    assert NeuralAtlasGraph.edges(@trace_nodes, :trace, unknown) ==
+             [%{kind: :stage_order, from: :lifg, to: :prefrontal,
+                directed: true, from_stage: :lifg_selection,
+                to_stage: :prefrontal_control}]
+    # Conceptual metadata still renders only as faint dotted context.
+    html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @trace_nodes, selected: :lifg, layer: :trace, trace: unknown)
+    assert html =~ ~s(data-edge-kind="conceptual-context")
+    assert html =~ ~s(data-edge-kind="trace-stage_order")
+    refute html =~ ~s(data-edge-kind="trace-planner_invocation")
+    refute html =~ ~s(data-edge-kind="beam")
+  end
+
+  test "trace graph draws visually distinct observed invocations and stage-order connections" do
+    html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @trace_nodes, selected: :prefrontal,
+      layer: :trace, trace: @completed_turn)
+
+    assert html =~ ~s(data-layer="trace")
+    assert html =~ ~s(data-edge-kind="trace-planner_invocation")
+    assert html =~ ~s(data-edge-kind="trace-stage_order")
+    assert html =~ ~s(data-invocation-status="no_opinion")
+    assert html =~ "url(#atlas-network-invocation-arrow)"
+    assert html =~ ~s(id="atlas-trace-edge-legend")
+    assert html =~ "4 reported planner invocations (solid amber)"
+    assert html =~ "3 successive completed region stages"
+    assert html =~ "order only"
+    assert html =~ ~s(id="atlas-network-viewport")
+    assert html =~ "min-width: 1000px; height: 600px;"
+    refute html =~ ~s(data-edge-kind="beam")
+  end
+
+  test "choosing another turn replaces all active links while keeping conceptual context" do
+    quiet = %{trace_id: "turn-quiet", events: [
+      %{stage: :lifg_selection, region: :lifg, status: :ok, evidence: %{}}
+    ]}
+
+    active_html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @trace_nodes, selected: :prefrontal,
+      layer: :trace, trace: @completed_turn)
+    quiet_html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @trace_nodes, selected: :prefrontal,
+      layer: :trace, trace: quiet)
+
+    assert active_html =~ ~s(data-edge-kind="trace-planner_invocation")
+    refute quiet_html =~ ~s(data-edge-kind="trace-planner_invocation")
+    refute quiet_html =~ ~s(data-edge-kind="trace-stage_order")
+    assert quiet_html =~ ~s(data-edge-kind="conceptual-context")
+    assert quiet_html =~ "0 reported planner invocations"
+    assert quiet_html =~ "0 successive completed region stages"
+  end
+
 end
