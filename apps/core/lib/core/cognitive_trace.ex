@@ -14,8 +14,33 @@ defmodule Core.CognitiveTrace do
   @regions %{
     lifg_selection: :lifg,
     atl_integration: :atl,
+    prefrontal_control: :prefrontal,
     hippocampus_persist: :hippocampus
   }
+
+  @planner_regions %{
+    Brain.DLPFC.Policy => :dlpfc,
+    Brain.VmPFC => :vmpfc,
+    Brain.FPC => :fpc,
+    Brain.DmPFC => :dmpfc,
+    Brain.Salience => :salience
+  }
+
+  @control_keys [
+    :policy, :top_k, :max_retries, :branch_budget, :switch_after_ms,
+    :utility_prior, :explore_rate, :confidence_scale, :acc_conflict_gain,
+    :salience_boost
+  ]
+  @actions [
+    :answer_user, :ask_clarifying_question, :store_memory, :observe_silently,
+    :self_check, :refuse_or_redirect, :safe_support
+  ]
+  @planner_statuses [:produced, :no_opinion, :unavailable, :failed, :rejected]
+  @shadow_statuses [:evaluated, :skipped, :disabled, :failed]
+  @shadow_reasons [
+    :bounded_candidate_modulation, :protected_live_decision,
+    :no_valid_controls, :invalid_context, :opted_out, :shadow_exception
+  ]
 
   @doc "Run a worker under a turn-scoped trace ID and always restore context."
   def with_trace("turn-" <> _ = trace_id, fun)
@@ -105,12 +130,153 @@ defmodule Core.CognitiveTrace do
             %{speech_act: :not_detected}
         end
 
+      :prefrontal_control ->
+        prefrontal_evidence(Map.get(result, :prefrontal))
+
+      :action_selection ->
+        action_evidence(Map.get(result, :action_meta))
+
       _ ->
         %{}
     end
   end
 
   defp evidence(_stage, _result), do: %{}
+
+  # Only small numeric/atom control summaries cross the telemetry boundary.
+  # Never include candidate text, input context, module exception details or
+  # arbitrary metadata from a planner.
+  defp prefrontal_evidence(%{} = report) do
+    planners =
+      report
+      |> Map.get(:planners, [])
+      |> List.wrap()
+      |> Enum.take(5)
+      |> Enum.flat_map(fn
+        %{planner: mod, status: status} = item ->
+          case Map.get(@planner_regions, mod) do
+            nil -> []
+            region when status in @planner_statuses ->
+              [%{
+                region: region,
+                status: status,
+                reason: planner_reason(Map.get(item, :reason)),
+                proposed_keys: control_keys(Map.get(item, :proposed_keys)),
+                merged_keys: control_keys(Map.get(item, :accepted_keys)),
+                superseded_keys: control_keys(Map.get(item, :superseded_keys))
+              }]
+            _ -> []
+          end
+
+        _ -> []
+      end)
+
+    %{
+      available: true,
+      planners: planners,
+      controls: safe_controls(Map.get(report, :signals)),
+      feedback_quality:
+        if(Map.get(report, :feedback_quality) == :heuristic_proxy,
+          do: :heuristic_proxy, else: :unknown)
+    }
+  end
+
+  defp prefrontal_evidence(_), do: %{available: false}
+
+  defp action_evidence(%{} = meta) do
+    shadow = Map.get(meta, :prefrontal_shadow)
+
+    case shadow do
+      %{} = comparison ->
+        status = Map.get(comparison, :status)
+        reason = Map.get(comparison, :reason)
+        live = Map.get(comparison, :live_selected)
+        proposed = Map.get(comparison, :shadow_selected)
+        sources =
+          comparison
+          |> Map.get(:applied_sources, [])
+          |> List.wrap()
+          |> Enum.take(10)
+          |> Enum.flat_map(fn
+            %{key: key, planner: planner} ->
+              with true <- key in @control_keys,
+                   region when not is_nil(region) <- Map.get(@planner_regions, planner) do
+                [%{key: key, region: region}]
+              else
+                _ -> []
+              end
+            _ -> []
+          end)
+
+        adjustments =
+          comparison
+          |> Map.get(:adjustments, [])
+          |> List.wrap()
+          |> Enum.take(7)
+          |> Enum.flat_map(fn
+            %{action: action, baseline_score: baseline, shadow_score: adjusted, delta: delta}
+              when action in @actions and is_number(baseline) and
+                   is_number(adjusted) and is_number(delta) ->
+              if baseline >= 0.0 and baseline <= 1.0 and
+                   adjusted >= 0.0 and adjusted <= 1.0 and
+                   delta >= -0.121 and delta <= 0.121 do
+                [%{action: action, baseline: baseline, proposed: adjusted,
+                   delta: delta, keys: control_keys(Map.get(comparison, :applied_keys))}]
+              else
+                []
+              end
+            _ -> []
+          end)
+
+        %{
+          shadow_status: if(status in @shadow_statuses, do: status, else: :unknown),
+          shadow_reason: if(reason in @shadow_reasons, do: reason, else: :unknown),
+          live_action: if(live in @actions, do: live, else: :unknown),
+          shadow_action: if(proposed in @actions, do: proposed, else: :unknown),
+          changed: Map.get(comparison, :changed?) == true,
+          applied_keys: control_keys(Map.get(comparison, :applied_keys)),
+          unused_keys: control_keys(Map.get(comparison, :unused_keys)),
+          applied_sources: sources,
+          adjustments: adjustments
+        }
+
+      _ -> %{shadow_status: :not_recorded}
+    end
+  end
+
+  defp action_evidence(_), do: %{shadow_status: :not_recorded}
+
+  defp planner_reason(reason)
+       when reason in [:validated, :empty_result, :module_not_loaded,
+                       :function_not_exported, :no_valid_control_values,
+                       :planner_exception, :planner_failure], do: reason
+  defp planner_reason(_), do: :unknown
+
+  defp control_keys(keys) when is_list(keys) do
+    keys
+    |> Enum.filter(&(&1 in @control_keys))
+    |> Enum.uniq()
+    |> Enum.take(10)
+  end
+
+  defp control_keys(_), do: []
+
+  defp safe_controls(%{} = raw) do
+    for key <- @control_keys,
+        value = Map.get(raw, key),
+        valid_control?(key, value),
+        into: %{}, do: {key, value}
+  end
+
+  defp safe_controls(_), do: %{}
+
+  defp valid_control?(:policy, value),
+    do: value in [:strict_mwe, :loose_single, :balanced]
+  defp valid_control?(key, value)
+       when key in [:top_k, :max_retries, :branch_budget, :switch_after_ms],
+       do: is_integer(value) and value >= 0 and value <= 5_000
+  defp valid_control?(_key, value),
+    do: is_number(value) and value >= 0.0 and value <= 1.5
 
   defp count(list) when is_list(list), do: length(list)
   defp count(map) when is_map(map), do: map_size(map)
