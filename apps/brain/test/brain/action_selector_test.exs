@@ -140,4 +140,76 @@ defmodule Brain.ActionSelectorTest do
     assert result.selected == :refuse_or_redirect
     assert result.safety_gate == :redirected
   end
+
+  test "valid control proposals do not affect the authoritative selector" do
+    base = %{intent: :unclassified, confidence: 0.75, mood: %{}}
+    controlled = Map.put(base, :control_signals, %{
+      utility_prior: 0.0, confidence_scale: 0.5, branch_budget: 5
+    })
+
+    assert ActionSelector.select(base) == ActionSelector.select(controlled)
+    assert ActionSelector.select(controlled).selected == :answer_user
+  end
+
+  test "shadow can recommend a different action without changing the live answer" do
+    ctx = %{
+      intent: :unclassified,
+      confidence: 0.75,
+      mood: %{},
+      control_signals: %{utility_prior: 0.0, confidence_scale: 0.5, branch_budget: 5}
+    }
+
+    live = ActionSelector.select(ctx)
+    comparison = ActionSelector.shadow_compare(ctx, live)
+
+    assert comparison.version == "prefrontal_shadow.v1"
+    assert comparison.status == :evaluated
+    assert comparison.live_selected == :answer_user
+    assert comparison.shadow_selected == :ask_clarifying_question
+    assert comparison.changed? == true
+    assert :utility_prior in comparison.applied_keys
+    assert :branch_budget in comparison.applied_keys
+    assert :confidence_scale in comparison.applied_keys
+    assert Enum.all?(comparison.adjustments, &(abs(&1.delta) <= 0.120001))
+
+    # Shadow assessment never modifies the original candidates or action.
+    assert ActionSelector.select(ctx) == live
+  end
+
+  test "protected safety and explicit-memory decisions cannot be re-ranked" do
+    cases = [
+      %{intent: :health_support, confidence: 0.85,
+        symbolic_frame: %{type: :health_support_event, subject: :user}},
+      %{intent: :tell, confidence: 0.50, text: "I want to hurt myself"},
+      %{intent: :illicit_request, confidence: 0.85},
+      %{intent: :memory_write, confidence: 0.90}
+    ]
+
+    for base <- cases do
+      ctx = Map.put(base, :control_signals, %{
+        utility_prior: 0.0, confidence_scale: 0.5, branch_budget: 5
+      })
+      live = ActionSelector.select(ctx)
+      shadow = ActionSelector.shadow_compare(ctx, live)
+
+      assert shadow.status == :skipped
+      assert shadow.reason == :protected_live_decision
+      assert shadow.live_selected == shadow.shadow_selected
+      assert shadow.changed? == false
+      assert shadow.applied_keys == []
+    end
+  end
+
+  test "unknown controls are rejected and no shadow candidates are created" do
+    ctx = %{intent: :unclassified, confidence: 0.70, control_signals: %{
+      arbitrary_command: :run, top_k: "invalid"
+    }}
+    live = ActionSelector.select(ctx)
+    shadow = ActionSelector.shadow_compare(ctx, live)
+
+    assert shadow.status == :skipped
+    assert shadow.reason == :no_valid_controls
+    assert shadow.shadow_selected == live.selected
+    assert shadow.adjustments == []
+  end
 end
