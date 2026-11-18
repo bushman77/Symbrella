@@ -18,6 +18,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
   alias SymbrellaWeb.Components.Brain.Regions
   alias SymbrellaWeb.Components.Brain.ActivationTrend
   alias SymbrellaWeb.Components.Brain.SocialCognition
+  alias SymbrellaWeb.Components.Brain.NeuralAtlas
 
   def brain(assigns) do
     assigns =
@@ -33,6 +34,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       |> Map.put_new(:region_status, %{})
       |> Map.put_new(:region_tweaks, %{})
       |> Map.put_new(:svg_base, nil)
+      |> Map.put_new(:brain_view, :atlas)
+      |> Map.put_new(:atlas_nodes, [])
       |> Map.put_new(:bb_filter, "")
       |> Map.put_new(:wm, %{})
       |> Map.put_new(:activation_samples, [])
@@ -62,7 +65,32 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       <!-- Pure social cognition stays separate from the neuron activation chart. -->
       <SocialCognition.panel events={get_in(@region_state, [:workspace]) || []} />
 
-    <!-- Brain map + Region summary -->
+    <!-- Source-registry Neural Atlas is the default visual mode.
+         The original anatomy and region summary are retained intact. -->
+    <nav id="brain-visualization-mode" aria-label="Brain visualization" class="flex flex-wrap gap-2">
+      <button type="button" phx-click="brain-view" phx-value-view="atlas"
+        aria-pressed={@brain_view == :atlas}
+        class={[
+          "min-h-11 rounded-lg border px-4 py-2 text-sm font-semibold",
+          @brain_view == :atlas && "border-emerald-400 bg-emerald-900 text-white",
+          @brain_view != :atlas && "border-zinc-500 text-zinc-600 dark:text-zinc-300"
+        ]}>
+        Neural Atlas
+      </button>
+      <button type="button" phx-click="brain-view" phx-value-view="anatomy"
+        aria-pressed={@brain_view == :anatomy}
+        class={[
+          "min-h-11 rounded-lg border px-4 py-2 text-sm font-semibold",
+          @brain_view == :anatomy && "border-emerald-400 bg-emerald-900 text-white",
+          @brain_view != :anatomy && "border-zinc-500 text-zinc-600 dark:text-zinc-300"
+        ]}>
+        Anatomical map
+      </button>
+    </nav>
+    <%= if @brain_view == :atlas do %>
+      <NeuralAtlas.panel nodes={@atlas_nodes} selected={@selected}/>
+    <% else %>
+
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="border rounded-xl p-4 shadow-sm">
           <.brain_map
@@ -105,6 +133,8 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         </div>
       </div>
       
+    <% end %>
+
     <!-- Blackboard + WM -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div data-brain-report-section="Complete Blackboard Feed" data-brain-report-source="#blackboard-full-copy-target, #blackboard-copy-target">
