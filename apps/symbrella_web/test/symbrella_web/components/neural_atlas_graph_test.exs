@@ -51,7 +51,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     satellites = NeuralAtlasGraph.satellites(@nodes)
 
     assert length(satellites) == 3
-    assert Enum.map(satellites, & &1.module) |> Enum.sort() ==
+    assert Enum.sort(Enum.map(satellites, & &1.module)) ==
              ["Brain.ATL", "Brain.LIFG", "Brain.PMTG"]
     assert Enum.all?(satellites, &(&1.region in [:lifg, :atl, :pmtg]))
     assert Enum.all?(satellites, &(&1.x != &1.hub_x or &1.y != &1.hub_y))
@@ -101,7 +101,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     assert html =~ ~s(aria-label="Inspect LIFG cognitive region")
     assert html =~ ~s(<svg)
     assert html =~ "documented links"
-    assert html =~ "positions are illustrative"
+    assert html =~ "Positions are illustrative"
   end
 
   test "telemetry highlights only observed nodes without claiming a connection" do
