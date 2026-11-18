@@ -296,9 +296,9 @@ defmodule Core do
     si
     |> Core.Brain.WM.Comprehension.store(opts)
     |> StateDump.capture(:wm_comprehension)
-    |> Core.Brain.Prefrontal.attach(opts)
+    |> CognitiveTrace.step(:prefrontal_control, &Core.Brain.Prefrontal.attach(&1, opts))
     |> StateDump.capture(:prefrontal)
-    |> Core.Brain.ActionSelection.attach(opts)
+    |> CognitiveTrace.step(:action_selection, &Core.Brain.ActionSelection.attach(&1, opts))
     |> StateDump.capture(:action_selection)
     |> Core.Brain.WM.focus_prompt_topics(opts)
     |> StateDump.capture(:working_memory)
