@@ -100,6 +100,51 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanelTest do
     refute old =~ ~s(data-planner-region="fpc")
   end
 
+  test "decision lineage distinguishes selection, reconciliation and command receipts" do
+    lineage_event = %{
+      stage: :response_planning, region: nil, status: :ok,
+      duration_us: 140, at_ms: 1_005,
+      evidence: %{
+        initial_action: :ask_clarifying_question,
+        final_action: :answer_user,
+        initial_safety_gate: :approved, final_safety_gate: :approved,
+        reconciliation: :reconciled,
+        reason: :social_intent_reconciliation,
+        shadow_action: :observe_silently, shadow_status: :evaluated,
+        shadow_applied_keys: [:utility_prior],
+        initial_command_statuses: [:deferred],
+        final_command_statuses: [],
+        delivery_status: :not_observed
+      }
+    }
+
+    selected = Map.update!(@trace, :events, &(&1 ++ [lineage_event]))
+    report = ExecutiveTracePanel.report(selected)
+
+    assert report.has_lineage?
+    assert report.lineage.initial_action == :ask_clarifying_question
+    assert report.lineage.final_action == :answer_user
+    assert report.lineage.reconciliation == :reconciled
+    assert report.lineage.delivery_status == :not_observed
+
+    html = render_component(&ExecutiveTracePanel.panel/1, trace: selected)
+    assert html =~ ~s(id="atlas-decision-lineage")
+    assert html =~ ~s(data-decision-stage="initial")
+    assert html =~ ~s(data-decision-stage="final")
+    assert html =~ ~s(data-decision-stage="reconciliation")
+    assert html =~ ~s(data-decision-stage="execution")
+    assert html =~ "ask_clarifying_question"
+    assert html =~ "social_intent_reconciliation"
+    assert html =~ "deferred"
+    assert html =~ "Response delivery: not_observed"
+    assert html =~ "Shadow scoring did not change the authoritative live selection."
+    refute html =~ ~s(id="atlas-decision-lineage-empty")
+
+    old = render_component(&ExecutiveTracePanel.panel/1, trace: @trace)
+    assert old =~ ~s(id="atlas-decision-lineage-empty")
+    refute old =~ ~s(id="atlas-decision-lineage")
+  end
+
   test "atlas uses only the selected turn's executive receipts" do
     nodes = [
       %{key: :prefrontal, label: "Prefrontal", subtitle: "Executive",
