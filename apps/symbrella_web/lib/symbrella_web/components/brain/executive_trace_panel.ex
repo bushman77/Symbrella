@@ -11,13 +11,24 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanel do
   use SymbrellaWeb, :html
 
   @executive_regions [:prefrontal, :dlpfc, :fpc, :dmpfc, :vmpfc, :salience]
+  @lineage_fields [
+    :initial_action, :final_action,
+    :initial_safety_gate, :final_safety_gate,
+    :reconciliation, :reason, :shadow_action,
+    :shadow_status, :shadow_applied_keys,
+    :initial_command_statuses, :final_command_statuses,
+    :delivery_status
+  ]
 
   @doc "Summarize only explicitly captured Phase 7 receipts in the selected turn."
   def report(%{events: events}) when is_list(events) do
     prefrontal = last_evidence(events, :prefrontal_control)
     action = last_evidence(events, :action_selection)
     lineage = last_evidence(events, :response_planning)
-    lineage? = is_map(lineage) and Map.get(lineage, :reconciliation) != :not_recorded
+    lineage? =
+      is_map(lineage) and
+        Map.get(lineage, :reconciliation) in [:reconciled, :unchanged, :not_planned] and
+        Enum.all?(@lineage_fields, &Map.has_key?(lineage, &1))
 
     %{
       has_prefrontal?: not is_nil(prefrontal),
