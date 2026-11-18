@@ -76,7 +76,6 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:activation_samples, fn -> [] end)
       |> assign_new(:social_activity, fn -> SocialBrainActivity.latest() end)
       |> MoodHud.seed()
-      |> assign(:all_status, collect_all_region_status())
       |> maybe_seed_intent_from_brain()
       |> refresh_selected()
 
@@ -195,9 +194,6 @@ defmodule SymbrellaWeb.BrainLive do
           <.selected_region_status selected={@selected} status={@region_status} />
         </div>
 
-        <div data-brain-report-section="All Regions Live Status">
-          <.regions_status_grid all_status={@all_status} />
-        </div>
       </div>
 
       <!-- Compact Mood HUD overlay (extracted to MoodHud) -->
@@ -504,10 +500,6 @@ defmodule SymbrellaWeb.BrainLive do
 
   defp normalize_self_portrait(other), do: %{value: other}
 
-  # ---- All-regions aggregation ----------------------------------------------
-
-  defp collect_all_region_status, do: BrainRuntime.all_region_status()
-
   # ---------------------------------------------------------------------------
   # Render helpers (panels)
   # ---------------------------------------------------------------------------
@@ -523,7 +515,7 @@ defmodule SymbrellaWeb.BrainLive do
       </div>
 
       <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white/75 dark:bg-neutral-900/70">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div>
             <div class="font-medium mb-1">Mode & Thresholds</div>
             <div>pMTG mode: {h(status_val(@status, :pmtg_mode))}</div>
@@ -549,15 +541,6 @@ defmodule SymbrellaWeb.BrainLive do
             <% end %>
           </div>
 
-          <div>
-            <div class="font-medium mb-1">Process</div>
-            <div>pid: {inspect(@status[:pid] || @status["pid"])}</div>
-            <div>queue: {h(@status[:queue] || @status["queue"])}</div>
-            <div>current: {h(@status[:current] || @status["current"])}</div>
-            <%= if rn = (@status[:registered_name] || @status["registered_name"]) do %>
-              <div>registered_name: {h(rn)}</div>
-            <% end %>
-          </div>
         </div>
       </div>
     </div>
@@ -585,7 +568,6 @@ defmodule SymbrellaWeb.BrainLive do
     |> assign(:clock, BrainRuntime.cycle_snapshot())
     |> assign(:region_status, status)
     |> assign(:self_portrait, self_portrait)
-    |> assign(:all_status, collect_all_region_status())
     |> assign(:regions, RegionRegistry.keys())
     |> assign(:region, region_meta_for(selected))
     |> maybe_assign_wm(extract_wm_any(snapshot), "snapshot")
@@ -615,56 +597,6 @@ defmodule SymbrellaWeb.BrainLive do
       socket
     end
   end
-
-  # --- All-regions status grid ----------------------------------------------
-
-  attr :all_status, :map, default: %{}
-
-  defp regions_status_grid(assigns) do
-    ~H"""
-    <div class="mt-6">
-      <div class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">
-        All Regions — Live Status
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <%= for {k, s} <- @all_status do %>
-          <div class="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-white/70 dark:bg-neutral-900/70">
-            <div class="flex items-center justify-between">
-              <div class="text-sm font-medium">{RegionRegistry.label_for(k)}</div>
-              <span class={"text-xs px-2 py-0.5 rounded-full " <> status_badge_class(s[:status])}>
-                {(s[:status] || :unknown) |> to_string()}
-              </span>
-            </div>
-            <div class="mt-2 text-xs text-gray-600 dark:text-gray-400">
-              <div>pid: {inspect(s[:pid])}</div>
-              <%= if is_number(s[:queue] || s["queue"]) do %>
-                <div>queue: {s[:queue] || s["queue"]}</div>
-              <% end %>
-              <%= if s[:current] || s["current"] do %>
-                <div>current: {h(s[:current] || s["current"])}</div>
-              <% end %>
-              <%= if s[:store] && is_map(s[:store]) do %>
-                <div class="mt-1">
-                  store: size={s[:store][:size] || s[:store]["size"] || 0},
-                  pending={s[:store][:pending] || s[:store]["pending"] || 0}
-                </div>
-              <% end %>
-            </div>
-          </div>
-        <% end %>
-      </div>
-    </div>
-    """
-  end
-
-  defp status_badge_class(:down),
-    do: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-
-  defp status_badge_class(:unknown),
-    do: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-
-  defp status_badge_class(_),
-    do: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
 
   defp h(v) when is_tuple(v), do: inspect(v)
   defp h(v) when is_pid(v), do: inspect(v)
