@@ -37,6 +37,12 @@ defmodule Core.CognitiveTrace do
   ]
   @planner_statuses [:produced, :no_opinion, :unavailable, :failed, :rejected]
   @shadow_statuses [:evaluated, :skipped, :disabled, :failed]
+  @lineage_statuses [:reconciled, :unchanged, :not_planned]
+  @lineage_reasons [
+    :social_intent_reconciliation, :action_preserved,
+    :response_disabled, :response_unavailable
+  ]
+  @command_statuses [:executed, :deferred, :failed, :rejected]
   @shadow_reasons [
     :bounded_candidate_modulation, :protected_live_decision,
     :no_valid_controls, :invalid_context, :opted_out, :shadow_exception
@@ -135,6 +141,9 @@ defmodule Core.CognitiveTrace do
 
       :action_selection ->
         action_evidence(Map.get(result, :action_meta))
+
+      :response_planning ->
+        decision_lineage_evidence(Map.get(result, :decision_lineage))
 
       _ ->
         %{}
@@ -245,6 +254,51 @@ defmodule Core.CognitiveTrace do
   end
 
   defp action_evidence(_), do: %{shadow_status: :not_recorded}
+
+  # Only explicit internal enum fields and bounded command receipt statuses
+  # cross the telemetry boundary. Never forward the SI, candidate, response
+  # text, decision trace IDs, or an unsanitized lineage map.
+  defp decision_lineage_evidence(%{} = lineage) do
+    %{
+      initial_action: allow_action(Map.get(lineage, :initial_action)),
+      final_action: allow_action(Map.get(lineage, :final_action)),
+      initial_safety_gate: allow_safety(Map.get(lineage, :initial_safety_gate)),
+      final_safety_gate: allow_safety(Map.get(lineage, :final_safety_gate)),
+      reconciliation:
+        allow_enum(Map.get(lineage, :reconciliation), @lineage_statuses),
+      reason: allow_enum(Map.get(lineage, :reason), @lineage_reasons),
+      shadow_action: allow_action(Map.get(lineage, :shadow_action)),
+      shadow_status: allow_enum(Map.get(lineage, :shadow_status), @shadow_statuses),
+      shadow_applied_keys: control_keys(Map.get(lineage, :shadow_applied_keys)),
+      initial_command_statuses:
+        safe_command_statuses(Map.get(lineage, :initial_command_statuses)),
+      final_command_statuses:
+        safe_command_statuses(Map.get(lineage, :final_command_statuses)),
+      delivery_status: :not_observed
+    }
+  end
+
+  defp decision_lineage_evidence(_), do: %{reconciliation: :not_recorded}
+
+  defp allow_action(action) when action in @actions, do: action
+  defp allow_action(_), do: :unknown
+
+  defp allow_safety(safety) when safety in [:approved, :redirected], do: safety
+  defp allow_safety(_), do: :unknown
+
+  defp allow_enum(value, accepted) do
+    if value in accepted, do: value, else: :unknown
+  end
+
+  defp safe_command_statuses(items) when is_list(items) do
+    items
+    |> Enum.take(12)
+    |> Enum.map(fn status ->
+      if status in @command_statuses, do: status, else: :unknown
+    end)
+  end
+
+  defp safe_command_statuses(_), do: []
 
   defp planner_reason(reason)
        when reason in [:validated, :empty_result, :module_not_loaded,
