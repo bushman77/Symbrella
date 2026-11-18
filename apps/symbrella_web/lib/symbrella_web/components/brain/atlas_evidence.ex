@@ -94,7 +94,7 @@ defmodule SymbrellaWeb.Components.Brain.AtlasEvidence do
       when is_list(events) and is_map(env) and is_list(nodes) and is_integer(at_ms) do
     kind =
       case Map.get(env, :kind, Map.get(env, "kind")) do
-        value when is_atom(value) -> inspect(value)
+        value when is_atom(value) and not is_nil(value) -> inspect(value)
         value when is_binary(value) and byte_size(value) <= 64 ->
           if Regex.match?(~r/\\A[a-zA-Z0-9_:.\\-]+\\z/, value), do: value, else: nil
         _ -> nil
