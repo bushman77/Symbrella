@@ -23,7 +23,8 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
     :phase_4_grammar, :lifg_selection, :atl_integration,
     :phase_5_semantics, :phase_6_comprehension,
     :comprehension_summary, :speech_act_binding,
-    :phase_7_planning, :phase_8_memory, :hippocampus_persist
+    :phase_7_planning, :prefrontal_control, :action_selection,
+    :phase_8_memory, :hippocampus_persist
   ]
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -115,6 +116,7 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
 
   defp region_for(:lifg_selection), do: :lifg
   defp region_for(:atl_integration), do: :atl
+  defp region_for(:prefrontal_control), do: :prefrontal
   defp region_for(:hippocampus_persist), do: :hippocampus
   defp region_for(_), do: nil
 
@@ -128,7 +130,135 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
   defp evidence_for(:speech_act_binding, %{speech_act: act})
        when act in [:greeting, :gratitude, :farewell, :wellbeing_query, :not_detected],
        do: %{speech_act: act}
+  @executive_regions [:dlpfc, :vmpfc, :fpc, :dmpfc, :salience]
+  @planner_statuses [:produced, :no_opinion, :unavailable, :failed, :rejected]
+  @planner_reasons [
+    :validated, :empty_result, :module_not_loaded, :function_not_exported,
+    :no_valid_control_values, :planner_exception, :planner_failure, :unknown
+  ]
+  @control_keys [
+    :policy, :top_k, :max_retries, :branch_budget, :switch_after_ms,
+    :utility_prior, :explore_rate, :confidence_scale, :acc_conflict_gain,
+    :salience_boost
+  ]
+  @actions [
+    :answer_user, :ask_clarifying_question, :store_memory, :observe_silently,
+    :self_check, :refuse_or_redirect, :safe_support, :unknown
+  ]
+  @shadow_statuses [:evaluated, :skipped, :disabled, :failed, :unknown, :not_recorded]
+  @shadow_reasons [
+    :bounded_candidate_modulation, :protected_live_decision, :no_valid_controls,
+    :invalid_context, :opted_out, :shadow_exception, :unknown
+  ]
+
+  defp evidence_for(:prefrontal_control, %{} = raw) do
+    planners =
+      raw
+      |> Map.get(:planners, [])
+      |> list()
+      |> Enum.take(5)
+      |> Enum.flat_map(fn
+        %{region: region, status: status} = planner
+        when region in @executive_regions and status in @planner_statuses ->
+          [%{
+            region: region,
+            status: status,
+            reason: allow_atom(Map.get(planner, :reason), @planner_reasons, :unknown),
+            proposed_keys: safe_keys(Map.get(planner, :proposed_keys)),
+            merged_keys: safe_keys(Map.get(planner, :merged_keys)),
+            superseded_keys: safe_keys(Map.get(planner, :superseded_keys))
+          }]
+        _ -> []
+      end)
+
+    %{
+      available: Map.get(raw, :available) == true,
+      feedback_quality:
+        allow_atom(Map.get(raw, :feedback_quality), [:heuristic_proxy, :unknown], :unknown),
+      planners: planners,
+      controls: safe_controls(Map.get(raw, :controls))
+    }
+  end
+
+  defp evidence_for(:action_selection, %{} = raw) do
+    sources =
+      raw
+      |> Map.get(:applied_sources, [])
+      |> list()
+      |> Enum.take(10)
+      |> Enum.flat_map(fn
+        %{key: key, region: region}
+          when key in @control_keys and region in @executive_regions ->
+          [%{key: key, region: region}]
+        _ -> []
+      end)
+
+    adjustments =
+      raw
+      |> Map.get(:adjustments, [])
+      |> list()
+      |> Enum.take(7)
+      |> Enum.flat_map(fn
+        %{action: action, baseline: baseline, proposed: proposed, delta: delta}
+        when action in @actions and is_number(baseline) and is_number(proposed)
+             and is_number(delta) ->
+          if baseline >= 0.0 and baseline <= 1.0 and
+               proposed >= 0.0 and proposed <= 1.0 and
+               delta >= -0.121 and delta <= 0.121 do
+            [%{action: action, baseline: baseline, proposed: proposed,
+               delta: delta}]
+          else
+            []
+          end
+        _ -> []
+      end)
+
+    %{
+      shadow_status:
+        allow_atom(Map.get(raw, :shadow_status), @shadow_statuses, :unknown),
+      shadow_reason:
+        allow_atom(Map.get(raw, :shadow_reason), @shadow_reasons, :unknown),
+      live_action: allow_atom(Map.get(raw, :live_action), @actions, :unknown),
+      shadow_action: allow_atom(Map.get(raw, :shadow_action), @actions, :unknown),
+      changed: Map.get(raw, :changed) == true,
+      applied_keys: safe_keys(Map.get(raw, :applied_keys)),
+      unused_keys: safe_keys(Map.get(raw, :unused_keys)),
+      applied_sources: sources,
+      adjustments: adjustments
+    }
+  end
+
   defp evidence_for(_, _), do: %{}
+
+  defp safe_controls(%{} = raw) do
+    for key <- @control_keys,
+        value = Map.get(raw, key),
+        valid_control?(key, value),
+        into: %{}, do: {key, value}
+  end
+  defp safe_controls(_), do: %{}
+
+  defp valid_control?(:policy, value),
+    do: value in [:strict_mwe, :loose_single, :balanced]
+  defp valid_control?(key, value)
+       when key in [:top_k, :max_retries, :branch_budget, :switch_after_ms],
+       do: is_integer(value) and value >= 0 and value <= 5_000
+  defp valid_control?(_key, value),
+    do: is_number(value) and value >= 0.0 and value <= 1.5
+
+  defp safe_keys(value) do
+    value
+    |> list()
+    |> Enum.filter(&(&1 in @control_keys))
+    |> Enum.uniq()
+    |> Enum.take(10)
+  end
+
+  defp list(value) when is_list(value), do: value
+  defp list(_), do: []
+
+  defp allow_atom(value, allowed, fallback),
+    do: if(value in allowed, do: value, else: fallback)
 
   defp numeric(map, keys) do
     for key <- keys, value = Map.get(map, key), is_integer(value),
