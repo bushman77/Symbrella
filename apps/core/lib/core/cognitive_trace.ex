@@ -37,10 +37,11 @@ defmodule Core.CognitiveTrace do
   ]
   @planner_statuses [:produced, :no_opinion, :unavailable, :failed, :rejected]
   @shadow_statuses [:evaluated, :skipped, :disabled, :failed]
-  @lineage_statuses [:reconciled, :unchanged, :not_planned]
+  @lineage_statuses [:reconciled, :unchanged, :not_planned, :not_recorded]
   @lineage_reasons [
     :social_intent_reconciliation, :action_preserved,
-    :response_disabled, :response_unavailable
+    :response_disabled, :response_unavailable,
+    :initial_action_unavailable, :final_action_unavailable
   ]
   @command_statuses [:executed, :deferred, :failed, :rejected]
   @shadow_reasons [
