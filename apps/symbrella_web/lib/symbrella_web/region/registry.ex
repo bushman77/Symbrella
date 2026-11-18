@@ -39,12 +39,14 @@ defmodule SymbrellaWeb.Region.Registry do
     desc: "Overview of the selected module.",
     modules: [],
     telemetry: [],
-    config_examples: []
+    config_examples: [],
+    related: []
   }
 
   # Registry-owned meta. These values override module-provided meta (if any).
   @meta_by_key %{
     lifg: %{
+      related: [:pmtg, :atl, :acc],
       subtitle: "Competitive Sense Selection",
       desc:
         "Selects the winning sense per token from si.sense_candidates with boundary guards and scoring " <>
@@ -63,6 +65,7 @@ defmodule SymbrellaWeb.Region.Registry do
       ]
     },
     pmtg: %{
+      related: [:lifg, :temporal],
       subtitle: "Lexical Retrieval Boost",
       desc:
         "Boosts/recovers sense candidates before LIFG using retrieval heuristics when confidence is low " <>
@@ -78,6 +81,7 @@ defmodule SymbrellaWeb.Region.Registry do
       ]
     },
     hippocampus: %{
+      related: [:atl, :temporal, :prefrontal],
       subtitle: "Episodic Recall",
       desc:
         "Stores and recalls episodes; can attach recall evidence to bias selection and planning. " <>
@@ -93,6 +97,7 @@ defmodule SymbrellaWeb.Region.Registry do
       ]
     },
     acc: %{
+      related: [:lifg, :salience, :prefrontal],
       subtitle: "Conflict Monitor",
       desc:
         "Tracks competition/conflict signals and helps decide when to escalate or tighten thresholds.",
@@ -101,6 +106,7 @@ defmodule SymbrellaWeb.Region.Registry do
       config_examples: ["config :brain, acc_conflict_tau: 0.50"]
     },
     salience: %{
+      related: [:acc, :prefrontal, :thalamus],
       subtitle: "Conversational Attention and Salience",
       desc:
         "Brain.Attention scores scoped goal-term relevance for the Basal Ganglia WM gate. " <>
@@ -119,6 +125,7 @@ defmodule SymbrellaWeb.Region.Registry do
       ]
     },
     thalamus: %{
+      related: [:salience, :basal_ganglia],
       subtitle: "Routing & Gating",
       desc:
         "Routes signals between regions and participates in gating policies (attention/WM routing).",
@@ -127,6 +134,7 @@ defmodule SymbrellaWeb.Region.Registry do
       config_examples: []
     },
     basal_ganglia: %{
+      related: [:thalamus, :prefrontal],
       subtitle: "Action Selection",
       desc:
         "Action selection and gating signals (what enters focus/WM; inhibit/permit competing actions).",
@@ -134,6 +142,10 @@ defmodule SymbrellaWeb.Region.Registry do
       telemetry: [[:brain, :gate, :decision]],
       config_examples: []
     },
+    # Conceptual atlas links live with registry metadata, not in the view.
+    atl: %{related: [:lifg, :temporal, :hippocampus]},
+    prefrontal: %{related: [:acc, :salience, :basal_ganglia]},
+    amygdala: %{related: [:salience, :hippocampus]},
     bg: %{
       subtitle: "Action Selection",
       desc:
