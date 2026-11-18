@@ -169,6 +169,26 @@ Brain report are unchanged. The text report can still include OTP diagnostic
 status when explicitly requested; the background UI no longer polls all
 regions merely to render redundant process cards.
 
+## P-006: Decision lineage in Turn trace
+
+The Executive control panel now shows a separate **Decision lineage** section
+after the initial live-vs-shadow comparison. On traced Core turns the
+`:response_planning` receipt reports the original live ActionSelector choice,
+the final planned action after response reconciliation, the reconciliation
+status/reason, bounded shadow provenance and any recorded command statuses.
+This clarifies when response planning replaced an earlier action without
+treating a shadow suggestion as the live policy.
+
+The selected turn's receipt is the only source of these values. Older and
+memory-fast-path turns without this stage show an explicit no-lineage message.
+Neither a selected action nor an `:executed` command receipt proves the
+requested outcome occurred; reply delivery is `:not_observed` unless
+independently instrumented elsewhere.
+
+No visual connectivity claims are changed, and the underlying executive
+selector and command/safety gates are unchanged. See
+[Cognitive Trace v1](cognitive-trace-v1.md) for metadata allowlists.
+
 ## Verification
 
 From the umbrella root:
