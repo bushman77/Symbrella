@@ -8,6 +8,7 @@ defmodule Core do
   alias Core.Response.Attach, as: ResponseAttach
   alias Core.SemanticInput
   alias Core.StateDump
+  alias Core.CognitiveTrace
   alias Core.TokenFilters
   alias Core.Brain.Introspection, as: BrainIntrospection
   @type opts :: keyword()
@@ -36,7 +37,10 @@ defmodule Core do
     mode = Keyword.get(opts, :mode, :prod)
     lifg_opts = build_lifg_opts(opts)
 
-    si = phrase |> phase_one(opts, mode, lifg_opts) |> phase_two(opts, mode)
+    si =
+      phrase
+      |> CognitiveTrace.step(:phase_1_input, &phase_one(&1, opts, mode, lifg_opts))
+      |> CognitiveTrace.step(:phase_2_context, &phase_two(&1, opts, mode))
 
     out =
       case mode do
@@ -140,12 +144,12 @@ defmodule Core do
 
   defp run_prod_pipeline(%{} = si, opts, lifg_opts) when is_list(opts) and is_list(lifg_opts) do
     si
-    |> phase_three(opts)
-    |> phase_four(opts, lifg_opts)
-    |> phase_five(opts)
-    |> phase_six(opts)
-    |> phase_seven(opts)
-    |> phase_eight(opts)
+    |> CognitiveTrace.step(:phase_3_lexical, &phase_three(&1, opts))
+    |> CognitiveTrace.step(:phase_4_grammar, &phase_four(&1, opts, lifg_opts))
+    |> CognitiveTrace.step(:phase_5_semantics, &phase_five(&1, opts))
+    |> CognitiveTrace.step(:phase_6_comprehension, &phase_six(&1, opts))
+    |> CognitiveTrace.step(:phase_7_planning, &phase_seven(&1, opts))
+    |> CognitiveTrace.step(:phase_8_memory, &phase_eight(&1, opts))
   end
 
   # Phase 3: Retrieve and prepare lexical candidates, including MWE hypotheses.
@@ -207,7 +211,7 @@ defmodule Core do
     |> Core.LIFG.FuzzyEntities.attach(opts)
     |> StateDump.capture(:fuzzy_entities)
     |> Core.Brain.Activation.overlay_candidate_slates()
-    |> LifgAttach.run_and_attach(lifg_opts)
+    |> CognitiveTrace.step(:lifg_selection, &LifgAttach.run_and_attach(&1, lifg_opts))
     |> StateDump.capture(:lifg)
     |> Core.Pipeline.LexicalFocus.audit_lifg()
     |> StateDump.capture(:lexical_focus_alignment)
@@ -219,7 +223,7 @@ defmodule Core do
     |> StateDump.capture(:event_frames)
     |> BrainIntrospection.update_self_model(opts)
     |> StateDump.capture(:self_model)
-    |> Core.Brain.ATL.ingest(atl_opts)
+    |> CognitiveTrace.step(:atl_integration, &Core.Brain.ATL.ingest(&1, atl_opts))
     |> StateDump.capture(:atl)
     |> Core.Brain.ATL.attach_lifg_pairs(atl_opts)
     |> StateDump.capture(:atl_pairs)
@@ -280,10 +284,10 @@ defmodule Core do
   # Phase 6: Summarize comprehension and identify the speaker's speech act.
   defp phase_six(si, opts) do
     si
-    |> Core.Comprehension.Summary.attach(opts)
+    |> CognitiveTrace.step(:comprehension_summary, &Core.Comprehension.Summary.attach(&1, opts))
     |> StateDump.capture(:comprehension)
     # Read-only post-LIFG speech-act and vocative binding. No scoring changes.
-    |> Core.Semantic.SpeechActs.attach()
+    |> CognitiveTrace.step(:speech_act_binding, &Core.Semantic.SpeechActs.attach/1)
     |> StateDump.capture(:speech_act)
   end
 
@@ -307,7 +311,7 @@ defmodule Core do
     si
     |> Core.Brain.Hippocampus.encode(opts)
     |> StateDump.capture(:hippocampus_encode)
-    |> Core.Brain.Hippocampus.persist(opts)
+    |> CognitiveTrace.step(:hippocampus_persist, &Core.Brain.Hippocampus.persist(&1, opts))
     |> StateDump.capture(:hippocampus_persist)
     |> Core.Brain.Activation.notify(opts)
     |> StateDump.capture(:activation)
