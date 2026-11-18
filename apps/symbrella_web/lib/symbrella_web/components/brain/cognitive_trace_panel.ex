@@ -23,6 +23,8 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
     comprehension_summary: "Comprehension evidence summary",
     speech_act_binding: "Social speech-act binding",
     phase_7_planning: "7 · WM and response planning",
+    prefrontal_control: "Prefrontal · Planner computation",
+    action_selection: "Executive · Live and shadow selection",
     phase_8_memory: "8 · Experience and memory",
     hippocampus_persist: "Hippocampus · Persistence decision"
   }
@@ -34,7 +36,7 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
   def evidence_label(%{evidence: evidence}) when is_map(evidence) do
     evidence
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.map_join(" · ", fn
+    |> Enum.map(fn
       {:degraded, value} -> "degraded summary: #{value}"
       {:understood, value} -> "understood: #{value}"
       {:uncertain, value} -> "uncertain: #{value}"
@@ -42,9 +44,20 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
       {:choices, value} -> "LIFG choices: #{value}"
       {:slate_present, value} -> "ATL slate present: #{value}"
       {:speech_act, value} -> "speech act: #{value}"
+      {:available, value} -> "prefrontal available: #{value}"
+      {:planners, value} when is_list(value) -> "planner receipts: #{length(value)}"
+      {:controls, value} when is_map(value) -> "merged controls: #{map_size(value)}"
+      {:feedback_quality, value} -> "feedback: #{value}"
+      {:shadow_status, value} -> "shadow: #{value}"
+      {:live_action, value} -> "live: #{value}"
+      {:shadow_action, value} -> "shadow proposal: #{value}"
+      {:changed, value} -> "changed proposal: #{value}"
+      {:applied_keys, value} when is_list(value) ->
+        "shadow-applied controls: #{length(value)}"
       _ -> ""
     end)
-    |> String.trim(" ·")
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" · ")
   end
 
   def evidence_label(_), do: ""
