@@ -149,7 +149,8 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
   @lineage_statuses [:reconciled, :unchanged, :not_planned, :not_recorded, :unknown]
   @lineage_reasons [
     :social_intent_reconciliation, :action_preserved,
-    :response_disabled, :response_unavailable, :unknown
+    :response_disabled, :response_unavailable,
+    :initial_action_unavailable, :final_action_unavailable, :unknown
   ]
   @command_statuses [:executed, :deferred, :failed, :rejected, :unknown]
   @shadow_reasons [
