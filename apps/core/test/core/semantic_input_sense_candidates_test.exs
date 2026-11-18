@@ -7,7 +7,8 @@ defmodule Core.SemanticInputSenseCandidatesTest do
 
   describe "contract helpers" do
     test "exposes a versioned field contract" do
-      assert SI.contract_version() == 12
+      assert SI.contract_version() == 13
+      assert :decision_lineage in SI.contract_fields()
       assert :sentence_signatures in SI.contract_fields()
       assert :lexical_focus in SI.contract_fields()
       assert :structural_competition in SI.contract_fields()
@@ -33,6 +34,24 @@ defmodule Core.SemanticInputSenseCandidatesTest do
       assert si.source == :test
       assert si.tokens == []
       refute Map.has_key?(Map.from_struct(si), :unknown_runtime_key)
+      assert :ok = SI.validate_contract(si)
+    end
+
+    test "accepts bounded decision-lineage map without changing other SI fields" do
+      assert {:ok, %SI{} = si} =
+               SI.normalize_contract(%{
+                 sentence: "hello",
+                 source: :test,
+                 decision_lineage: %{
+                   v: 1,
+                   initial_action: :ask_clarifying_question,
+                   final_action: :answer_user,
+                   reconciliation: :reconciled
+                 }
+               })
+
+      assert si.decision_lineage.initial_action == :ask_clarifying_question
+      assert si.decision_lineage.final_action == :answer_user
       assert :ok = SI.validate_contract(si)
     end
 
