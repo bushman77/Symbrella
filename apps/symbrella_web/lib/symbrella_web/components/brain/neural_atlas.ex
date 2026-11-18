@@ -9,19 +9,6 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
 
   alias SymbrellaWeb.Region.Registry
 
-  @related %{
-    lifg: [:pmtg, :atl, :acc],
-    pmtg: [:lifg, :temporal],
-    atl: [:lifg, :temporal, :hippocampus],
-    acc: [:lifg, :salience, :prefrontal],
-    hippocampus: [:atl, :temporal, :prefrontal],
-    prefrontal: [:acc, :salience, :basal_ganglia],
-    salience: [:acc, :prefrontal, :thalamus],
-    thalamus: [:salience, :basal_ganglia],
-    basal_ganglia: [:thalamus, :prefrontal],
-    amygdala: [:salience, :hippocampus]
-  }
-
   @spec regions() :: list(map())
   def regions do
     Registry.keys()
@@ -35,7 +22,11 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         description: Map.get(defn, :desc, ""),
         modules: List.wrap(Map.get(defn, :modules, [])),
         telemetry: List.wrap(Map.get(defn, :telemetry, [])),
-        related: Map.get(@related, key, [])
+        related:
+          defn
+          |> Map.get(:related, [])
+          |> List.wrap()
+          |> Enum.filter(&Registry.available?/1)
       }
     end)
   end
