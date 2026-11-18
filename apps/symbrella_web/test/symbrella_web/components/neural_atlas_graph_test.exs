@@ -169,4 +169,51 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     assert html =~ "Faint dotted links = conceptual reference only"
     refute html =~ ~s(data-edge-kind="beam")
   end
+
+  test "mobile viewport keeps a full-size canvas without relying on generated height utilities" do
+    html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @nodes, selected: :lifg, layer: :conceptual)
+
+    assert html =~ ~s(id="atlas-network-viewport")
+    assert html =~ ~s(role="region")
+    assert html =~ ~s(tabindex="0")
+    assert html =~ ~s(aria-label="Scrollable Symbrella cognitive-region network")
+    assert html =~ ~s(aria-describedby="atlas-mobile-scroll-hint")
+    assert html =~ ~s(id="atlas-mobile-scroll-hint")
+    assert html =~ "Swipe sideways to explore the network"
+
+    assert html =~ ~s(id="atlas-network-canvas")
+    assert html =~ "position: relative; width: 100%; min-width: 1000px; height: 600px;"
+    assert html =~ "max-width: 100%; overflow-x: auto;"
+    assert html =~ "-webkit-overflow-scrolling: touch;"
+    assert html =~ "pointer-events: none; position: absolute; inset: 0;"
+    refute html =~ ~s(min-w-[940px])
+  end
+
+  test "node selection and graph geometry retain CSS-independent positioning fallbacks" do
+    html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: @nodes, selected: :lifg)
+
+    assert html =~ ~s(id="atlas-region-lifg")
+    assert html =~ ~s(phx-click="select-region")
+    assert html =~ ~s(aria-pressed="true")
+    assert html =~ "position: absolute; left: 39.0%; top: 65.0%; width: 88px;"
+    assert html =~ "transform: translate(-50%, -50%);"
+    assert html =~ ~s(viewBox="0 0 1000 600")
+    assert html =~ ~s(data-role="registered-module")
+  end
+
+  test "non-collapsing mobile canvas survives every evidence layer" do
+    for layer <- [:conceptual, :source, :dependencies, :telemetry, :bus, :trace] do
+      html = render_component(&NeuralAtlasGraph.graph/1,
+        nodes: @nodes, selected: :lifg, layer: layer)
+
+      assert html =~ ~s(id="atlas-network-viewport")
+      assert html =~ ~s(id="atlas-network-canvas")
+      assert html =~ "min-width: 1000px; height: 600px;"
+      assert html =~ ~s(data-layer="#{layer}")
+      assert html =~ ~s(id="atlas-region-lifg")
+    end
+  end
+
 end
