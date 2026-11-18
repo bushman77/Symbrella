@@ -20,7 +20,19 @@ brain anatomy but do not claim anatomical precision or biological neurons.
 Curved conceptual edges are derived only from registry `:related` entries
 and deduplicated as undirected pairs. Directed, dashed BEAM edges use
 `AtlasEvidence.dependencies/1` results. Observed telemetry and Bus receipts
-light up nodes and show counts; **neither produces inter-region edges**.
+highlight nodes and show session counts; **neither produces inter-region edges**.
+
+Every registered module is represented by one small violet satellite dot attached
+to its region hub. The spoke means **registry membership**, not a function call,
+runtime activation, or a separate biological neuron. Regions with zero registered
+modules have no satellites, even if their underlying implementation may exist.
+
+On BEAM, telemetry and Bus layers, the graph retains faint dotted conceptual
+links for geographic context. They are explicitly labeled as registry navigation
+metadata, **not** observed calls or inferred signal traffic. Telemetry and
+Bus observations are marked by amber rings and counts but are not animated
+continuously: a receipt observed earlier in the connected session does not
+establish continuing activity.
 
 The graph uses SVG for non-interactive edges and ordinary HTML buttons for
 the selectable nodes. Buttons have accessible names, keyboard focus, and
