@@ -116,4 +116,40 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     refute html =~ "documented links"
     refute html =~ "compiled references"
   end
+
+  test "source topology distinguishes documented grouping, configured planners and direct calls" do
+    nodes = [
+      %{key: :lifg, label: "LIFG", subtitle: "Sense selection",
+        related: [:cerebellum], modules: [Brain.LIFG]},
+      %{key: :cerebellum, label: "Cerebellum", subtitle: "Calibration",
+        related: [:lifg], modules: [Brain.Cerebellum]},
+      %{key: :prefrontal, label: "Prefrontal", subtitle: "Planning",
+        related: [:lifg], modules: [Brain.Prefrontal]}
+    ]
+
+    source_edges = [
+      %{from: :lifg, to: :cerebellum, kind: :direct_call,
+        source: "Brain.LIFG.Stage1.cereb_calibrate/4"},
+      %{from: :prefrontal, to: :lifg, kind: :grouping,
+        source: "Brain.Prefrontal.status/0 children"},
+      %{from: :missing, to: :lifg, kind: :planner_reference, source: "missing"}
+    ]
+
+    result = NeuralAtlasGraph.edges(nodes, :source, source_edges)
+
+    assert length(result) == 2
+    assert Enum.any?(result, &(&1.kind == :direct_call and &1.directed))
+    assert Enum.any?(result, &(&1.kind == :grouping and not &1.directed))
+    refute Enum.any?(result, &(&1.from == :missing))
+
+    html = render_component(&NeuralAtlasGraph.graph/1,
+      nodes: nodes, selected: :lifg, layer: :source, sources: source_edges)
+
+    assert html =~ ~s(data-layer="source")
+    assert html =~ ~s(data-edge-kind="source-direct_call")
+    assert html =~ ~s(data-edge-kind="source-grouping")
+    assert html =~ "source-backed relationships"
+    assert html =~ "Faint dotted links = conceptual reference only"
+    refute html =~ ~s(data-edge-kind="beam")
+  end
 end
