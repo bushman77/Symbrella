@@ -64,4 +64,75 @@ defmodule SymbrellaWeb.CognitiveTraceStoreTest do
     {expired, _} = record(second, "turn-dead", :turn, :started, 900_000)
     assert expired.order == ["turn-dead"]
   end
+
+  test "executive receipts survive store sanitization without exposing payloads" do
+    planner_evidence = %{
+      available: true,
+      feedback_quality: :heuristic_proxy,
+      input_text: "NEVER KEEP ME",
+      controls: %{top_k: 4, branch_budget: 2, utility_prior: 0.65,
+                  unknown: "PRIVATE"},
+      planners: [
+        %{region: :dlpfc, status: :produced, reason: :validated,
+          proposed_keys: [:top_k, :unknown], merged_keys: [:top_k],
+          superseded_keys: []},
+        %{region: :fpc, status: :unavailable, reason: :module_not_loaded,
+          proposed_keys: [], merged_keys: [], superseded_keys: []},
+        %{region: :invented, status: :produced, reason: :validated,
+          proposed_keys: [:unknown], merged_keys: [], superseded_keys: []}
+      ]
+    }
+
+    {state1, executive} =
+      record(state(), "turn-f0a1", :prefrontal_control, :ok, 1_000,
+        planner_evidence)
+    [first] = executive.events
+    assert first.region == :prefrontal
+    assert first.evidence.controls ==
+             %{top_k: 4, branch_budget: 2, utility_prior: 0.65}
+    assert Enum.map(first.evidence.planners, & &1.region) == [:dlpfc, :fpc]
+    refute inspect(first.evidence) =~ "PRIVATE"
+    refute inspect(first.evidence) =~ "NEVER KEEP ME"
+
+    decision_evidence = %{
+      shadow_status: :evaluated,
+      shadow_reason: :bounded_candidate_modulation,
+      live_action: :answer_user,
+      shadow_action: :ask_clarifying_question,
+      changed: true,
+      applied_keys: [:branch_budget, :bad_key],
+      unused_keys: [:top_k],
+      applied_sources: [
+        %{key: :branch_budget, region: :fpc},
+        %{key: :bad_key, region: :fpc},
+        %{key: :utility_prior, region: :invented}
+      ],
+      adjustments: [
+        %{action: :answer_user, baseline: 0.5, proposed: 0.45, delta: -0.05},
+        %{action: :answer_user, baseline: 1000.0, proposed: 0.2, delta: -999.8}
+      ],
+      conversation_text: "NEVER KEEP ME"
+    }
+
+    {_, trace} =
+      record(state1, "turn-f0a1", :action_selection, :ok, 1_002,
+        decision_evidence)
+
+    [_, action] = trace.events
+    assert action.region == nil
+    assert action.evidence.live_action == :answer_user
+    assert action.evidence.shadow_action == :ask_clarifying_question
+    assert action.evidence.applied_keys == [:branch_budget]
+    assert action.evidence.applied_sources == [%{key: :branch_budget, region: :fpc}]
+    assert length(action.evidence.adjustments) == 1
+    refute inspect(action.evidence) =~ "NEVER KEEP ME"
+  end
+
+  test "empty executive reports are explicitly marked unavailable" do
+    {_, trace} =
+      record(state(), "turn-001122", :prefrontal_control, :ok, 100,
+        %{available: false, controls: %{}, planners: []})
+
+    assert [%{evidence: %{available: false, planners: []}}] = trace.events
+  end
 end
