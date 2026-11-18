@@ -145,6 +145,42 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanelTest do
     refute old =~ ~s(id="atlas-decision-lineage")
   end
 
+  test "lineage is selected-turn-only even when another turn is newer or expired" do
+    event = %{
+      stage: :response_planning, status: :ok, region: nil,
+      duration_us: 200, at_ms: 1_005,
+      evidence: %{
+        initial_action: :ask_clarifying_question, final_action: :answer_user,
+        reconciliation: :reconciled, reason: :social_intent_reconciliation,
+        initial_safety_gate: :approved, final_safety_gate: :approved,
+        shadow_action: :observe_silently, shadow_status: :evaluated,
+        shadow_applied_keys: [], initial_command_statuses: [],
+        final_command_statuses: [], delivery_status: :not_observed
+      }
+    }
+    traced = Map.update!(@trace, :events, &(&1 ++ [event]))
+    unrelated = %{trace_id: "turn-newer", status: :completed, events: []}
+    nodes = NeuralAtlas.regions()
+
+    active = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :prefrontal, layer: :trace,
+      traces: [unrelated, traced], trace_id: traced.trace_id)
+    assert active =~ ~s(id="atlas-decision-lineage")
+    assert active =~ "social_intent_reconciliation"
+
+    prior = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :prefrontal, layer: :trace,
+      traces: [unrelated, traced], trace_id: unrelated.trace_id)
+    assert prior =~ ~s(id="atlas-decision-lineage-empty")
+    refute prior =~ ~s(id="atlas-decision-lineage")
+
+    expired = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :prefrontal, layer: :trace,
+      traces: [traced], trace_id: "turn-expired")
+    assert expired =~ ~s(id="atlas-decision-lineage-empty")
+    refute expired =~ "social_intent_reconciliation"
+  end
+
   test "atlas uses only the selected turn's executive receipts" do
     nodes = [
       %{key: :prefrontal, label: "Prefrontal", subtitle: "Executive",
