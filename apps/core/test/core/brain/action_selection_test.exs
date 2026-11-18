@@ -119,4 +119,74 @@ defmodule Core.Brain.ActionSelectionTest do
     assert %{selected: :answer_user} = out.action_meta
     assert %Core.Agency.Decision{selected_action: :answer_user} = out.agency_decision
   end
+
+  test "shadow comparison is recorded while authoritative action and commands stay unchanged" do
+    si = %{
+      sentence: "An unclassified observation",
+      source: :test,
+      tokens: [],
+      trace: [],
+      intent: :unclassified,
+      confidence: 0.75,
+      mood: %{},
+      control_signals: %{
+        utility_prior: 0.0,
+        confidence_scale: 0.5,
+        branch_budget: 5
+      },
+      prefrontal: %{
+        provenance: %{
+          utility_prior: Brain.VmPFC,
+          confidence_scale: Brain.DmPFC,
+          branch_budget: Brain.FPC
+        }
+      }
+    }
+
+    baseline = ActionSelection.attach(si, prefrontal_shadow?: false)
+    observed = ActionSelection.attach(si, prefrontal_shadow?: true)
+
+    assert baseline.selected_action == :answer_user
+    assert observed.selected_action == baseline.selected_action
+    assert observed.action_candidates == baseline.action_candidates
+    assert observed.agency_decision.selected_action == baseline.agency_decision.selected_action
+    assert observed.agency_commands == baseline.agency_commands
+    assert observed.agency_command_results == baseline.agency_command_results
+
+    shadow = observed.action_meta.prefrontal_shadow
+    assert shadow.status == :evaluated
+    assert shadow.live_selected == :answer_user
+    assert shadow.shadow_selected == :ask_clarifying_question
+    assert shadow.changed? == true
+    assert Enum.any?(shadow.applied_sources, &(
+      &1.key == :branch_budget and &1.planner == Brain.FPC
+    ))
+
+    assert Enum.any?(observed.trace, fn
+      %{stage: :action_selection, meta: %{prefrontal_shadow: %{changed?: true}}} -> true
+      _ -> false
+    end)
+  end
+
+  test "explicitly disabled shadow reports its status without altering memory permission" do
+    si = %{
+      sentence: "Remember my preference.",
+      source: :test,
+      tokens: [],
+      trace: [],
+      intent: :memory_write,
+      confidence: 0.88,
+      mood: %{},
+      control_signals: %{utility_prior: 0.0}
+    }
+
+    disabled = ActionSelection.attach(si, prefrontal_shadow?: false)
+    enabled = ActionSelection.attach(si, prefrontal_shadow?: true)
+
+    assert disabled.action_meta.prefrontal_shadow.status == :disabled
+    assert enabled.action_meta.prefrontal_shadow.reason == :protected_live_decision
+    assert disabled.selected_action == enabled.selected_action
+    assert [%Core.Agency.Command{requires_permission?: true}] = enabled.agency_commands
+    assert [%{status: :deferred, reason: :permission_required}] = enabled.agency_command_results
+  end
 end
