@@ -25,7 +25,8 @@ and a wall-clock observation timestamp. It is *not* a neural firing event.
 - Phase 4: grammar and competition, with separately timed LIFG and ATL calls
 - Phase 5: semantic composition
 - Phase 6: comprehension summary and speech-act binding, each separately timed
-- Phase 7: working memory and response planning
+- Phase 7: working memory, explicitly timed Prefrontal planner aggregation and
+  ActionSelector execution (including read-only shadow comparison), and response planning
 - Phase 8: experience and memory, including qualified Hippocampus persistence
 
 Phase spans include nested operations; **summing phase and nested durations
@@ -57,10 +58,45 @@ snapshots to `NeuralAtlas.panel`. Select **Turn trace** in the existing
 The detailed timeline shows observed ordered completion receipts, elapsed
 time, status, and bounded evidence counters.
 
-The network graph highlights **only** regions with specifically
-instrumented, completed module calls: LIFG selection, ATL integration,
-and Hippocampus persistence. Faint conceptual edges are still navigation
-context; they do not claim that a signal traversed those paths.
+The network graph highlights **only** regions with explicitly recorded
+activity: LIFG selection, ATL integration, Hippocampus persistence,
+Prefrontal aggregation, and actual planner-call reports returned by that
+aggregation. A planner with status `:unavailable` is **not** counted as an
+executed planner. Faint conceptual edges remain navigation context; they
+do not claim that signals traveled along those links.
+
+### P-002: Executive observability
+
+`Core.CognitiveTrace.step/3` now times the real
+`Core.Brain.Prefrontal.attach/2` and
+`Core.Brain.ActionSelection.attach/2` invocations nested in Phase 7.
+The results feed the **same chat turn ID** as the enclosing worker.
+Only known planner region keys, statuses, merged control values (bounded
+numbers/enumerated policies), shadow action names, candidate score comparisons,
+and per-planner control-key provenance survive telemetry sanitization.
+Planner exception details, user text, raw semantic candidates, memory contents,
+and arbitrary action payloads are never stored by the trace store.
+
+Select **Turn trace** on `/brain` to inspect:
+
+- A Prefrontal-region summary of the reported planner calls
+- Individual DLPFC, FPC, DMPFC, VMPFC and Salience planner statuses
+- Which planner keys were computed and which survived the canonical merge
+- Which keys affected only the shadow-scoring comparison
+- Live action versus shadow recommendation and the bounded candidate scores
+
+The turn-scoped report distinguishes `produced`, `no_opinion`,
+`unavailable`, `failed`, and `rejected`. A merged value does not prove
+it influenced action selection, and shadow-scoring use does not imply a change
+to the authoritative live decision. Disabled and memory-fast-path turns
+may legitimately contain no executive receipt.
+
+The DMPFC and VMPFC calculations still use heuristic outcome estimates in
+`Core.Brain.Prefrontal.context_from_si/2`; they are marked
+`:heuristic_proxy`, not verified learning success. No planner behavior,
+working-memory admission, permissions, lexical winners, or action selection
+is changed by P-002. The instrumentation cannot infer distributed causal
+routes or prove that a recommendation improved comprehension.
 More precise causal edges will require explicit parent/child span IDs and
 instrumented message send/receive boundaries.
 
@@ -76,6 +112,7 @@ From the umbrella root:
 mix test apps/core/test/core/cognitive_trace_test.exs
 mix test apps/symbrella_web/test/symbrella_web/cognitive_trace_store_test.exs \
   apps/symbrella_web/test/symbrella_web/components/cognitive_trace_panel_test.exs \
+  apps/symbrella_web/test/symbrella_web/components/executive_trace_panel_test.exs \
   apps/symbrella_web/test/symbrella_web/components/neural_atlas_test.exs \
   apps/symbrella_web/test/symbrella_web/components/neural_atlas_graph_test.exs
 ```
