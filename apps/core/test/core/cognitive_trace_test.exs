@@ -29,7 +29,7 @@ defmodule Core.CognitiveTraceTest do
                                                      stage: :turn, status: :started}}
     assert_receive {:observed, %{duration_us: step_us}, %{trace_id: "turn-abcdef12",
                                                           stage: :phase_1_input, status: :ok,
-                                                          evidence: %{}}}}
+                                                          evidence: %{}}}
     assert is_integer(step_us) and step_us >= 0
     assert_receive {:observed, %{duration_us: turn_us}, %{trace_id: "turn-abcdef12",
                                                           stage: :turn, status: :ok}}
