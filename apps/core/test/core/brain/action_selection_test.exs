@@ -150,8 +150,19 @@ defmodule Core.Brain.ActionSelectionTest do
     assert observed.selected_action == baseline.selected_action
     assert observed.action_candidates == baseline.action_candidates
     assert observed.agency_decision.selected_action == baseline.agency_decision.selected_action
-    assert observed.agency_commands == baseline.agency_commands
-    assert observed.agency_command_results == baseline.agency_command_results
+    # Decisions and command IDs are generated independently on each call.
+    # Compare stable action/permission semantics rather than unique identifiers.
+    stable_command = fn command ->
+      Map.take(command, [:type, :reason, :risk, :requires_permission?, :payload])
+    end
+
+    assert Enum.map(observed.agency_commands, stable_command) ==
+             Enum.map(baseline.agency_commands, stable_command)
+
+    stable_result = fn result -> Map.take(result, [:type, :status, :reason]) end
+
+    assert Enum.map(observed.agency_command_results, stable_result) ==
+             Enum.map(baseline.agency_command_results, stable_result)
 
     shadow = observed.action_meta.prefrontal_shadow
     assert shadow.status == :evaluated
