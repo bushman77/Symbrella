@@ -428,6 +428,8 @@ defmodule Core.Response.Attach do
       cond do
         not attempted? -> {:not_planned, :response_disabled}
         not completed? -> {:not_planned, :response_unavailable}
+        is_nil(initial) -> {:not_recorded, :initial_action_unavailable}
+        is_nil(final) -> {:not_recorded, :final_action_unavailable}
         initial != final -> {:reconciled, :social_intent_reconciliation}
         true -> {:unchanged, :action_preserved}
       end
