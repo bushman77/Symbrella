@@ -3,8 +3,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
   Graph-first, accessible view of registered Symbrella cognitive regions.
 
   Positions are stable presentation coordinates, not brain measurements.
-  Only registry conceptual links and cross-region BEAM references produce edges.
-  Telemetry and Bus receipts illuminate nodes, never fabricate connections.
+  Conceptual, source and BEAM edges have distinct evidence meaning.
+  Selected-turn trace edges show explicit planner invocation reports or
+  temporal order of completed, instrumented stages. Telemetry and Bus receipts
+  illuminate nodes but never fabricate call connections.
   """
 
   use SymbrellaWeb, :html
@@ -79,11 +81,22 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
     end)
   end
 
-  @doc """
-  Returns only evidence-supported graph edges.
+  @trace_stages [
+    {:lifg_selection, :lifg},
+    {:atl_integration, :atl},
+    {:prefrontal_control, :prefrontal},
+    {:hippocampus_persist, :hippocampus}
+  ]
+  @planner_regions [:dlpfc, :vmpfc, :fpc, :dmpfc, :salience]
+  @invoked_statuses [:produced, :no_opinion, :failed, :rejected]
 
-  Conceptual edges are undirected registry relationships. Compiled dependencies
-  are directed references. Runtime receipts have no verified edge endpoints.
+  @doc """
+  Build evidence-separated graph edges.
+
+  The trace layer uses only the selected turn's explicitly completed region
+  stages and Prefrontal's sanitized per-planner invocation receipts.
+  Stage-order arrows indicate chronology, *not* a direct remote call or
+  propagated neural signal. An unavailable planner is never shown as invoked.
   """
   def edges(nodes, :conceptual, _dependencies) do
     keys = MapSet.new(Enum.map(nodes, & &1.key))
@@ -132,6 +145,77 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
     |> Enum.sort_by(&{&1.from, &1.to})
   end
 
+  def edges(nodes, :trace, %{events: events}) when is_list(events) do
+    known = MapSet.new(Enum.map(nodes, & &1.key))
+
+    completed =
+      events
+      |> Enum.flat_map(fn
+        %{stage: stage, region: region, status: :ok} ->
+          if {stage, region} in @trace_stages and MapSet.member?(known, region),
+            do: [%{stage: stage, region: region}],
+            else: []
+
+        _ ->
+          []
+      end)
+      |> Enum.uniq_by(& &1.stage)
+
+    # These are successive *recorded* region stages, not verified call edges.
+    stage_order =
+      completed
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.flat_map(fn [earlier, later] ->
+        if earlier.region == later.region do
+          []
+        else
+          [%{
+            from: earlier.region,
+            to: later.region,
+            kind: :stage_order,
+            directed: true,
+            from_stage: earlier.stage,
+            to_stage: later.stage
+          }]
+        end
+      end)
+
+    planner_invocations =
+      if MapSet.member?(known, :prefrontal) do
+        Enum.flat_map(events, fn
+          %{stage: :prefrontal_control, region: :prefrontal, status: :ok,
+            evidence: %{available: true, planners: planners}} when is_list(planners) ->
+            Enum.flat_map(planners, fn
+              %{region: region, status: status} ->
+                if region in @planner_regions and
+                     status in @invoked_statuses and
+                     MapSet.member?(known, region) do
+                  [%{
+                    from: :prefrontal,
+                    to: region,
+                    kind: :planner_invocation,
+                    directed: true,
+                    status: status
+                  }]
+                else
+                  []
+                end
+
+              _ ->
+                []
+            end)
+
+          _ ->
+            []
+        end)
+      else
+        []
+      end
+
+    (stage_order ++ planner_invocations)
+    |> Enum.uniq_by(&{&1.kind, &1.from, &1.to})
+  end
+
   def edges(_nodes, _layer, _dependencies), do: []
 
   attr :nodes, :list, required: true
@@ -151,10 +235,16 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
     nodes = Enum.map(nodes, &Map.put(&1, :observed, Map.get(observed, &1.key, 0)))
     module_sparks = satellites(assigns.nodes)
 
+    edge_evidence =
+      case assigns.layer do
+        :source -> assigns.sources
+        :trace -> assigns.trace
+        _ -> assigns.dependencies
+      end
+
     wires =
       assigns.nodes
-      |> edges(assigns.layer,
-        if(assigns.layer == :source, do: assigns.sources, else: assigns.dependencies))
+      |> edges(assigns.layer, edge_evidence)
       |> Enum.flat_map(fn edge ->
         case {Map.get(index, edge.from), Map.get(index, edge.to)} do
           {nil, _} -> []
@@ -201,6 +291,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
       assigns
       |> assign(:graph_nodes, nodes)
       |> assign(:wires, wires)
+      |> assign(:trace_invocations, Enum.count(wires, &(Map.get(&1, :kind) == :planner_invocation)))
+      |> assign(:trace_stage_links, Enum.count(wires, &(Map.get(&1, :kind) == :stage_order)))
       |> assign(:context_wires, context_wires)
       |> assign(:module_sparks, module_sparks)
       |> assign(:total_modules, length(module_sparks))
@@ -247,6 +339,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
                 refX="6" refY="3.5" orient="auto">
                 <path d="M0,0 L7,3.5 L0,7 Z" fill="#67e8f9" />
               </marker>
+              <marker id="atlas-network-invocation-arrow" markerWidth="7" markerHeight="7"
+                refX="6" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 Z" fill="#fcd34d" />
+              </marker>
             </defs>
             <rect width="1000" height="600" fill="#050d19" />
             <rect width="1000" height="600" fill="url(#atlas-network-grid-pattern)" />
@@ -261,43 +357,83 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
 
             <path :for={edge <- @context_wires} d={edge.path}
               data-edge-kind="conceptual-context" fill="none" stroke="#427184"
-              stroke-width="1.3" stroke-opacity="0.3" stroke-dasharray="2 7"
-              stroke-linecap="round" />
+              stroke-width="1.3"
+              stroke-opacity={if @layer == :trace, do: "0.37", else: "0.3"}
+              stroke-dasharray="2 7" stroke-linecap="round" />
 
             <path :for={edge <- @wires} d={edge.path}
               data-edge-kind={
                 cond do
                   @layer == :source -> "source-#{edge.kind}"
+                  @layer == :trace -> "trace-#{edge.kind}"
                   edge.directed -> "beam"
                   true -> "conceptual"
                 end
               }
               fill="none"
-              stroke={if @layer == :source, do: "#c4b5fd", else: "#22d3ee"}
-              stroke-width="8" stroke-opacity="0.13"
+              stroke={
+                cond do
+                  @layer == :trace and edge.kind == :planner_invocation -> "#fbbf24"
+                  @layer == :source -> "#c4b5fd"
+                  true -> "#22d3ee"
+                end
+              }
+              stroke-width={if @layer == :trace, do: "11", else: "8"}
+              stroke-opacity={if @layer == :trace, do: "0.22", else: "0.13"}
               filter="url(#atlas-network-wire-glow)"
               stroke-linecap="round" />
 
             <path :for={edge <- @wires} d={edge.path} fill="none"
+              data-edge-kind={
+                if @layer == :trace, do: "trace-#{edge.kind}", else: nil
+              }
+              data-invocation-status={
+                if @layer == :trace and edge.kind == :planner_invocation,
+                  do: edge.status, else: nil
+              }
               stroke={
                 cond do
+                  @layer == :trace and edge.kind == :planner_invocation -> "#fcd34d"
+                  @layer == :trace -> "#67e8f9"
                   @layer == :source and edge.selected -> "#ddd6fe"
                   @layer == :source -> "#a78bfa"
                   edge.selected -> "#a5f3fc"
                   true -> "#389fbd"
                 end
               }
-              stroke-width={if edge.selected, do: "3.4", else: "1.8"}
-              stroke-opacity={if edge.selected, do: "1", else: "0.65"}
+              stroke-width={
+                cond do
+                  @layer == :trace and edge.kind == :planner_invocation -> "4"
+                  @layer == :trace -> "3"
+                  edge.selected -> "3.4"
+                  true -> "1.8"
+                end
+              }
+              stroke-opacity={if @layer == :trace or edge.selected, do: "1", else: "0.65"}
               stroke-dasharray={
-                if @layer == :source or edge.directed, do: "8 6", else: nil
+                cond do
+                  @layer == :trace and edge.kind == :planner_invocation -> nil
+                  @layer == :trace -> "8 6"
+                  @layer == :source or edge.directed -> "8 6"
+                  true -> nil
+                end
               }
               marker-end={
-                if @layer != :source and edge.directed,
-                  do: "url(#atlas-network-arrow)",
-                  else: nil
+                cond do
+                  @layer == :source -> nil
+                  @layer == :trace and edge.kind == :planner_invocation ->
+                    "url(#atlas-network-invocation-arrow)"
+                  edge.directed -> "url(#atlas-network-arrow)"
+                  true -> nil
+                end
               }
-              stroke-linecap="round" />
+              stroke-linecap="round">
+              <title :if={@layer == :trace}>
+                {if edge.kind == :planner_invocation,
+                  do: "Prefrontal reported planner invocation (#{edge.status})",
+                  else: "Successive completed region stages (order only; not a direct call)"}
+              </title>
+            </path>
 
             <circle :for={node <- @graph_nodes} cx={node.x} cy={node.y} r="59"
               fill="url(#atlas-network-soma)"
@@ -368,6 +504,15 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
           <span class="font-semibold text-amber-300">◉</span>
           {@received}
           {if @layer == :trace, do: "instrumented region stages in the selected turn (including reported planner calls)", else: "event-region observations in this session"}
+        </span>
+        <span :if={@layer == :trace} id="atlas-trace-edge-legend"
+          class="flex flex-wrap gap-x-4 gap-y-1">
+          <span><span class="font-bold text-amber-300">━</span>
+            {@trace_invocations} reported planner invocations (solid amber)
+          </span>
+          <span><span class="font-bold text-cyan-300">┄</span>
+            {@trace_stage_links} successive completed region stages (dashed cyan; order only)
+          </span>
         </span>
         <span :if={@layer != :conceptual}>
           <span class="font-semibold text-cyan-500">┄</span>
