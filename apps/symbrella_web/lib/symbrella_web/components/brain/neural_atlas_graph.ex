@@ -328,7 +328,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
             title={"#{node.label} — #{node.subtitle}"}
             style={"position: absolute; left: #{node.left}; top: #{node.top}; width: 88px; height: 88px; transform: translate(-50%, -50%);"}
             class={[
-              "absolute z-10 flex h-[88px] w-[88px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-2 px-2 text-center shadow-xl transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-white/80 motion-reduce:transition-none",
+              "absolute z-10 flex h-[88px] w-[88px] flex-col items-center justify-center rounded-full border-2 px-2 text-center shadow-xl transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-white/80 motion-reduce:transition-none",
               @selected == node.key && "border-emerald-300 bg-emerald-900 text-white shadow-emerald-400/40 ring-4 ring-emerald-500/30",
               @selected != node.key && MapSet.member?(@neighbors, node.key) && "border-cyan-300 bg-cyan-950 text-cyan-100 shadow-cyan-400/30",
               @selected != node.key && node.observed > 0 && @layer in [:telemetry, :bus, :trace] && "border-amber-300 bg-amber-950 text-amber-100 shadow-amber-500/30",
