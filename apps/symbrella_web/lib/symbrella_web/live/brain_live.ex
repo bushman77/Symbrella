@@ -23,6 +23,7 @@ defmodule SymbrellaWeb.BrainLive do
   alias SymbrellaWeb.Components.Brain.AtlasEvidence
   alias SymbrellaWeb.BrainRuntime
   alias SymbrellaWeb.SocialBrainActivity
+  alias SymbrellaWeb.CognitiveTraceStore
   alias SymbrellaWeb.Components.Brain.ActivationTrend
   alias SymbrellaWeb.Region.Registry, as: RegionRegistry
   alias SymbrellaWeb.BrainLive.MoodHud
@@ -32,6 +33,7 @@ defmodule SymbrellaWeb.BrainLive do
 
   @blackboard_topic "brain:blackboard"
   @social_topic "brain:social"
+  @cognitive_trace_topic "brain:cognitive_trace"
   @hud_topics ~w(brain:clock brain:intent brain:mood brain:lifg brain:wm)
   @refresh_ms 500
 
@@ -67,6 +69,8 @@ defmodule SymbrellaWeb.BrainLive do
       |> assign_new(:atlas_dependencies, fn -> AtlasEvidence.dependencies(NeuralAtlas.regions()) end)
       |> assign_new(:atlas_events, fn -> [] end)
       |> assign_new(:atlas_bus_events, fn -> [] end)
+      |> assign_new(:cognitive_traces, fn -> CognitiveTraceStore.latest() end)
+      |> assign_new(:atlas_trace_id, fn -> nil end)
       |> assign_new(:bb_filter, fn -> "" end)
       |> assign_new(:wm, fn -> %{} end)
       |> assign_new(:activation_samples, fn -> [] end)
@@ -80,6 +84,7 @@ defmodule SymbrellaWeb.BrainLive do
       if connected?(socket) do
         :ok = Bus.subscribe(@blackboard_topic)
         :ok = Bus.subscribe(@social_topic)
+        :ok = Bus.subscribe(@cognitive_trace_topic)
         Enum.each(@hud_topics, &Bus.subscribe/1)
         :timer.send_interval(@refresh_ms, :refresh_selected)
 
@@ -275,12 +280,13 @@ defmodule SymbrellaWeb.BrainLive do
   # Switch evidence layers without changing Brain execution.
   @impl true
   def handle_event("atlas-layer", %{"layer" => layer}, socket)
-      when layer in ["conceptual", "dependencies", "telemetry", "bus"] do
+      when layer in ["conceptual", "dependencies", "telemetry", "bus", "trace"] do
     selected =
       case layer do
         "dependencies" -> :dependencies
         "telemetry" -> :telemetry
         "bus" -> :bus
+        "trace" -> :trace
         _ -> :conceptual
       end
 
@@ -288,6 +294,18 @@ defmodule SymbrellaWeb.BrainLive do
   end
 
   def handle_event("atlas-layer", _params, socket), do: {:noreply, socket}
+
+  # Only switch to a trace that the bounded in-memory observer actually knows.
+  @impl true
+  def handle_event("atlas-trace", %{"id" => id}, socket) do
+    if Enum.any?(socket.assigns.cognitive_traces, &(&1.trace_id == id)) do
+      {:noreply, assign(socket, :atlas_trace_id, id)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("atlas-trace", _params, socket), do: {:noreply, socket}
 
   # Preserve the anatomical diagram and all current live diagnostics.
   @impl true
@@ -345,6 +363,12 @@ defmodule SymbrellaWeb.BrainLive do
 
   @impl true
   def handle_info({:brain_bus, env}, socket), do: handle_blackboard(env, socket)
+
+  # Only sanitized stage metadata from the supervised in-memory observer.
+  @impl true
+  def handle_info({:cognitive_trace_updated, _trace}, socket) do
+    {:noreply, assign(socket, :cognitive_traces, CognitiveTraceStore.latest())}
+  end
 
   # A live observation of the isolated external semantic pipeline; do not
   # mutate region snapshots or attribute this to actual neuron activation.
