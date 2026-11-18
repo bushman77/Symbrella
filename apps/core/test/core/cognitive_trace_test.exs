@@ -135,6 +135,48 @@ defmodule Core.CognitiveTraceTest do
     refute inspect(action) =~ "PRIVATE"
   end
 
+  test "post-response lineage is turn-scoped and excludes private decision data" do
+    CognitiveTrace.with_trace("turn-0ddba11", fn ->
+      CognitiveTrace.stage(:response_planning, fn ->
+        %{
+          sentence: "PRIVATE INPUT",
+          response_text: "PRIVATE REPLY",
+          decision_lineage: %{
+            initial_action: :ask_clarifying_question,
+            final_action: :answer_user,
+            initial_safety_gate: :approved,
+            final_safety_gate: :approved,
+            reconciliation: :reconciled,
+            reason: :social_intent_reconciliation,
+            shadow_action: :observe_silently,
+            shadow_status: :evaluated,
+            shadow_applied_keys: [:utility_prior, :private_key],
+            initial_command_statuses: [:deferred, :private_status],
+            final_command_statuses: [],
+            initial_decision_trace_id: "PRIVATE DECISION ID",
+            response_text: "PRIVATE LEAK"
+          }
+        }
+      end)
+    end)
+
+    assert_receive {:observed, _, %{stage: :turn, status: :started}}
+    assert_receive {:observed, _, %{stage: :response_planning, status: :ok,
+                                   trace_id: "turn-0ddba11", evidence: lineage}}
+    assert lineage.initial_action == :ask_clarifying_question
+    assert lineage.final_action == :answer_user
+    assert lineage.reconciliation == :reconciled
+    assert lineage.reason == :social_intent_reconciliation
+    assert lineage.shadow_action == :observe_silently
+    assert lineage.shadow_applied_keys == [:utility_prior]
+    assert lineage.initial_command_statuses == [:deferred, :unknown]
+    assert lineage.final_command_statuses == []
+    assert lineage.delivery_status == :not_observed
+    refute Map.has_key?(lineage, :initial_decision_trace_id)
+    refute inspect(lineage) =~ "PRIVATE"
+    assert_receive {:observed, _, %{stage: :turn, status: :ok}}
+  end
+
   test "untraced calls do not emit executive metadata" do
     value = %{prefrontal: %{signals: %{top_k: 2}}}
     assert value == CognitiveTrace.stage(:prefrontal_control, fn -> value end)
