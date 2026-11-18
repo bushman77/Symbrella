@@ -266,6 +266,7 @@ defmodule Core.SemanticInput do
           selected_action: atom() | nil,
           action_candidates: list() | nil,
           action_meta: map() | nil,
+          decision_lineage: map() | nil,
           agency_decision: term() | nil,
           agency_commands: list() | nil,
           agency_command_results: list() | nil,
