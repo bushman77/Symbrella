@@ -66,6 +66,12 @@ The inspector offers four independent layers:
    `brain:blackboard` message kinds and an explicitly claimed registered
    region when present. Unattributed messages remain unattributed.
    These receipts do **not** prove which module/function executed.
+5. **Turn trace:** `Core.CognitiveTrace` instruments real, ordered
+   symbolic chat worker calls, and `CognitiveTraceStore` retains bounded,
+   turn-correlated stage timings and evidence counters. Region highlights
+   are limited to specifically instrumented operations and do not imply
+   propagation along the faint conceptual links. See
+   [Cognitive Trace v1](cognitive-trace-v1.md) for contracts and tests.
 
 The two observation buffers are per connected LiveView and each holds up to
 40 receipt summaries. No event payloads, user text, or neural cell state are
