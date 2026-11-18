@@ -128,8 +128,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
       <nav id="atlas-display-modes" aria-label="Neural Atlas display mode"
         class="mb-4 flex flex-wrap items-center gap-2">
         <button :for={{mode, title} <- [{:graph, "Network graph"}, {:list, "Region list"}]}
-          type="button" id={"atlas-display-#{mode}"
-          }
+          type="button" id={"atlas-display-#{mode}"}
           phx-click="atlas-display" phx-value-display={mode}
           aria-pressed={to_string(@display == mode)}
           class={[
