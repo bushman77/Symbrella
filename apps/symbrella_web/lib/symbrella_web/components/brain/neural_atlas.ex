@@ -36,6 +36,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
   attr :layer, :atom, default: :conceptual
   attr :dependencies, :list, default: []
   attr :events, :list, default: []
+  attr :bus_events, :list, default: []
 
   def panel(assigns) do
     current = Enum.find(assigns.nodes, &(&1.key == assigns.selected))
@@ -47,6 +48,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
 
          :telemetry ->
            for event <- assigns.events, region <- event.regions, do: region
+
+         :bus ->
+           for event <- assigns.bus_events, not is_nil(event.region), do: event.region
 
          _ ->
            if current, do: current.related, else: []
@@ -60,6 +64,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
       |> assign(:outgoing, Enum.filter(assigns.dependencies, &(&1.from == assigns.selected)))
       |> assign(:incoming, Enum.filter(assigns.dependencies, &(&1.to == assigns.selected)))
       |> assign(:observations, Enum.filter(assigns.events, &(assigns.selected in &1.regions)))
+      |> assign(:bus_observations,
+        Enum.filter(assigns.bus_events, &(&1.region == assigns.selected)))
+      |> assign(:unattributed_bus_events,
+        assigns.bus_events |> Enum.filter(&is_nil(&1.region)) |> Enum.take(5))
 
     ~H"""
     <section id="brain-neural-atlas"
@@ -81,7 +89,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         <button :for={{layer, name} <- [
             {:conceptual, "Conceptual links"},
             {:dependencies, "BEAM references"},
-            {:telemetry, "Live telemetry"}
+            {:telemetry, "Live telemetry"},
+            {:bus, "Bus events"}
           ]}
           type="button"
           id={"atlas-layer-#{layer}"}
@@ -105,6 +114,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
           <% :telemetry -> %>
             Only registered telemetry topics received by this connected page are shown.
             A received event is an observation, not proof of neural firing or a complete execution trace.
+          <% :bus -> %>
+            Recent Brain.Bus messages exclude telemetry and contain only receipt time, kind and
+            any explicitly attributed registered region. They are not verified function executions.
           <% _ -> %>
             Region associations provide conceptual navigation links, not measured neural firing
             or verified execution dependencies.
@@ -215,6 +227,34 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
               </ul>
               <p :if={@observations == []} class="mt-2 text-xs text-zinc-400">
                 No matching registered telemetry observed since this page connected.
+              </p>
+            <% end %>
+
+            <%= if @layer == :bus do %>
+              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+                Region-attributed bus events ({length(@bus_observations)})
+              </h4>
+              <ul id="atlas-observed-bus" class="mt-2 max-h-64 space-y-2 overflow-y-auto">
+                <li :for={event <- @bus_observations}
+                  class="rounded-lg border border-zinc-700 p-2 text-xs">
+                  <time class="text-emerald-200">{event.seen_at}</time>
+                  <span class="ml-2 font-mono text-cyan-200">{event.kind}</span>
+                </li>
+              </ul>
+              <p :if={@bus_observations == []} class="mt-2 text-xs text-zinc-400">
+                No bus events explicitly attributed to this region since connecting.
+              </p>
+              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+                Unattributed recent messages ({length(@unattributed_bus_events)} shown)
+              </h4>
+              <ul class="mt-2 space-y-1">
+                <li :for={event <- @unattributed_bus_events}
+                  class="font-mono text-xs text-zinc-400">
+                  {event.seen_at} · {event.kind} (no region attribution)
+                </li>
+              </ul>
+              <p :if={@unattributed_bus_events == []} class="mt-2 text-xs text-zinc-400">
+                No unattributed bus events observed.
               </p>
             <% end %>
 
