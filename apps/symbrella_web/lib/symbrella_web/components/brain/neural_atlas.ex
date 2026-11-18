@@ -9,6 +9,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
 
   alias SymbrellaWeb.Region.Registry
   alias SymbrellaWeb.Components.Brain.NeuralAtlasGraph
+  alias SymbrellaWeb.Components.Brain.CognitiveTracePanel
 
   @spec regions() :: list(map())
   def regions do
@@ -39,9 +40,13 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
   attr :dependencies, :list, default: []
   attr :events, :list, default: []
   attr :bus_events, :list, default: []
+  attr :traces, :list, default: []
+  attr :trace_id, :any, default: nil
 
   def panel(assigns) do
     current = Enum.find(assigns.nodes, &(&1.key == assigns.selected))
+    trace = Enum.find(assigns.traces, &(&1.trace_id == assigns.trace_id)) || List.first(assigns.traces)
+    trace_steps = if trace, do: trace.events, else: []
 
     linked =
       (case assigns.layer do
@@ -54,6 +59,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
          :bus ->
            for event <- assigns.bus_events, not is_nil(event.region), do: event.region
 
+         :trace ->
+           for event <- trace_steps, event.status == :ok, not is_nil(event.region),
+             do: event.region
+
          _ ->
            if current, do: current.related, else: []
        end)
@@ -62,6 +71,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
     assigns =
       assigns
       |> assign(:current, current)
+      |> assign(:trace, trace)
+      |> assign(:trace_steps, trace_steps)
+      |> assign(:region_trace_steps, Enum.filter(trace_steps, &(&1.region == assigns.selected)))
       |> assign(:linked, linked)
       |> assign(:outgoing, Enum.filter(assigns.dependencies, &(&1.from == assigns.selected)))
       |> assign(:incoming, Enum.filter(assigns.dependencies, &(&1.to == assigns.selected)))
@@ -92,7 +104,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             {:conceptual, "Conceptual links"},
             {:dependencies, "BEAM references"},
             {:telemetry, "Live telemetry"},
-            {:bus, "Bus events"}
+            {:bus, "Bus events"},
+            {:trace, "Turn trace"}
           ]}
           type="button"
           id={"atlas-layer-#{layer}"}
@@ -119,6 +132,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
           <% :bus -> %>
             Recent Brain.Bus messages exclude telemetry and contain only receipt time, kind and
             any explicitly attributed registered region. They are not verified function executions.
+          <% :trace -> %>
+            Turn-scoped execution spans show actual symbolic functions returning or failing.
+            Highlighted regions correspond only to explicitly instrumented module calls;
+            conceptual connections remain reference-only.
           <% _ -> %>
             Region associations provide conceptual navigation links, not measured neural firing
             or verified execution dependencies.
@@ -155,6 +172,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
           dependencies={@dependencies}
           events={@events}
           bus_events={@bus_events}
+          trace={@trace}
         />
 
         <div :if={@display == :list} id="atlas-region-grid" class="grid gap-3 sm:grid-cols-2">
@@ -291,6 +309,22 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
               </p>
             <% end %>
 
+            <%= if @layer == :trace do %>
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
+                Instrumented region stages ({length(@region_trace_steps)})
+              </h4>
+              <ul id="atlas-region-trace-steps" class="mt-2 space-y-2">
+                <li :for={event <- @region_trace_steps}
+                  class="rounded-lg border border-zinc-700 p-2 text-xs text-cyan-200">
+                  {CognitiveTracePanel.label(event.stage)} · {event.status}
+                  · {Float.round(event.duration_us / 1000, 2)} ms
+                </li>
+              </ul>
+              <p :if={@region_trace_steps == []} class="mt-2 text-xs text-zinc-400">
+                No explicitly instrumented operations for this region in the selected turn.
+              </p>
+            <% end %>
+
             <h4 class="mt-5 text-base font-semibold text-zinc-100">
               Registered telemetry topics
             </h4>
@@ -306,6 +340,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
           <% end %>
         </aside>
       </div>
+      <CognitiveTracePanel.panel :if={@layer == :trace}
+        trace={@trace} traces={@traces} />
+
       <p class="mt-5 border-t border-zinc-700 pt-3 text-xs leading-relaxed text-zinc-400">
         The anatomical map, runtime status, memory, blackboard and mood remain available
         elsewhere on this page. Evidence layers are read-only.
