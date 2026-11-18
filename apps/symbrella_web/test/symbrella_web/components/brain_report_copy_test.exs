@@ -77,6 +77,41 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     refute html =~ "All Regions — Live Status"
   end
 
+  test "BrainLive keeps selected configuration without the all-region PID dashboard" do
+    html =
+      render_component(&SymbrellaWeb.BrainLive.render/1,
+        flash: %{},
+        current_scope: nil,
+        selected: :lifg,
+        regions: [:lifg],
+        brain_view: :atlas,
+        atlas_nodes: SymbrellaWeb.Components.Brain.NeuralAtlas.regions(),
+        snapshot: %{},
+        region_state: %{workspace: []},
+        region_status: %{
+          status: :up,
+          pid: self(),
+          queue: 0,
+          margin_threshold: 0.15,
+          weights: %{lex_fit: 0.2}
+        },
+        social_activity: nil,
+        mood: %{levels: %{}, derived: %{}, tone: :neutral},
+        wm: %{size: 0, capacity: 12, items: []},
+        clock: %{},
+        intent: %{}
+      )
+
+    assert html =~ ~s(data-brain-report-section="Selected Region Runtime Configuration")
+    assert html =~ "margin_threshold"
+    assert html =~ "lex_fit"
+    assert html =~ ~s(id="brain-neural-atlas")
+    refute html =~ ~s(data-brain-report-section="All Regions Live Status")
+    refute html =~ "All Regions — Live Status"
+    refute html =~ "Module Status —"
+    refute html =~ "Process</div>"
+  end
+
   test "full blackboard export contains events hidden by an active filter" do
     now = System.system_time(:millisecond)
 
