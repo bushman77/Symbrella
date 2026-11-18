@@ -46,8 +46,21 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
 
   def panel(assigns) do
     current = Enum.find(assigns.nodes, &(&1.key == assigns.selected))
-    trace = Enum.find(assigns.traces, &(&1.trace_id == assigns.trace_id)) || List.first(assigns.traces)
+    # An explicitly chosen trace that has expired must not silently display
+    # edges from a different turn.
+    trace =
+      case assigns.trace_id do
+        nil -> List.first(assigns.traces)
+        selected_id -> Enum.find(assigns.traces, &(&1.trace_id == selected_id))
+      end
+
     trace_steps = if trace, do: trace.events, else: []
+    trace_links = NeuralAtlasGraph.edges(assigns.nodes, :trace, trace)
+    selected_trace_links =
+      Enum.filter(trace_links, fn edge ->
+        edge.from == assigns.selected or edge.to == assigns.selected
+      end)
+
     executive = ExecutiveTracePanel.report(trace)
     keys = MapSet.new(Enum.map(assigns.nodes, & &1.key))
 
@@ -79,16 +92,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
            for event <- assigns.bus_events, not is_nil(event.region), do: event.region
 
          :trace ->
-           stage_regions =
-             for event <- trace_steps, event.status == :ok, not is_nil(event.region),
-               do: event.region
-
-           planner_regions =
-             for planner <- executive.planners,
-                 planner.status in [:produced, :no_opinion, :failed, :rejected],
-                 do: planner.region
-
-           stage_regions ++ planner_regions
+           for edge <- selected_trace_links do
+             if edge.from == assigns.selected, do: edge.to, else: edge.from
+           end
 
          _ ->
            if current, do: current.related, else: []
@@ -101,6 +107,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
       |> assign(:source_relations, source_relations)
       |> assign(:source_for_selected, source_for_selected)
       |> assign(:trace, trace)
+      |> assign(:trace_links, trace_links)
+      |> assign(:selected_trace_links, selected_trace_links)
       |> assign(:executive, executive)
       |> assign(:trace_steps, trace_steps)
       |> assign(:region_trace_steps, Enum.filter(trace_steps, &(&1.region == assigns.selected)))
@@ -168,9 +176,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             Recent Brain.Bus messages exclude telemetry and contain only receipt time, kind and
             any explicitly attributed registered region. They are not verified function executions.
           <% :trace -> %>
-            Turn-scoped execution spans show actual symbolic functions returning or failing.
-            Highlighted regions correspond only to explicitly instrumented module calls;
-            conceptual connections remain reference-only.
+            Turn-scoped spans highlight completed region operations and reported planner calls.
+            Solid amber arrows show Prefrontal-to-planner invocations in this turn;
+            dashed cyan arrows connect successive completed region stages in recorded order,
+            not verified direct calls. Faint dotted links remain conceptual only.
           <% _ -> %>
             Region associations provide conceptual navigation links, not measured neural firing
             or verified execution dependencies.
@@ -384,6 +393,35 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
               <p :if={@region_trace_steps == []} class="mt-2 text-xs text-zinc-400">
                 No directly timed stage for this region in the selected turn.
                 Planner calls, when reported, are listed separately below.
+              </p>
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
+                Observed turn connections ({length(@selected_trace_links)})
+              </h4>
+              <ul id="atlas-region-trace-connections" class="mt-2 space-y-2">
+                <li :for={edge <- @selected_trace_links}
+                  data-trace-edge-kind={edge.kind}
+                  class="rounded-lg border border-zinc-700 p-3 text-xs">
+                  <p :if={edge.kind == :planner_invocation}
+                    class="font-semibold text-amber-200">
+                    Reported Prefrontal planner invocation · {edge.status}
+                  </p>
+                  <p :if={edge.kind == :stage_order}
+                    class="font-semibold text-cyan-200">
+                    Successive completed region stages · order only, not a direct call
+                  </p>
+                  <p class="mt-1 text-zinc-300">
+                    {Registry.label_for(edge.from)} → {Registry.label_for(edge.to)}
+                  </p>
+                  <button type="button" phx-click="select-region"
+                    phx-value-region={if edge.from == @selected, do: edge.to, else: edge.from}
+                    class="mt-2 min-h-11 rounded-lg border border-cyan-700 px-3 py-2 text-cyan-200">
+                    Inspect {Registry.label_for(if edge.from == @selected, do: edge.to, else: edge.from)}
+                  </button>
+                </li>
+              </ul>
+              <p :if={@selected_trace_links == []} class="mt-2 text-xs text-zinc-400">
+                No observed connections for this region in the selected turn.
+                Conceptual and source relationships do not count as runtime edges.
               </p>
               <ExecutiveTracePanel.inspector executive={@executive} region={@selected} />
             <% end %>
