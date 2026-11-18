@@ -24,6 +24,10 @@ defmodule Core.Brain.ActionSelection do
         |> Brain.ActionSelector.select(opts)
         |> normalize_result()
 
+      # The original selection is authoritative. Shadow evaluation is read-only
+      # and cannot replace this result, its commands, or its permission gates.
+      shadow = maybe_shadow_compare(ctx, result, opts)
+
       selected = Map.get(result, :selected)
       candidates = Map.get(result, :candidates, [])
       confidence = Map.get(result, :confidence, 0.0)
@@ -34,7 +38,7 @@ defmodule Core.Brain.ActionSelection do
       si
       |> Map.put(:selected_action, selected)
       |> Map.put(:action_candidates, candidates)
-      |> Map.put(:action_meta, result)
+      |> Map.put(:action_meta, Map.put(result, :prefrontal_shadow, shadow))
       |> Map.put(:agency_decision, decision)
       |> Map.put(:agency_commands, commands)
       |> Map.put(:agency_command_results, command_results)
@@ -51,7 +55,12 @@ defmodule Core.Brain.ActionSelection do
           risk: decision.risk,
           permission: decision.permission,
           commands: summarize_commands(commands),
-          command_results: summarize_command_results(command_results)
+          command_results: summarize_command_results(command_results),
+          prefrontal_shadow:
+            Map.take(shadow, [
+              :status, :reason, :live_selected, :shadow_selected, :changed?,
+              :applied_keys, :unused_keys, :applied_sources
+            ])
         }
       )
     else
@@ -60,6 +69,51 @@ defmodule Core.Brain.ActionSelection do
   end
 
   def attach(si, _opts), do: si
+
+  defp maybe_shadow_compare(ctx, live, opts) do
+    if Keyword.get(opts, :prefrontal_shadow?, true) do
+      comparison = Brain.ActionSelector.shadow_compare(ctx, live)
+      prefrontal = Map.get(ctx, :prefrontal) || %{}
+      provenance = Map.get(prefrontal, :provenance) || %{}
+
+      applied_sources =
+        for key <- Map.get(comparison, :applied_keys, []) do
+          %{key: key, planner: Map.get(provenance, key)}
+        end
+
+      Map.put(comparison, :applied_sources, applied_sources)
+    else
+      %{
+        status: :disabled,
+        reason: :opted_out,
+        live_selected: Map.get(live, :selected),
+        shadow_selected: Map.get(live, :selected),
+        changed?: false,
+        applied_keys: [],
+        unused_keys: [],
+        applied_sources: [],
+        adjustments: []
+      }
+    end
+  rescue
+    _ -> shadow_failure(live)
+  catch
+    _, _ -> shadow_failure(live)
+  end
+
+  defp shadow_failure(live) do
+    %{
+      status: :failed,
+      reason: :shadow_exception,
+      live_selected: Map.get(live, :selected),
+      shadow_selected: Map.get(live, :selected),
+      changed?: false,
+      applied_keys: [],
+      unused_keys: [],
+      applied_sources: [],
+      adjustments: []
+    }
+  end
 
   defp context_from_si(%{} = si) do
     %{
