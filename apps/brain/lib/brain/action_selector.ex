@@ -117,9 +117,11 @@ defmodule Brain.ActionSelector do
             }
           end)
 
-        shadow_top = Enum.max_by(considered, & &1.shadow_score, fn ->
-          %{action: selected, shadow_score: live.confidence}
-        end)
+        shadow_top =
+          case considered do
+            [] -> %{action: selected, shadow_score: Map.get(live, :confidence, 0.0)}
+            items -> Enum.max_by(items, & &1.shadow_score)
+          end
 
         applied = considered |> Enum.flat_map(& &1.applied_keys) |> Enum.uniq() |> Enum.sort()
 
