@@ -282,8 +282,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
                 if @layer == :source or edge.directed, do: "8 6", else: nil
               }
               marker-end={
-                if @layer == :source, do: nil,
-                  else: if(edge.directed, do: "url(#atlas-network-arrow)", else: nil)
+                if @layer != :source and edge.directed,
+                  do: "url(#atlas-network-arrow)",
+                  else: nil
               }
               stroke-linecap="round" />
 
