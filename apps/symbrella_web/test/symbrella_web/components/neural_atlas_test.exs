@@ -159,4 +159,71 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
     assert list =~ "Registered modules"
   end
 
+
+  test "previously isolated regions now expose registered implementation modules" do
+    alias SymbrellaWeb.Region.Registry
+
+    expected = %{
+      frontal: [Brain.Frontal],
+      prefrontal: [Brain.Prefrontal, Core.Brain.Prefrontal],
+      fpc: [Brain.FPC],
+      dlpfc: [Brain.DLPFC, Brain.DLPFC.Policy],
+      vmpfc: [Brain.VmPFC],
+      dmpfc: [Brain.DmPFC],
+      ofc: [Brain.OFC],
+      cerebellum: [Brain.Cerebellum],
+      temporal: [Brain.Temporal]
+    }
+
+    Enum.each(expected, fn {key, modules} ->
+      assert Registry.available?(key), "Region #{key} should be registered"
+      assert Registry.defn(key).modules == modules
+      assert Enum.all?(modules, &Code.ensure_loaded?/1),
+             "Missing compiled module for #{key}"
+    end)
+  end
+
+  test "source-backed relationships connect implemented regions without claiming execution" do
+    alias SymbrellaWeb.Region.Registry
+
+    edges = Registry.source_relations()
+    nodes = NeuralAtlas.regions()
+    known = MapSet.new(Enum.map(nodes, & &1.key))
+
+    assert Enum.all?(edges, fn edge ->
+             edge.kind in [:grouping, :planner_reference, :direct_call, :telemetry_subscription] and
+               MapSet.member?(known, edge.from) and
+               MapSet.member?(known, edge.to) and
+               is_binary(edge.source) and edge.source != ""
+           end)
+
+    assert Enum.any?(edges, &(&1.from == :lifg and &1.to == :cerebellum and
+                               &1.kind == :direct_call))
+    assert Enum.any?(edges, &(&1.from == :dlpfc and &1.to == :thalamus and
+                               &1.kind == :telemetry_subscription))
+    assert Enum.any?(edges, &(&1.from == :prefrontal and &1.to == :fpc and
+                               &1.kind == :planner_reference))
+
+    # The default conceptual view now includes source-backed navigation links,
+    # but it does not claim that these links executed in any given chat turn.
+    assert :cerebellum in Registry.defn(:lifg).related
+    assert :lifg in Registry.defn(:cerebellum).related
+    assert :prefrontal in Registry.defn(:frontal).related
+    assert :prefrontal in Registry.defn(:dmpfc).related
+  end
+
+  test "source topology inspector identifies the relationship kind and source witness" do
+    nodes = NeuralAtlas.regions()
+
+    html =
+      render_component(&NeuralAtlas.panel/1,
+        nodes: nodes, selected: :cerebellum, layer: :source)
+
+    assert html =~ ~s(id="atlas-layer-source")
+    assert html =~ ~s(id="atlas-source-relations")
+    assert html =~ "direct call"
+    assert html =~ "Brain.LIFG.Stage1.cereb_calibrate/4"
+    assert html =~ "source-backed"
+    assert html =~ "not evidence that execution occurred"
+  end
 end
