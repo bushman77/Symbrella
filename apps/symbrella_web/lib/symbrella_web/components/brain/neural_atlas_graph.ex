@@ -119,11 +119,12 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
   attr :dependencies, :list, default: []
   attr :events, :list, default: []
   attr :bus_events, :list, default: []
+  attr :trace, :any, default: nil
 
   def graph(assigns) do
     nodes = layout(assigns.nodes)
     index = Map.new(nodes, &{&1.key, &1})
-    observed = counts(assigns.layer, assigns.events, assigns.bus_events)
+    observed = counts(assigns.layer, assigns.events, assigns.bus_events, assigns.trace)
 
     nodes = Enum.map(nodes, &Map.put(&1, :observed, Map.get(observed, &1.key, 0)))
     module_sparks = satellites(assigns.nodes)
@@ -275,17 +276,17 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
               "absolute z-10 flex h-[88px] w-[88px] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border-2 px-2 text-center shadow-xl transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-white/80 motion-reduce:transition-none",
               @selected == node.key && "border-emerald-300 bg-emerald-900 text-white shadow-emerald-400/40 ring-4 ring-emerald-500/30",
               @selected != node.key && MapSet.member?(@neighbors, node.key) && "border-cyan-300 bg-cyan-950 text-cyan-100 shadow-cyan-400/30",
-              @selected != node.key && node.observed > 0 && @layer in [:telemetry, :bus] && "border-amber-300 bg-amber-950 text-amber-100 shadow-amber-500/30",
-              @selected != node.key && not MapSet.member?(@neighbors, node.key) && not (node.observed > 0 && @layer in [:telemetry, :bus]) && "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300"
+              @selected != node.key && node.observed > 0 && @layer in [:telemetry, :bus, :trace] && "border-amber-300 bg-amber-950 text-amber-100 shadow-amber-500/30",
+              @selected != node.key && not MapSet.member?(@neighbors, node.key) && not (node.observed > 0 && @layer in [:telemetry, :bus, :trace]) && "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300"
             ]}>
-            <span :if={@layer in [:telemetry, :bus] and node.observed > 0}
+            <span :if={@layer in [:telemetry, :bus, :trace] and node.observed > 0}
               aria-hidden="true"
               class="pointer-events-none absolute inset-[-7px] rounded-full border-2 border-amber-300/75">
             </span>
             <span class="relative max-w-full break-words text-[12px] font-bold leading-tight">
               {node.label}
             </span>
-            <span :if={@layer in [:telemetry, :bus] and node.observed > 0}
+            <span :if={@layer in [:telemetry, :bus, :trace] and node.observed > 0}
               class="relative mt-1 text-[10px] font-semibold text-amber-200">
               {node.observed} seen
             </span>
@@ -303,9 +304,10 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
           <span class="font-semibold text-cyan-300">━</span>
           {length(@wires)} {if @layer == :dependencies, do: "compiled references", else: "documented links"}
         </span>
-        <span :if={@layer in [:telemetry, :bus]}>
+        <span :if={@layer in [:telemetry, :bus, :trace]}>
           <span class="font-semibold text-amber-300">◉</span>
-          {@received} event-region observations in this session
+          {@received}
+          {if @layer == :trace, do: "instrumented region stages in the selected turn", else: "event-region observations in this session"}
         </span>
         <span :if={@layer != :conceptual}>
           <span class="font-semibold text-cyan-500">┄</span>
@@ -329,7 +331,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
     {round(500 + 395 * :math.cos(angle)), round(300 + 240 * :math.sin(angle))}
   end
 
-  defp counts(:telemetry, events, _bus_events) do
+  defp counts(:telemetry, events, _bus_events, _trace) do
     Enum.reduce(events, %{}, fn event, totals ->
       Enum.reduce(event.regions, totals, fn region, acc ->
         Map.update(acc, region, 1, &(&1 + 1))
@@ -337,7 +339,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
     end)
   end
 
-  defp counts(:bus, _events, bus_events) do
+  defp counts(:bus, _events, bus_events, _trace) do
     Enum.reduce(bus_events, %{}, fn event, totals ->
       if is_nil(event.region) do
         totals
@@ -347,5 +349,15 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
     end)
   end
 
-  defp counts(_layer, _events, _bus_events), do: %{}
+  defp counts(:trace, _events, _bus_events, %{events: stages}) when is_list(stages) do
+    Enum.reduce(stages, %{}, fn event, totals ->
+      if event.status == :ok and is_atom(event.region) and event.region != nil do
+        Map.update(totals, event.region, 1, &(&1 + 1))
+      else
+        totals
+      end
+    end)
+  end
+
+  defp counts(_layer, _events, _bus_events, _trace), do: %{}
 end
