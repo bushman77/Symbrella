@@ -98,6 +98,27 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
     |> Enum.sort_by(&{&1.from, &1.to})
   end
 
+  def edges(nodes, :source, source_relations) do
+    keys = MapSet.new(Enum.map(nodes, & &1.key))
+
+    source_relations
+    |> Enum.filter(fn edge ->
+      MapSet.member?(keys, edge.from) and
+        MapSet.member?(keys, edge.to) and edge.from != edge.to
+    end)
+    |> Enum.uniq_by(&{&1.from, &1.to, &1.kind})
+    |> Enum.map(fn edge ->
+      %{
+        from: edge.from,
+        to: edge.to,
+        directed: edge.kind == :direct_call,
+        kind: edge.kind,
+        source: edge.source
+      }
+    end)
+    |> Enum.sort_by(&{&1.from, &1.to, &1.kind})
+  end
+
   def edges(nodes, :dependencies, dependencies) do
     keys = MapSet.new(Enum.map(nodes, & &1.key))
 
@@ -117,6 +138,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
   attr :selected, :atom, required: true
   attr :layer, :atom, default: :conceptual
   attr :dependencies, :list, default: []
+  attr :sources, :list, default: []
   attr :events, :list, default: []
   attr :bus_events, :list, default: []
   attr :trace, :any, default: nil
@@ -131,7 +153,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
 
     wires =
       assigns.nodes
-      |> edges(assigns.layer, assigns.dependencies)
+      |> edges(assigns.layer,
+        if(assigns.layer == :source, do: assigns.sources, else: assigns.dependencies))
       |> Enum.flat_map(fn edge ->
         case {Map.get(index, edge.from), Map.get(index, edge.to)} do
           {nil, _} -> []
@@ -231,17 +254,37 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
               stroke-linecap="round" />
 
             <path :for={edge <- @wires} d={edge.path}
-              data-edge-kind={if edge.directed, do: "beam", else: "conceptual"}
-              fill="none" stroke="#22d3ee" stroke-width="8" stroke-opacity="0.13"
+              data-edge-kind={
+                cond do
+                  assigns.layer == :source -> "source-#{edge.kind}"
+                  edge.directed -> "beam"
+                  true -> "conceptual"
+                end
+              }
+              fill="none"
+              stroke={if @layer == :source, do: "#c4b5fd", else: "#22d3ee"}
+              stroke-width="8" stroke-opacity="0.13"
               filter="url(#atlas-network-wire-glow)"
               stroke-linecap="round" />
 
             <path :for={edge <- @wires} d={edge.path} fill="none"
-              stroke={if edge.selected, do: "#a5f3fc", else: "#389fbd"}
+              stroke={
+                cond do
+                  @layer == :source and edge.selected -> "#ddd6fe"
+                  @layer == :source -> "#a78bfa"
+                  edge.selected -> "#a5f3fc"
+                  true -> "#389fbd"
+                end
+              }
               stroke-width={if edge.selected, do: "3.4", else: "1.8"}
               stroke-opacity={if edge.selected, do: "1", else: "0.65"}
-              stroke-dasharray={if edge.directed, do: "8 6", else: nil}
-              marker-end={if edge.directed, do: "url(#atlas-network-arrow)", else: nil}
+              stroke-dasharray={
+                if @layer == :source or edge.directed, do: "8 6", else: nil
+              }
+              marker-end={
+                if @layer == :source, do: nil,
+                  else: if(edge.directed, do: "url(#atlas-network-arrow)", else: nil)
+              }
               stroke-linecap="round" />
 
             <circle :for={node <- @graph_nodes} cx={node.x} cy={node.y} r="59"
@@ -300,9 +343,14 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
       <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-zinc-400">
         <span><span class="font-semibold text-emerald-300">●</span> Selected region</span>
         <span><span class="font-semibold text-violet-300">◉</span> {@total_modules} registered module satellites (spokes = membership)</span>
-        <span :if={@layer in [:conceptual, :dependencies]}>
+        <span :if={@layer in [:conceptual, :dependencies, :source]}>
           <span class="font-semibold text-cyan-300">━</span>
-          {length(@wires)} {if @layer == :dependencies, do: "compiled references", else: "documented links"}
+          {length(@wires)}
+          {case @layer do
+             :source -> "source-backed relationships"
+             :dependencies -> "compiled references"
+             _ -> "documented links"
+           end}
         </span>
         <span :if={@layer in [:telemetry, :bus, :trace]}>
           <span class="font-semibold text-amber-300">◉</span>
