@@ -39,6 +39,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
       |> Map.put_new(:atlas_layer, :conceptual)
       |> Map.put_new(:atlas_dependencies, [])
       |> Map.put_new(:atlas_events, [])
+      |> Map.put_new(:atlas_bus_events, [])
       |> Map.put_new(:bb_filter, "")
       |> Map.put_new(:wm, %{})
       |> Map.put_new(:activation_samples, [])
@@ -97,6 +98,7 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
         layer={@atlas_layer}
         dependencies={@atlas_dependencies}
         events={@atlas_events}
+        bus_events={@atlas_bus_events}
       />
       <!-- Keep the live selected-region snapshot available in both modes. -->
       <div class="mt-5" data-brain-report-section="Selected Region Summary and Snapshot">
