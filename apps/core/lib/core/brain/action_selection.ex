@@ -39,6 +39,23 @@ defmodule Core.Brain.ActionSelection do
       |> Map.put(:selected_action, selected)
       |> Map.put(:action_candidates, candidates)
       |> Map.put(:action_meta, Map.put(result, :prefrontal_shadow, shadow))
+      |> Map.put(:decision_lineage, %{
+        v: 1,
+        initial_action: selected,
+        final_action: selected,
+        initial_safety_gate: Map.get(result, :safety_gate),
+        final_safety_gate: Map.get(result, :safety_gate),
+        initial_decision_trace_id: decision.trace_id,
+        final_decision_trace_id: decision.trace_id,
+        shadow_action: Map.get(shadow, :shadow_selected),
+        shadow_status: Map.get(shadow, :status),
+        shadow_applied_keys: Map.get(shadow, :applied_keys, []),
+        initial_command_statuses: command_statuses(command_results),
+        final_command_statuses: command_statuses(command_results),
+        reconciliation: :pending,
+        reason: :awaiting_response_plan,
+        delivery_status: :not_observed
+      })
       |> Map.put(:agency_decision, decision)
       |> Map.put(:agency_commands, commands)
       |> Map.put(:agency_command_results, command_results)
@@ -183,6 +200,19 @@ defmodule Core.Brain.ActionSelection do
   end
 
   defp summarize_commands(_), do: []
+
+  # Only bounded command receipt statuses cross into decision lineage.
+  # A receipt records execution or deferral, not proof of intended success.
+  defp command_statuses(results) when is_list(results) do
+    results
+    |> Enum.take(12)
+    |> Enum.map(fn
+      %{status: status} when is_atom(status) -> status
+      _ -> :unknown
+    end)
+  end
+
+  defp command_statuses(_), do: []
 
   defp summarize_command_results(results) when is_list(results) do
     Enum.map(results, fn
