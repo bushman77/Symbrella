@@ -62,4 +62,49 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
              Enum.all?(node.related, &MapSet.member?(keys, &1))
            end)
   end
+
+  test "BEAM reference layer shows static evidence separately from conceptual links" do
+    nodes = [
+      %{key: :lifg, label: "LIFG", subtitle: "Lexical", description: "Lexical",
+        modules: [Brain.LIFG], telemetry: [], related: [:atl]},
+      %{key: :atl, label: "ATL", subtitle: "Integration", description: "Integration",
+        modules: [Brain.ATL], telemetry: [], related: [:lifg]}
+    ]
+
+    dependencies = [
+      %{from: :lifg, to: :atl, source: "Brain.LIFG",
+        target: "Brain.ATL", call: "resolve/1"}
+    ]
+
+    html = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :lifg, layer: :dependencies, dependencies: dependencies)
+
+    assert html =~ "atlas-layer-dependencies"
+    assert html =~ "aria-pressed=\\"true\\""
+    assert html =~ "atlas-outgoing-references"
+    assert html =~ "Brain.ATL.resolve/1"
+    assert html =~ "Inspect ATL"
+    assert html =~ "They do not establish execution order"
+    refute html =~ "No matching registered telemetry observed"
+  end
+
+  test "live telemetry layer shows only received event topics and receipt times" do
+    nodes = [
+      %{key: :lifg, label: "LIFG", subtitle: "Lexical", description: "Lexical",
+        modules: [Brain.LIFG], telemetry: [[:brain, :lifg]], related: []}
+    ]
+
+    event = %{regions: [:lifg], topic: "[:brain, :lifg]",
+      at_ms: 1_700_000_000_000, seen_at: "22:13:20 UTC"}
+
+    html = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :lifg, layer: :telemetry, events: [event])
+
+    assert html =~ "atlas-layer-telemetry"
+    assert html =~ "atlas-observed-telemetry"
+    assert html =~ "Observed this session"
+    assert html =~ "22:13:20 UTC"
+    assert html =~ "[:brain, :lifg]"
+    assert html =~ "A received event is an observation"
+  end
 end
