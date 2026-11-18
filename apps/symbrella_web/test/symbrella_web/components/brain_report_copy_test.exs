@@ -19,7 +19,7 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     def all_region_status, do: %{lifg: %{status: :up}}
   end
 
-  test "brain dashboard offers one complete clipboard export with every diagnostic section" do
+  test "brain dashboard preserves cognitive sections while excluding redundant process cards" do
     html =
       render_component(&Panels.brain/1,
         selected: :lifg,
@@ -46,9 +46,35 @@ defmodule SymbrellaWeb.BrainReportCopyTest do
     assert html =~ ~s(data-brain-report-section="Complete Blackboard Feed")
     assert html =~ ~s(data-brain-report-section="Read-only Colony Cognition")
     assert html =~ ~s(data-brain-report-section="Working Memory")
-    assert html =~ ~s(data-brain-report-section="Live Region State")
-    assert html =~ ~s(data-brain-report-section="Module Status")
+    refute html =~ ~s(data-brain-report-section="Live Region State")
+    refute html =~ ~s(data-brain-report-section="Module Status")
     assert html =~ ~s(data-brain-report-section="Current Mood and Neuromodulators")
+  end
+
+  test "Neural Atlas keeps region inspection and working memory without process cards" do
+    html =
+      render_component(&Panels.brain/1,
+        brain_view: :atlas,
+        selected: :prefrontal,
+        regions: [:prefrontal, :lifg],
+        snapshot: %{},
+        region_state: %{workspace: []},
+        region_status: %{status: :available},
+        mood: %{levels: %{}, derived: %{}, tone: :neutral},
+        wm: %{size: 0, capacity: 12, items: []},
+        clock: %{},
+        intent: %{},
+        atlas_nodes: SymbrellaWeb.Components.Brain.NeuralAtlas.regions()
+      )
+
+    assert html =~ ~s(id="brain-neural-atlas")
+    assert html =~ ~s(id="atlas-inspector")
+    assert html =~ ~s(data-brain-report-section="Selected Region Summary and Snapshot")
+    assert html =~ ~s(data-brain-report-section="Working Memory")
+    assert html =~ ~s(data-brain-report-section="Current Mood and Neuromodulators")
+    refute html =~ ~s(data-brain-report-section="Live Region State")
+    refute html =~ ~s(data-brain-report-section="Module Status")
+    refute html =~ "All Regions — Live Status"
   end
 
   test "full blackboard export contains events hidden by an active filter" do
