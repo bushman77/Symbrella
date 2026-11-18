@@ -145,6 +145,23 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanelTest do
     refute old =~ ~s(id="atlas-decision-lineage")
   end
 
+  test "incomplete legacy lineage evidence never crashes the inspector" do
+    incomplete = %{
+      trace_id: "turn-incomplete",
+      events: [
+        %{stage: :response_planning, status: :ok,
+          evidence: %{reconciliation: :reconciled}}
+      ]
+    }
+
+    report = ExecutiveTracePanel.report(incomplete)
+    refute report.has_lineage?
+
+    html = render_component(&ExecutiveTracePanel.panel/1, trace: incomplete)
+    assert html =~ ~s(id="atlas-decision-lineage-empty")
+    refute html =~ ~s(id="atlas-decision-lineage")
+  end
+
   test "lineage is selected-turn-only even when another turn is newer or expired" do
     event = %{
       stage: :response_planning, status: :ok, region: nil,
