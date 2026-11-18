@@ -113,21 +113,30 @@ defmodule SymbrellaWeb.HomeLive do
 
         ChatHistory.append(socket.assigns.session_id, msg)
 
+        trace_id = socket.assigns.pending_user_turn.id
+        session_id = socket.assigns.session_id
+
         task =
           Task.Supervisor.async_nolink(Symbrella.TaskSup, fn ->
-            if training_archive_enabled?(), do: Brain.Hippocampus.TurnTrace.start()
-            planned = build_planned_reply(text, socket.assigns.session_id)
+            Core.CognitiveTrace.with_trace(trace_id, fn ->
+              if training_archive_enabled?(), do: Brain.Hippocampus.TurnTrace.start()
 
-            if training_archive_enabled?() do
-              trace = Brain.Hippocampus.TurnTrace.finish_with_status()
+              planned =
+                Core.CognitiveTrace.stage(:chat_route, fn ->
+                  build_planned_reply(text, session_id)
+                end)
 
-              planned
-              |> Map.put(:hippocampal_events, trace.events)
-              |> Map.put(:worker_trace_status, trace.status)
-              |> Map.put(:runtime_observation, Core.TrainingArchive.RuntimeObservation.capture())
-            else
-              planned
-            end
+              if training_archive_enabled?() do
+                trace = Brain.Hippocampus.TurnTrace.finish_with_status()
+
+                planned
+                |> Map.put(:hippocampal_events, trace.events)
+                |> Map.put(:worker_trace_status, trace.status)
+                |> Map.put(:runtime_observation, Core.TrainingArchive.RuntimeObservation.capture())
+              else
+                planned
+              end
+            end)
           end)
 
         {:noreply, assign(socket, :pending_task, task)}
