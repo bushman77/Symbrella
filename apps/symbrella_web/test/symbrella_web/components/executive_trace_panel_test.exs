@@ -119,6 +119,10 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanelTest do
       traces: [unrelated, @trace], trace_id: @trace.trace_id)
 
     assert current =~ ~s(data-layer="trace")
+    assert current =~ ~s(data-edge-kind="trace-planner_invocation")
+    assert current =~ ~s(data-trace-edge-kind="planner_invocation")
+    assert current =~ "Reported Prefrontal planner invocation"
+    assert current =~ ~s(id="atlas-region-trace-connections")
     assert current =~ ~s(data-planner-region="fpc")
     assert current =~ "branch_budget: 2"
     assert current =~ "instrumented region stages in the selected turn"
@@ -131,5 +135,15 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanelTest do
 
     assert prior =~ ~s(id="atlas-executive-empty")
     refute prior =~ ~s(data-planner-region="fpc")
+    refute prior =~ ~s(data-edge-kind="trace-planner_invocation")
+
+    expired = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :prefrontal, layer: :trace,
+      traces: [@trace, unrelated], trace_id: "turn-expired")
+
+    assert expired =~ ~s(id="atlas-executive-empty")
+    assert expired =~ "No observed connections for this region in the selected turn."
+    refute expired =~ ~s(data-edge-kind="trace-planner_invocation")
+    refute expired =~ ~s(data-trace-edge-kind="planner_invocation")
   end
 end
