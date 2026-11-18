@@ -16,10 +16,14 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanel do
   def report(%{events: events}) when is_list(events) do
     prefrontal = last_evidence(events, :prefrontal_control)
     action = last_evidence(events, :action_selection)
+    lineage = last_evidence(events, :response_planning)
+    lineage? = is_map(lineage) and Map.get(lineage, :reconciliation) != :not_recorded
 
     %{
       has_prefrontal?: not is_nil(prefrontal),
       has_action?: not is_nil(action),
+      has_lineage?: lineage?,
+      lineage: if(lineage?, do: lineage, else: nil),
       available?: is_map(prefrontal) and Map.get(prefrontal, :available) == true,
       planners: if(is_map(prefrontal), do: Map.get(prefrontal, :planners, []), else: []),
       controls: if(is_map(prefrontal), do: Map.get(prefrontal, :controls, %{}), else: %{}),
@@ -30,7 +34,8 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanel do
   end
 
   def report(_), do: %{
-    has_prefrontal?: false, has_action?: false, available?: false,
+    has_prefrontal?: false, has_action?: false, has_lineage?: false,
+    lineage: nil, available?: false,
     planners: [], controls: %{}, feedback_quality: :unknown, shadow: nil
   }
 
@@ -191,6 +196,66 @@ defmodule SymbrellaWeb.Components.Brain.ExecutiveTracePanel do
       </div>
       <p :if={not @executive.has_action?} class="mt-3 text-xs text-zinc-400">
         No action-selection receipt in the selected turn.
+      </p>
+
+      <section :if={@executive.has_lineage?} id="atlas-decision-lineage"
+        class="mt-5 rounded-lg border border-emerald-700/50 bg-zinc-950/80 p-4"
+        aria-label="Selected-turn decision lineage">
+        <h4 class="font-semibold text-emerald-200">Decision lineage · selected turn</h4>
+        <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt class="text-xs text-zinc-400">Initial live selection</dt>
+            <dd data-decision-stage="initial" class="font-semibold text-cyan-200">
+              {@executive.lineage.initial_action}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Final planned action</dt>
+            <dd data-decision-stage="final" class="font-semibold text-emerald-200">
+              {@executive.lineage.final_action}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Response-plan reconciliation</dt>
+            <dd data-decision-stage="reconciliation" class="text-zinc-200">
+              {@executive.lineage.reconciliation} · {@executive.lineage.reason}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Safety gates</dt>
+            <dd class="text-zinc-200">
+              {@executive.lineage.initial_safety_gate} →
+              {@executive.lineage.final_safety_gate}
+            </dd>
+          </div>
+        </dl>
+        <p class="mt-3 text-xs text-zinc-300">
+          Earlier shadow recommendation: {@executive.lineage.shadow_action}
+          ({@executive.lineage.shadow_status});
+          shadow-scored keys:
+          {if @executive.lineage.shadow_applied_keys == [],
+            do: "none", else: Enum.join(@executive.lineage.shadow_applied_keys, ", ")}.
+          Shadow scoring did not change the authoritative live selection.
+        </p>
+        <p class="mt-2 text-xs text-zinc-300" data-decision-stage="execution">
+          Initial command receipts:
+          {if @executive.lineage.initial_command_statuses == [],
+            do: "none observed",
+            else: Enum.join(@executive.lineage.initial_command_statuses, ", ")} ·
+          Final command receipts:
+          {if @executive.lineage.final_command_statuses == [],
+            do: "none observed",
+            else: Enum.join(@executive.lineage.final_command_statuses, ", ")}
+        </p>
+        <p class="mt-2 text-xs text-amber-200">
+          Response delivery: {@executive.lineage.delivery_status}.
+          A selected action or command receipt does not prove that a reply was
+          delivered or that a requested outcome succeeded.
+        </p>
+      </section>
+      <p :if={not @executive.has_lineage?} id="atlas-decision-lineage-empty"
+        class="mt-4 text-xs text-zinc-400">
+        No post-response decision-lineage receipt for the selected turn.
       </p>
     </section>
     """
