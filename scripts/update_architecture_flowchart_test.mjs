@@ -1,0 +1,10 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {moduleCatalog,sourceStages,regenerate} from "./update_architecture_flowchart.mjs";
+const files=["apps/core/lib/core.ex","apps/core/lib/core/integration/audit.ex","apps/core/lib/core/integration/coverage.ex","apps/core/lib/core/semantic/named_mentions.ex"];
+const src=["one","two","three","four","five","six","seven","eight"].map(s=>"  defp phase_"+s+"(si,opts) do\n    si\n    |> Core.Integration.Audit.attach()\n  end\n").join("\n");
+const template='<!doctype html><html><style>.test{color:red}</style><header>old</header><aside class="left">old</aside><main><section class="diagram" data-view="overview">old</section><h2 class="details-title">Complete ordered pipeline stages</h2>old</main><aside class="right">inspector</aside><footer>old</footer><script>const LOOKUP = {};let active=\'overview\';</script></html>';
+test("eight phases preserve source call order",()=>{const x=sourceStages(src,moduleCatalog(files));assert.equal(x.length,8);assert.equal(x[4].stages[0].label,"Core.Integration.Audit.attach");});
+test("interactive template remains and regeneration is idempotent",()=>{const x=regenerate(template,src,files);assert.match(x,/data-open="evidence"/);assert.match(x,/Core.Integration.Coverage/);assert.match(x,/<style>\.test\{color:red\}<\/style>/);assert.equal(regenerate(x,src,files),x);});
+test("new calls appear automatically",()=>{const s=src.replace("    |> Core.Integration.Audit.attach()","    |> Core.Integration.Coverage.assess()\n    |> Core.Integration.Audit.attach()");assert.match(regenerate(template,s,files),/Core.Integration.Coverage.assess/);});
+test("missing phases fail without generating",()=>{assert.throws(()=>regenerate(template,src.replace("phase_five(","phase_missing("),files),/Missing Core.phase_five/);});

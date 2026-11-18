@@ -61,6 +61,23 @@ defmodule Symbrella.Umbrella.MixProject do
     Mix.Task.run("run", ["--no-start", "scripts/audit_dictionary_fidelity.exs", "--" | args])
   end
 
+  # Refresh the source-derived architecture only when ExUnit passes.
+  def update_architecture(_args) do
+    node = System.find_executable("node") || Mix.raise("Node.js required for architecture regeneration")
+
+    {test_output, test_status} =
+      System.cmd(node, ["--test", "scripts/update_architecture_flowchart_test.mjs"], stderr_to_stdout: true)
+
+    Mix.shell().info(String.trim(test_output))
+    if test_status != 0, do: Mix.raise("Architecture generator tests failed")
+
+    {output, status} =
+      System.cmd(node, ["scripts/update_architecture_flowchart.mjs"], stderr_to_stdout: true)
+
+    Mix.shell().info(String.trim(output))
+    if status != 0, do: Mix.raise("Architecture generation failed")
+  end
+
   # ---------- Umbrella-wide tasks ----------
   defp aliases do
     [
@@ -116,7 +133,8 @@ defmodule Symbrella.Umbrella.MixProject do
          "ecto.create -r Db --quiet",
          "ecto.migrate -r Db --quiet",
          "negcache.clean",
-         "test"
+         "test --raise",
+         &__MODULE__.update_architecture/1
        ]}
     ]
   end
