@@ -356,7 +356,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
         <span :if={@layer in [:telemetry, :bus, :trace]}>
           <span class="font-semibold text-amber-300">◉</span>
           {@received}
-          {if @layer == :trace, do: "instrumented region stages in the selected turn", else: "event-region observations in this session"}
+          {if @layer == :trace, do: "instrumented region stages in the selected turn (including reported planner calls)", else: "event-region observations in this session"}
         </span>
         <span :if={@layer != :conceptual}>
           <span class="font-semibold text-cyan-500">┄</span>
@@ -400,8 +400,28 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
 
   defp counts(:trace, _events, _bus_events, %{events: stages}) when is_list(stages) do
     Enum.reduce(stages, %{}, fn event, totals ->
-      if event.status == :ok and is_atom(event.region) and event.region != nil do
-        Map.update(totals, event.region, 1, &(&1 + 1))
+      if event.status == :ok do
+        totals =
+          if is_atom(event.region) and event.region != nil,
+            do: Map.update(totals, event.region, 1, &(&1 + 1)),
+            else: totals
+
+        # P-002: Explicit receipts from the invoked planner aggregator count as
+        # observed *planner calls*, never as proof of signal propagation.
+        if event.stage == :prefrontal_control do
+          event
+          |> Map.get(:evidence, %{})
+          |> Map.get(:planners, [])
+          |> Enum.reduce(totals, fn
+            %{region: region, status: status}, acc
+            when region in [:dlpfc, :fpc, :dmpfc, :vmpfc, :salience] and
+                 status in [:produced, :no_opinion, :failed, :rejected] ->
+              Map.update(acc, region, 1, &(&1 + 1))
+            _, acc -> acc
+          end)
+        else
+          totals
+        end
       else
         totals
       end
