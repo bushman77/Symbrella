@@ -71,7 +71,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         <div id="atlas-region-grid" class="grid gap-3 sm:grid-cols-2">
           <button :for={node <- @nodes} id={"atlas-region-#{node.key}"}
             type="button" phx-click="select-region" phx-value-region={node.key}
-            aria-pressed={@selected == node.key}
+            aria-pressed={to_string(@selected == node.key)}
             class={[
               "min-h-28 rounded-xl border p-4 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-300",
               @selected == node.key && "border-emerald-400 bg-emerald-950/50",
