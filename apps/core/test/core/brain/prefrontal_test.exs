@@ -23,6 +23,15 @@ defmodule Core.Brain.PrefrontalTest do
 
     assert %{signals: signals, ctx: ctx} = out.prefrontal
     assert out.control_signals == signals
+    assert out.prefrontal.version == 2
+    assert out.prefrontal.feedback_quality == :heuristic_proxy
+    assert length(out.prefrontal.planners) == 5
+    assert out.prefrontal.provenance[:top_k] == Brain.DLPFC.Policy
+    assert out.prefrontal.provenance[:branch_budget] == Brain.FPC
+    assert Enum.any?(out.prefrontal.planners, fn planner ->
+      planner.planner == Brain.DLPFC.Policy and
+        planner.status == :produced and :top_k in planner.accepted_keys
+    end)
     assert ctx.acc_conflict == 0.72
     assert ctx.novelty > 0.0
     assert is_atom(signals.policy)
@@ -30,7 +39,10 @@ defmodule Core.Brain.PrefrontalTest do
     assert is_integer(signals.branch_budget)
     assert is_number(signals.salience_boost)
 
-    assert [%{stage: :prefrontal_control, decision: :attached} | _] = out.trace
+    assert [%{stage: :prefrontal_control, decision: :attached, meta: meta} | _] = out.trace
+    assert meta.feedback_quality == :heuristic_proxy
+    assert :top_k in meta.merged_keys
+    assert Enum.any?(meta.planner_statuses, &(&1.planner == Brain.FPC))
   end
 
   test "working-memory load uses configured Brain capacity" do
