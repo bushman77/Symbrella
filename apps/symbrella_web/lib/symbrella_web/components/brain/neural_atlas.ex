@@ -79,8 +79,8 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         <p class="text-xs font-semibold uppercase tracking-widest text-emerald-300">
           Cognitive software atlas
         </p>
-        <h2 class="mt-1 text-2xl font-semibold">Symbrella Neural Atlas</h2>
-        <p class="mt-2 text-sm leading-relaxed text-zinc-300">
+        <h2 class="mt-1 text-2xl font-semibold sm:text-3xl">Symbrella Neural Atlas</h2>
+        <p class="mt-2 text-sm leading-relaxed text-zinc-300 sm:text-base">
           Explore registered regions through documented associations, compiled BEAM references
           and observed telemetry. Each layer represents a different level of evidence.
         </p>
@@ -108,7 +108,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         </button>
       </nav>
 
-      <p id="atlas-layer-explanation" class="mb-4 text-xs leading-relaxed text-zinc-400">
+      <p id="atlas-layer-explanation" class="mb-4 text-sm leading-relaxed text-zinc-400">
         <%= case @layer do %>
           <% :dependencies -> %>
             BEAM imports are static references to external functions between registered modules.
@@ -184,17 +184,17 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
           </button>
         </div>
 
-        <aside id="atlas-inspector" class="min-w-0 rounded-xl border border-zinc-700 bg-zinc-900/75 p-4">
+        <aside id="atlas-inspector" class="min-w-0 rounded-xl border border-zinc-700 bg-zinc-900/75 p-5">
           <%= if @current do %>
-            <h3 class="text-xl font-semibold text-emerald-200">{@current.label}</h3>
-            <p class="mt-2 text-sm leading-relaxed text-zinc-200">
+            <h3 class="text-2xl font-semibold text-emerald-200">{@current.label}</h3>
+            <p class="mt-2 text-base leading-relaxed text-zinc-200">
               {@current.description}
             </p>
 
-            <h4 class="mt-5 text-sm font-semibold text-zinc-100">Registered modules</h4>
+            <h4 class="mt-5 text-base font-semibold text-zinc-100">Registered modules</h4>
             <ul class="mt-2 space-y-2">
               <li :for={mod <- @current.modules}
-                class="break-all rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-xs text-cyan-200">
+                class="break-all rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-cyan-200">
                 {inspect(mod)}
               </li>
             </ul>
@@ -203,7 +203,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             </p>
 
             <%= if @layer == :conceptual do %>
-              <h4 class="mt-5 text-sm font-semibold text-zinc-100">Related regions</h4>
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">Related regions</h4>
               <div class="mt-2 flex flex-wrap gap-2">
                 <button :for={key <- @linked} type="button"
                   phx-click="select-region" phx-value-region={key}
@@ -217,7 +217,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             <% end %>
 
             <%= if @layer == :dependencies do %>
-              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
                 Outgoing static references ({length(@outgoing)})
               </h4>
               <ul id="atlas-outgoing-references" class="mt-2 space-y-2">
@@ -233,7 +233,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
               <p :if={@outgoing == []} class="mt-2 text-xs text-zinc-400">
                 No cross-region BEAM references found. Dynamic calls and messages are not covered.
               </p>
-              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
                 Incoming static references ({length(@incoming)})
               </h4>
               <ul class="mt-2 space-y-2">
@@ -248,7 +248,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             <% end %>
 
             <%= if @layer == :telemetry do %>
-              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
                 Received topic events ({length(@observations)})
               </h4>
               <ul id="atlas-observed-telemetry" class="mt-2 max-h-64 space-y-2 overflow-y-auto">
@@ -264,7 +264,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             <% end %>
 
             <%= if @layer == :bus do %>
-              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
                 Region-attributed bus events ({length(@bus_observations)})
               </h4>
               <ul id="atlas-observed-bus" class="mt-2 max-h-64 space-y-2 overflow-y-auto">
@@ -277,7 +277,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
               <p :if={@bus_observations == []} class="mt-2 text-xs text-zinc-400">
                 No bus events explicitly attributed to this region since connecting.
               </p>
-              <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+              <h4 class="mt-5 text-base font-semibold text-zinc-100">
                 Unattributed recent messages ({length(@unattributed_bus_events)} shown)
               </h4>
               <ul class="mt-2 space-y-1">
@@ -291,7 +291,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
               </p>
             <% end %>
 
-            <h4 class="mt-5 text-sm font-semibold text-zinc-100">
+            <h4 class="mt-5 text-base font-semibold text-zinc-100">
               Registered telemetry topics
             </h4>
             <ul class="mt-2 space-y-1">
