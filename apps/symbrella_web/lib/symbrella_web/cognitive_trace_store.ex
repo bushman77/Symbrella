@@ -24,7 +24,7 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
     :phase_5_semantics, :phase_6_comprehension,
     :comprehension_summary, :speech_act_binding,
     :phase_7_planning, :prefrontal_control, :action_selection,
-    :phase_8_memory, :hippocampus_persist
+    :response_planning, :phase_8_memory, :hippocampus_persist
   ]
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -146,6 +146,12 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
     :self_check, :refuse_or_redirect, :safe_support, :unknown
   ]
   @shadow_statuses [:evaluated, :skipped, :disabled, :failed, :unknown, :not_recorded]
+  @lineage_statuses [:reconciled, :unchanged, :not_planned, :not_recorded, :unknown]
+  @lineage_reasons [
+    :social_intent_reconciliation, :action_preserved,
+    :response_disabled, :response_unavailable, :unknown
+  ]
+  @command_statuses [:executed, :deferred, :failed, :rejected, :unknown]
   @shadow_reasons [
     :bounded_candidate_modulation, :protected_live_decision, :no_valid_controls,
     :invalid_context, :opted_out, :shadow_exception, :unknown
@@ -227,6 +233,37 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
       adjustments: adjustments
     }
   end
+
+  defp evidence_for(:response_planning, %{} = raw) do
+    %{
+      initial_action: allow_atom(Map.get(raw, :initial_action), @actions, :unknown),
+      final_action: allow_atom(Map.get(raw, :final_action), @actions, :unknown),
+      initial_safety_gate:
+        allow_atom(Map.get(raw, :initial_safety_gate), [:approved, :redirected], :unknown),
+      final_safety_gate:
+        allow_atom(Map.get(raw, :final_safety_gate), [:approved, :redirected], :unknown),
+      reconciliation:
+        allow_atom(Map.get(raw, :reconciliation), @lineage_statuses, :unknown),
+      reason: allow_atom(Map.get(raw, :reason), @lineage_reasons, :unknown),
+      shadow_action: allow_atom(Map.get(raw, :shadow_action), @actions, :unknown),
+      shadow_status:
+        allow_atom(Map.get(raw, :shadow_status), @shadow_statuses, :unknown),
+      shadow_applied_keys: safe_keys(Map.get(raw, :shadow_applied_keys)),
+      initial_command_statuses:
+        bounded_statuses(Map.get(raw, :initial_command_statuses)),
+      final_command_statuses:
+        bounded_statuses(Map.get(raw, :final_command_statuses)),
+      delivery_status: :not_observed
+    }
+  end
+
+  defp bounded_statuses(items) when is_list(items) do
+    items
+    |> Enum.take(12)
+    |> Enum.map(&allow_atom(&1, @command_statuses, :unknown))
+  end
+
+  defp bounded_statuses(_), do: []
 
   defp evidence_for(_, _), do: %{}
 
