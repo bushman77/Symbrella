@@ -280,10 +280,11 @@ defmodule SymbrellaWeb.BrainLive do
   # Switch evidence layers without changing Brain execution.
   @impl true
   def handle_event("atlas-layer", %{"layer" => layer}, socket)
-      when layer in ["conceptual", "dependencies", "telemetry", "bus", "trace"] do
+      when layer in ["conceptual", "source", "dependencies", "telemetry", "bus", "trace"] do
     selected =
       case layer do
         "dependencies" -> :dependencies
+        "source" -> :source
         "telemetry" -> :telemetry
         "bus" -> :bus
         "trace" -> :trace
