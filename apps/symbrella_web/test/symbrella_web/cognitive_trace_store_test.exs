@@ -46,7 +46,7 @@ defmodule SymbrellaWeb.CognitiveTraceStoreTest do
   test "observed history keeps 20 turns, 40 events each, and expires old turns" do
     first =
       Enum.reduce(1..25, state(), fn i, acc ->
-        {updated, _} = record(acc, "turn-#{Integer.to_string(i, 16)}", :turn, :started, i)
+        {updated, _} = record(acc, "turn-#{Integer.to_string(i, 16) |> String.downcase()}", :turn, :started, i)
         updated
       end)
 
