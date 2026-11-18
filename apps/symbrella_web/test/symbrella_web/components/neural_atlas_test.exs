@@ -101,11 +101,18 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasTest do
       nodes: nodes, selected: :lifg, layer: :telemetry, events: [event])
 
     assert html =~ "atlas-layer-telemetry"
+    assert html =~ "atlas-network-graph"
     assert html =~ "atlas-observed-telemetry"
-    assert html =~ "Observed this session"
+    assert html =~ "1 seen"
     assert html =~ "22:13:20 UTC"
     assert html =~ "[:brain, :lifg]"
     assert html =~ "A received event is an observation"
+
+    list_html = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :lifg, layer: :telemetry, events: [event], display: :list)
+
+    assert list_html =~ "atlas-region-grid"
+    assert list_html =~ "Observed this session"
   end
   test "bus layer separates region-attributed events from unattributed messages" do
     nodes = [
