@@ -106,7 +106,7 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
             Only registered telemetry topics received by this connected page are shown.
             A received event is an observation, not proof of neural firing or a complete execution trace.
           <% _ -> %>
-            Region associations are documented navigation links, not measured neural firing
+            Region associations provide conceptual navigation links, not measured neural firing
             or verified execution dependencies.
         <% end %>
       </p>
