@@ -117,6 +117,23 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraphTest do
     refute html =~ "compiled references"
   end
 
+  test "reconciled Atlas no longer leaves the implemented cognitive regions isolated" do
+    alias SymbrellaWeb.Components.Brain.NeuralAtlas
+
+    nodes = NeuralAtlas.regions()
+    links = NeuralAtlasGraph.edges(nodes, :conceptual, [])
+
+    connected =
+      links
+      |> Enum.flat_map(fn edge -> [edge.from, edge.to] end)
+      |> MapSet.new()
+
+    for key <- [:frontal, :fpc, :dlpfc, :dmpfc, :vmpfc, :ofc, :cerebellum] do
+      assert MapSet.member?(connected, key),
+             "Reconciled region #{key} has lost its documented neighbor"
+    end
+  end
+
   test "source topology distinguishes documented grouping, configured planners and direct calls" do
     nodes = [
       %{key: :lifg, label: "LIFG", subtitle: "Sense selection",
