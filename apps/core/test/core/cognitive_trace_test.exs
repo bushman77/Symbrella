@@ -69,4 +69,75 @@ defmodule Core.CognitiveTraceTest do
     assert :not_traced == CognitiveTrace.stage(:phase_3_lexical, fn -> :not_traced end)
     refute_receive {:observed, _, _}, 25
   end
+
+  test "executive receipts are correlated and exclude raw user and planner data" do
+    CognitiveTrace.with_trace("turn-a1b2c3dd", fn ->
+      CognitiveTrace.stage(:prefrontal_control, fn ->
+        %{
+          sentence: "PRIVATE INPUT",
+          prefrontal: %{
+            feedback_quality: :heuristic_proxy,
+            signals: %{top_k: 4, branch_budget: 2, secret: "PRIVATE CONTROL"},
+            planners: [
+              %{planner: Brain.DLPFC.Policy, status: :produced, reason: :validated,
+                proposed_keys: [:top_k, :secret],
+                accepted_keys: [:top_k], superseded_keys: []},
+              %{planner: Brain.FPC, status: :unavailable, reason: :module_not_loaded,
+                proposed_keys: [], accepted_keys: [], superseded_keys: []}
+            ]
+          }
+        }
+      end)
+
+      CognitiveTrace.stage(:action_selection, fn ->
+        %{
+          action_meta: %{
+            selected: :answer_user,
+            prefrontal_shadow: %{
+              status: :evaluated, reason: :bounded_candidate_modulation,
+              live_selected: :answer_user,
+              shadow_selected: :ask_clarifying_question,
+              changed?: true,
+              applied_keys: [:branch_budget, :secret],
+              unused_keys: [:top_k],
+              applied_sources: [%{key: :branch_budget, planner: Brain.FPC}],
+              adjustments: [
+                %{action: :answer_user, baseline_score: 0.50,
+                  shadow_score: 0.45, delta: -0.05,
+                  applied_keys: [:secret]}
+              ],
+              conversation_text: "PRIVATE INPUT"
+            }
+          }
+        }
+      end)
+    end)
+
+    assert_receive {:observed, _, %{trace_id: "turn-a1b2c3dd",
+                                    stage: :prefrontal_control, status: :ok,
+                                    evidence: prefrontal}}
+    assert prefrontal.feedback_quality == :heuristic_proxy
+    assert prefrontal.controls == %{top_k: 4, branch_budget: 2}
+    assert [%{region: :dlpfc, status: :produced, merged_keys: [:top_k]},
+            %{region: :fpc, status: :unavailable}] = prefrontal.planners
+    refute inspect(prefrontal) =~ "PRIVATE"
+
+    assert_receive {:observed, _, %{trace_id: "turn-a1b2c3dd",
+                                    stage: :action_selection, status: :ok,
+                                    evidence: action}}
+    assert action.live_action == :answer_user
+    assert action.shadow_action == :ask_clarifying_question
+    assert action.changed == true
+    assert action.applied_keys == [:branch_budget]
+    assert action.applied_sources == [%{key: :branch_budget, region: :fpc}]
+    assert [%{action: :answer_user, baseline: 0.50, proposed: 0.45}] =
+             action.adjustments
+    refute inspect(action) =~ "PRIVATE"
+  end
+
+  test "untraced calls do not emit executive metadata" do
+    value = %{prefrontal: %{signals: %{top_k: 2}}}
+    assert value == CognitiveTrace.stage(:prefrontal_control, fn -> value end)
+    refute_receive {:observed, _, %{stage: :prefrontal_control}}, 25
+  end
 end
