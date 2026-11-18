@@ -380,6 +380,9 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlasGraph do
               }
               stroke-width={if @layer == :trace, do: "11", else: "8"}
               stroke-opacity={if @layer == :trace, do: "0.22", else: "0.13"}
+              stroke-dasharray={
+                if @layer == :trace and edge.kind == :stage_order, do: "8 6", else: nil
+              }
               filter="url(#atlas-network-wire-glow)"
               stroke-linecap="round" />
 
