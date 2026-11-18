@@ -143,7 +143,11 @@ defmodule SymbrellaWeb.Components.Brain.NeuralAtlas do
         </span>
       </nav>
 
-      <div class={["grid gap-5", @display == :list && "lg:grid-cols-2"]}>
+      <div class={[
+        "grid gap-5",
+        @display == :list && "lg:grid-cols-2",
+        @display == :graph && "2xl:grid-cols-[minmax(0,3fr)_minmax(340px,1fr)]"
+      ]}>
         <NeuralAtlasGraph.graph :if={@display == :graph}
           nodes={@nodes}
           selected={@selected}
