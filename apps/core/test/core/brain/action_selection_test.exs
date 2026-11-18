@@ -191,8 +191,11 @@ defmodule Core.Brain.ActionSelectionTest do
       control_signals: %{utility_prior: 0.0}
     }
 
-    disabled = ActionSelection.attach(si, prefrontal_shadow?: false)
-    enabled = ActionSelection.attach(si, prefrontal_shadow?: true)
+    # Explicitly exercise the permission gate; never permit a memory write.
+    gate_opts = [execute_agency_commands?: true, agency_permission?: false,
+                 record_agency_commands?: false]
+    disabled = ActionSelection.attach(si, gate_opts ++ [prefrontal_shadow?: false])
+    enabled = ActionSelection.attach(si, gate_opts ++ [prefrontal_shadow?: true])
 
     assert disabled.action_meta.prefrontal_shadow.status == :disabled
     assert enabled.action_meta.prefrontal_shadow.reason == :protected_live_decision
