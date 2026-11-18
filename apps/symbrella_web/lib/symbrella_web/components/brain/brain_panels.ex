@@ -89,6 +89,14 @@ defmodule SymbrellaWeb.Components.Brain.Panels do
     </nav>
     <%= if @brain_view == :atlas do %>
       <NeuralAtlas.panel nodes={@atlas_nodes} selected={@selected}/>
+      <!-- Keep the live selected-region snapshot available in both modes. -->
+      <div class="mt-5" data-brain-report-section="Selected Region Summary and Snapshot">
+        <Regions.region_summary
+          selected={@selected}
+          region={@region}
+          state={@snapshot || @region_status || (@region_state && @region_state[:snapshot]) || %{}}
+        />
+      </div>
     <% else %>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
