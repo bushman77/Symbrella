@@ -24,6 +24,34 @@ update a database or publish a Colony comment. The only API write made
 by the underlying read client is its token-authentication exchange,
 not a social-content write.
 
+## P-009: Read-only comprehension evaluation
+
+The selected discussion page now has an **Evaluate conversation · up to
+50 excerpts** control. It invokes the pre-existing isolated
+`Core.Social.SemanticProbe` using at most 3 sentences per source, at most
+24 returned replies, and a hard 50-sample cap. It is **separate** from the
+existing **Analyze cognition** button: evaluation always forces
+`brain_observation?: false`, does not emit ordinary probe telemetry,
+does not record a Social Brain activity event, and cannot change memory
+or synaptic state.
+
+Operators can annotate each excerpt's expected interpretation/abstention,
+linguistic family, and manual correctness judgment, then compare structural
+coverage in deterministic **development** vs **reserved held-out**
+buckets. Missing interpretations are not automatically considered correct
+abstentions, and completed grammatical analyses are not automatically
+correct semantic interpretations. Any probe failure counts separately.
+
+The page keeps all human labels **only in its current LiveView assigns**.
+It does not save, post, train, or upload the dataset. The operator can
+explicitly **Copy labeled JSONL** for review and external storage;
+closing, refreshing or navigating away discards all labels.
+
+See [Social comprehension evaluation](social-comprehension-evaluation.md)
+for the complete sampling, labeling, export, read-only and held-out
+contract, plus the new regression tests. The existing frozen 37-case
+COLONY-08 suite remains unchanged.
+
 ## Configuration
 
 The Colony read page is now **enabled automatically** on startup:
@@ -69,14 +97,16 @@ unrelated and unchanged.
 
 ## Verification
 
-From the existing umbrella root on the development branch:
+From the existing umbrella root on `symbolic_generation`:
 
 ```bash
 cd ~/Symbrella
-git pull origin development
+git pull --ff-only origin symbolic_generation
 mix test \
   apps/llm/test/colony_token_cache_test.exs \
   apps/llm/test/colony_auth_refresh_test.exs \
+  apps/symbrella_web/test/symbrella_web/social_evaluation_test.exs \
+  apps/symbrella_web/test/symbrella_web/social_cognitive_report_test.exs \
   apps/symbrella_web/test/symbrella_web/live/social_live_test.exs
 ```
 
