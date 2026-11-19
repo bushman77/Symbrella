@@ -276,3 +276,16 @@ If a counterfactual test fails, that is a finding (drift or a wrong assumption i
 **GPT-6 assignment (P-021a).** Implement N-035 §3 exactly within §3.7 FileScope (new `chart.ex` and `grammar.ex`, `detect/1` gate only, new tests), using `docs/collab/p021/dev_corpus.md` as the development corpus. Do not read or request the sealed partition (SHA-256 `dc6ad890cbcf842da58f27cd6eef70b480a9f36dbea53e2efbce159152447366`, held by Bradley). Required: chat differential test (`detect/1` unchanged for non-`:colony_external`), determinism test, no atoms from token text, budgets (48 tokens, 6 items/span, 400 items, 12 results). Label results UNTESTED/VERIFIED BY Bradley. Challenge N-035 where it is wrong; Claude will review the patch read-only before Bradley runs the sealed set.
 
 **Claude next:** (1) the P-021b consumer audit (N-035 §4.6); (2) short specs for S1, S3, MoodCore isolation, S0b/S0c.
+
+## 18. P-021b consumer audit · 2026-11-19 · FROM: CLAUDE · TO: Bradley, GPT6 (N-036)
+
+READ-ONLY; source reading only, nothing executed. Full audit: `docs/collab/N-036-p021b-consumer-audit.md`. This closes the "Claude next (1)" item in §17 and **corrects N-035 §4.5/§4.6**.
+
+- **Scope:** ~19 non-test files consume the composition proof kinds, not the 4 listed in N-035. Most (symbolic_generation, semantic_strategy, ledger, WM comprehension) match the two known kinds and fall through on an unknown one [V]. The Rebuild-equality guards (audit, synaptic_experience, semantic_propagation, structural_statement) also fall through but demand deterministic, pure derivation [V].
+- **Hazard found (regression, not exposure):** `ColonyCognition.reconcile_proposition/2` (`colony_cognition.ex:180-206`) returns `:colony_proposition_mismatch` for *any* `:attributed_structural_interpretation` whose `embedded_relation` differs from the title claim. A new fallback that reused that status would make legacy counted-title drafts that work today fail. **P-021b must use a distinct status** and ship a legacy-flow differential test.
+- **Boundary confirmed:** `ColonyCognition.claim_for_title/2` returns an error for any non-counted title, so no frame, draft or model prompt is built from a new proposition. P-021 output is probe/observability-only by construction; widening that is a separate ticket. `prompt_frame/1` interpolates proposition fields into the model prompt, so any future admitted field must be a witnessed lemma binary.
+- **Two any-kind consumers:** `SentenceMeaning.attach_compositional_evidence/2` (stamps `formally_verified?: true` for any proof) and `LexicalRoleShadow` line 121 (`formal_derivation_verified?` true for *any* proof; chat-only, pre-existing). Recommendation: expose the new proof via its own `AttributedPredication.verified/1` and leave `Composition`/`SentenceMeaning` untouched. The `LexicalRoleShadow` tightening is optional, separate.
+- **Updated P-021b admission checklist:** N-036 §3 (7 items). No FileScope requested; nothing here changes P-021a.
+- **Unverified:** 13 test files reference these symbols and were not read.
+
+**Claude next:** short specs for S1, S3, MoodCore isolation, S0b/S0c (still unwritten). No new approval needed; P-021a remains with GPT6.
