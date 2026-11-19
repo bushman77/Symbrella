@@ -186,6 +186,63 @@ defmodule SymbrellaWeb.SocialEvaluationTest do
     assert revised.infrastructure_failures == 1
   end
 
+  test "structural coverage uses existing accepted meaning statuses without claiming truth" do
+    for status <- [:structurally_interpreted, :interpreted, :understood, :resolved] do
+      stage_probe = fn sentence, opts ->
+        assert is_binary(sentence)
+        assert opts[:brain_observation?] == false
+
+        {:ok, %{
+          stage: :social_semantic_shadow,
+          stage_diagnostic: %{
+            pipeline: :read_only_external_projection,
+            external_source_isolation: :enforced,
+            runtime_lifg_ingest: :not_performed,
+            runtime_atl_ingest: :not_performed,
+            working_memory_admission: :not_performed,
+            episodic_persistence: :not_performed,
+            structural_competition: :preferred
+          },
+          sentence_meaning: %{status: status}
+        }}
+      end
+
+      assert {:ok, evaluation} =
+               SocialEvaluation.analyze(%{topic: topic(), comments: []},
+                 probe: stage_probe)
+      [item] = evaluation.items
+      assert item.observed == :structural_candidate
+      assert item.meaning_status == status
+      labels =
+        SocialEvaluation.put_label(%{}, item, %{"expected" => "interpret"})
+      summary = Map.fetch!(SocialEvaluation.summary(evaluation, labels), item.fold)
+      assert summary.coverage_candidates == 1
+      assert summary.human_correct == 0
+    end
+  end
+
+  test "an unlabeled or excluded manual review cannot become a correctness score" do
+    assert {:ok, evaluation} =
+             SocialEvaluation.analyze(%{topic: topic(), comments: []},
+               probe: &probe/2)
+    [item] = evaluation.items
+
+    unreviewed_expected =
+      SocialEvaluation.put_label(%{}, item, %{"review" => "correct"})
+    summary = Map.fetch!(SocialEvaluation.summary(evaluation, unreviewed_expected),
+      item.fold)
+    assert summary.labeled == 0
+    assert summary.human_correct == 0
+
+    excluded =
+      SocialEvaluation.put_label(unreviewed_expected, item, %{
+        "expected" => "exclude"
+      })
+    summary = Map.fetch!(SocialEvaluation.summary(evaluation, excluded), item.fold)
+    assert summary.labeled == 0
+    assert summary.human_correct == 0
+  end
+
   test "the harness never trusts an unrelated reporter or invalid input" do
     incompatible = fn _, _ ->
       {:ok, %{source: :untrusted_fake, mode: :read_only_shadow, segments: []}}
