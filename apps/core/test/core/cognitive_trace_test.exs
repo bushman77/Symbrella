@@ -104,6 +104,47 @@ defmodule Core.CognitiveTraceTest do
     assert_receive {:observed, _, %{stage: :turn, status: :ok}}
   end
 
+  test "mixed social-update receipts keep component order but never the utterance" do
+    CognitiveTrace.with_trace("turn-f008abcd", fn ->
+      CognitiveTrace.stage(:speech_act_binding, fn ->
+        %{sentence: "PRIVATE hey whats new with you?",
+          speech_act_frame: %{
+            speech_act: :social_update_query,
+            components: [:greeting, :social_update_query],
+            source_text: "PRIVATE MESSAGE",
+            lexical_evidence: %{witness: "PRIVATE SENSE"},
+            sentence_meaning_verified?: false
+          }}
+      end)
+    end)
+
+    assert_receive {:observed, _, %{stage: :turn, status: :started}}
+    assert_receive {:observed, _, %{stage: :speech_act_binding, status: :ok,
+                                   evidence: evidence}}
+    assert evidence ==
+             %{speech_act: :social_update_query,
+               social_components: [:greeting, :social_update_query]}
+    refute inspect(evidence) =~ "PRIVATE"
+    assert_receive {:observed, _, %{stage: :turn, status: :ok}}
+  end
+
+  test "an unrecognized social component combination is not promoted to an act" do
+    CognitiveTrace.with_trace("turn-f008abcd", fn ->
+      CognitiveTrace.stage(:speech_act_binding, fn ->
+        %{speech_act_frame: %{
+          speech_act: :social_update_query,
+          components: [:greeting, :unknown_request],
+          source_text: "PRIVATE"
+        }}
+      end)
+    end)
+
+    assert_receive {:observed, _, %{stage: :turn, status: :started}}
+    assert_receive {:observed, _, %{stage: :speech_act_binding, status: :ok,
+                                   evidence: %{speech_act: :not_detected}}}
+    assert_receive {:observed, _, %{stage: :turn, status: :ok}}
+  end
+
   test "exceptions preserve failure and restore trace isolation" do
     assert_raise ArgumentError, "intended", fn ->
       CognitiveTrace.with_trace("turn-aacc0011", fn ->
