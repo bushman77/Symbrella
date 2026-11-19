@@ -95,6 +95,15 @@ defmodule SymbrellaWeb.SocialEvaluation do
 
   def default_label, do: %{expected: :unlabeled, family: :unlabeled, review: :unreviewed}
 
+  def selected?(labels, %{id: id}, field, value)
+      when is_map(labels) and is_atom(field) and is_binary(value) do
+    label = Map.get(labels, id, default_label())
+    case Map.get(label, field) do
+      atom when is_atom(atom) -> Atom.to_string(atom) == value
+      _ -> false
+    end
+  end
+
   @doc "Update only allowlisted label fields, and only for a sampled item."
   def put_label(labels, %{id: id}, params)
       when is_map(labels) and is_binary(id) and is_map(params) do
