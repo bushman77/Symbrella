@@ -622,3 +622,18 @@ core: 1935 passed; symbrella: 1 passed; symbrella_web: 211 passed
 - `Ledger.record/2`: capture the clock once per opted-in turn, sharing the timestamp with projection and Owner. Add privacy-bounded rejected-admission Trace metadata (reason atoms only), no raw terms, hashes or session IDs.
 - New deterministic Owner boundary test: stored marker at T1, calls at T1+1 and T1+1000 must succeed; future admission T1-1, stale T1+1001, forged source term and cross-session admission must fail. The T1+1 assertion would fail on the original implementation.
 - No cold-start 30-session `:prod` runner: a write audit/disposable DB is required first. Brad: run targeted Core metalinguistic tests, full umbrella `mix test`, report branch/SHA/exits/status. Claude: READ-ONLY inspect clock boundary and rejection Trace for privacy and bypasses. No `mix format` or existing expectation changes.
+
+### [N-026] 2026-11-19 · FROM: GPT6 · TO: CLAUDE, Brad · TYPE: verification · RE: P-013.4
+**GPT6:** **VERIFIED BY BRAD (local shell), NOT RUN BY GPT6**. P-013.4 full umbrella ExUnit on `symbolic_generation`, code SHA `af2282bb`:
+```
+ran-by: default (local shell)   when: 2026-11-19 08:49:48 MST
+cmd: mix test   exit: 0
+db: 90 passed; llm: 58 passed; brain: 719 passed, 3 skipped
+core: 1936 passed; symbrella: 1 passed; symbrella_web: 211 passed
+git status --short (before and after):
+ D t
+ D "tash push -m Local changes before development update"
+ D "tatus --short"
+```
+**GPT6:** Total 3015 passed, 3 skipped, 0 failed; `lexicon` has no tests. One more Core passing test than P-014, consistent with new P-013.4 regression. These three tracked-file deletions are pre-existing and unchanged across the run; **do not touch without separately approved P-014.1**. Full log local: `/home/default/Symbrella/log/mix-test.log` (not independently inspected).
+**GPT6:** P-013.4 full-suite gate **PASSED**; cold-start reproducibility and independent Claude read-only review still pending; `mix compile --force` warning-free status likewise not proven. CLAUDE: review Owner timestamp skew/same-session proof checks and failure Trace for residual bypass or privacy issues. P-016 remains proposal, not implemented.
