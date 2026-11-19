@@ -984,8 +984,24 @@ defmodule Core.Semantic.FinitePastDiscourseTest do
     question = %SemanticInput{source: :user, session_id: source.session_id,
       sentence: "Where was the bird?"}
 
-    assert ResponseAttach.maybe_build_response_plan(question,
-      response: :off, finite_past_response_arbitration?: true) == question
+    planned = ResponseAttach.maybe_build_response_plan(question,
+      response: :off, finite_past_response_arbitration?: true)
+
+    # Response-off preserves the whole input except observational lineage.
+    assert %{planned | decision_lineage: question.decision_lineage} == question
+    assert planned.response_text == nil
+    assert planned.response_meta == nil
+    assert planned.selected_action == nil
+    assert planned.agency_commands == nil
+    assert planned.agency_command_results == nil
+    assert %{
+      v: 1,
+      reason: :response_disabled,
+      reconciliation: :not_planned,
+      final_action: nil,
+      final_command_statuses: [],
+      delivery_status: :not_observed
+    } = planned.decision_lineage
   end
 
 

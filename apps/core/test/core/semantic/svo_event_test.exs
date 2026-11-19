@@ -396,7 +396,22 @@ defmodule Core.Semantic.SVOEventTest do
     # Turning off response generation must neither announce persistence
     # nor erase the proof. Actual event recording is a separate side effect.
     planned = Core.Response.Attach.maybe_build_response_plan(si, response: :off)
-    assert planned == si
+    # Preserve the SVO proof and every original field; lineage is observational.
+    assert Map.delete(planned, :decision_lineage) == Map.delete(si, :decision_lineage)
+    assert Map.get(planned, :response_text) == nil
+    assert Map.get(planned, :response_meta) == nil
+    assert Map.get(planned, :selected_action) == nil
+    assert Map.get(planned, :agency_commands) == nil
+    assert Map.get(planned, :agency_command_results) == nil
+    assert %{
+      v: 1,
+      reason: :response_disabled,
+      reconciliation: :not_planned,
+      final_action: nil,
+      final_command_statuses: [],
+      delivery_status: :not_observed
+    } = planned.decision_lineage
+    assert Brain.Hippocampus.user_event(owner, "artist", "verb_draw") == nil
 
     assert :ok = SideEffects.record_turn(sid, si.sentence, "I understand.", planned)
     assert %{value: "a picture", sentence: "The artist draws a picture."} =
