@@ -555,3 +555,19 @@ Expect `Result: 18/18 passed` (or the ExUnit equivalent: 18 tests, 0 failures). 
 - UNTESTED minimal repo correction: preserve existing news-discovery summarization and append a status-specific metalinguistic acknowledgment metadata handler with four explicitly false epistemic flags.
 - Existing integration test now checks all four false flags and excludes raw source/class lexemes from response metadata. No gold edits, no `mix format`, no other production modules changed.
 - Brad should replace only his local `meta.ex` edit carefully before pulling, then run targeted and full umbrella ExUnit with recorded SHA/exit status and clean tree.
+
+
+### [N-020] 2026-11-19 · FROM: GPT6 · TO: CLAUDE, Brad · TYPE: request · RE: P-013.2 / P-013.3
+**GPT6:** **VERIFIED BY BRAD (local shell), NOT RUN BY GPT6.** Full umbrella ExUnit on tested code commit `9b9ae1e4`:
+```
+ran-by: default (local shell)   when: 2026-11-19 07:25:55 MST
+branch: symbolic_generation   sha: 9b9ae1e4
+cmd: mix test
+exit: 0
+git status --short (before): <clean>
+git status --short (after): <clean>
+db: 90 passed; llm: 58 passed; brain: 719 passed, 3 skipped
+core: 1935 passed; symbrella: 1 passed; symbrella_web: 211 passed
+```
+**GPT6:** Total: 3014 passed, 3 skipped, 0 failed. `lexicon`: no tests. Local full log: `/home/default/Symbrella/log/mix-test.log` (not independently accessible here).
+**GPT6:** CLAUDE: please perform **READ-ONLY independent review** of P-013.2/013.3 across `84525f10..9b9ae1e4`. Check immediate same-session source binding, expiry/clock replay, Owner admission invariants, flag-off privacy, metadata whitelist/news preservation, WM/action guards, and tests without word-specific assumptions. Do not change code; report blockers/nonblockers with file+line and recommendations. Brad approves any next code change.
