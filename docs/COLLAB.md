@@ -248,3 +248,31 @@ Keep future updates concise: add only decisions, evidence that changes priority,
 - **Unverified:** LTM attestation of corpus words and "Most"; real LIFG POS picks; UI counter logic; tokenizer behaviour for contractions and punctuation.
 
 **Needed from Bradley:** approve/reject the S0a hardening scope; approve freezing the P-021a contract (FileScope in N-035 §3.7); hold the sealed file; decide Explain privacy.
+
+
+## 17. Bradley's approval and work assignment · 2026-11-19 12:46 MST · FROM: CLAUDE · TO: Bradley, GPT6
+
+**Bradley's words (verbatim):** "Ill approve you doing what ever you need to do to the repo i think its sound that we have Symbrella with as many possible features as we can to understand everything she needs Approve: ALL you suggested". Recorded here by Claude; Bradley remains the sole approver. Claude's reading of scope (Bradley may correct it):
+
+| Item | Reading | Status |
+| --- | --- | --- |
+| **P-020.1** S0a hardening (N-035 §5) | Approved. Implemented by Claude, commit `b0b25818`. | **UNTESTED** (no Elixir runtime for Claude); Bradley to run the commands below |
+| **P-014.1** remove 3 stray root files | Approved. Remove-only, commit `3ac507bb`; blobs are identical pasted `git diff --stat` output; already deleted in Bradley's tree | done, nothing to run |
+| **P-021a** chart + copular rows (N-035 §3, FileScope §3.7) | Approved. **To be implemented by GPT-6**, not Claude: Claude authored the sealed holdout, so the implementer must be someone who has not seen it | OPEN, GPT-6 |
+| **P-021b** typed skeleton + attribution wrapper (N-035 §4, FileScope §4.7) | Approved **after** the read-only consumer audit (N-035 §4.6), which Claude does next | blocked on audit |
+| S1 lexical A/B, S3 isolated prior, S0b/S0c, MoodCore isolation, P-015 runner, P-016/017/018 | Approved in principle. Each needs a short read-only spec and exact FileScope before code; MoodCore/S0c touch Brain files | queued, Claude writes specs |
+| Explain privacy (`source_term`/`class_term`) | **Not decided by the blanket approval.** Default stays: no disclosure | needs Bradley's yes/no |
+
+**P-020.1 contents (Claude, UNTESTED).** New pure module `apps/core/lib/core/social/structural_scope.ex`; `SemanticProbe.structural_scope/2` now delegates to it (3-line change in `semantic_probe.ex`). Token-validity filter aligned with `Brain.LIFG.StructuralCompetition.base_indices/1` (`phrase` binary, `index >= 0`); signature scan capped at 64 like Brain. New observational fields: `base_tokens`, `clause_core_signatures`, `longest_span_tokens`, `uncovered_token_count`, `constituent_only?`. All existing keys unchanged; `SocialBrainActivity`, `SocialLive` and the existing handoff test read only `reason`/`full_span_signatures`/`scope`. New tests `apps/core/test/core/social/structural_scope_test.exs` call the **real Brain module** for counterfactuals at 48 vs 49 tokens and for invalid tokens (missing phrase, negative index, `n: 2`, punctuation). No existing test, fixture or baseline edited; no `mix format`; no Brain file touched.
+
+**Commands for Bradley (AGENTS.md: umbrella root, explicit paths; record branch, SHA, exit):**
+```
+mix test apps/core/test/core/social/structural_scope_test.exs apps/core/test/core/social/semantic_probe_read_only_handoff_test.exs apps/symbrella_web/test/symbrella_web/social_brain_activity_test.exs apps/symbrella_web/test/symbrella_web/live/social_live_test.exs
+mix test
+set -o pipefail; mix compile --force 2>&1 | tee log/compile-force.log; echo "exit=$?"
+```
+If a counterfactual test fails, that is a finding (drift or a wrong assumption in my fixtures), not something to patch around. Report the failure text to Claude.
+
+**GPT-6 assignment (P-021a).** Implement N-035 §3 exactly within §3.7 FileScope (new `chart.ex` and `grammar.ex`, `detect/1` gate only, new tests), using `docs/collab/p021/dev_corpus.md` as the development corpus. Do not read or request the sealed partition (SHA-256 `dc6ad890cbcf842da58f27cd6eef70b480a9f36dbea53e2efbce159152447366`, held by Bradley). Required: chat differential test (`detect/1` unchanged for non-`:colony_external`), determinism test, no atoms from token text, budgets (48 tokens, 6 items/span, 400 items, 12 results). Label results UNTESTED/VERIFIED BY Bradley. Challenge N-035 where it is wrong; Claude will review the patch read-only before Bradley runs the sealed set.
+
+**Claude next:** (1) the P-021b consumer audit (N-035 §4.6); (2) short specs for S1, S3, MoodCore isolation, S0b/S0c.
