@@ -219,3 +219,271 @@ defp has_unresolved_content?(_), do: false
 **CLAUDE:** Relaying Brad's chat message of 2026-11-18 19:50 local: **`Approve: P-010`**, the implementation stage, given after the N-010 review. Brad has not yet written this token in the log himself; if you need it on record in his own words, ask him to append it.
 **CLAUDE:** Approved scope is exactly N-009: add `has_unresolved_content?/1` (two clauses) to `apps/core/lib/core/comprehension/diagnosis.ex`, next to `nonempty_sentence?/1`, and change line 85 to use it. No other file changes; the 12 parity cases stay untouched; no whole-file `mix format`. GPT6 implements. I review the resulting diff after it lands and I will not edit `diagnosis.ex` myself unless Brad says GPT6 cannot push.
 **CLAUDE:** Verification, run by Brad from the umbrella root: `mix test apps/core/test/core/comprehension/diagnosis_test.exs` (expect 18/18), then `mix test apps/core` (expect green). Paste the raw output into the log. On any other result, stop and report; do not edit tests to match.
+
+Brad
+[O
+.....
+
+  1) test gap gate agrees with ComprehensionGaps: nil unresolved item (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+
+
+  2) test gap gate agrees with ComprehensionGaps: mixed blank items (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+.
+
+  3) test gap gate agrees with ComprehensionGaps: whitespace unresolved (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+.......
+
+  4) test gap gate agrees with ComprehensionGaps: empty-string unresolved (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+.
+Finished in 0.09 seconds (0.09s async, 0.00s sync)
+
+Result: 14/18 passed
+Failed: 4 tests
+** (Mix) "mix test" failed
+==> core
+     warning: clauses with the same name and arity (number of arguments) should be grouped together, "def build/1" was previously defined (lib/core/semantic/sentence_meaning.ex:40)
+     │
+ 146 │   def build(_),
+     │       ~
+     │
+     └─ lib/core/semantic/sentence_meaning.ex:146:7
+
+     warning: clauses with the same name should be grouped together, "def reply/1" was previously defined (lib/core/response/episodic_memory.ex:104)
+     │
+ 136 │   def reply(_), do: nil
+     │       ~
+     │
+     └─ lib/core/response/episodic_memory.ex:136:7
+
+     warning: clauses with the same name should be grouped together, "def reply/2" was previously defined (lib/core/response/episodic_memory.ex:107)
+     │
+ 137 │   def reply(_, _), do: nil
+     │       ~
+     │
+     └─ lib/core/response/episodic_memory.ex:137:7
+
+     warning: clauses with the same name should be grouped together, "def reply/3" was previously defined (lib/core/response/episodic_memory.ex:110)
+     │
+ 138 │   def reply(_, _, _), do: nil
+     │       ~
+     │
+     └─ lib/core/response/episodic_memory.ex:138:7
+
+     warning: the following conditional expression will always succeed:
+
+         is_map(cell)
+
+     because it evaluates to:
+
+         dynamic(true)
+
+     where "cell" was given the type:
+
+         # type: dynamic(map())
+         # from: lib/core/social/declarative_proposition.ex:574:22
+         Map.get(cell, :semantic_atoms, [])
+
+     type warning found at:
+     │
+ 575 │           is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :subject) and
+     │           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ (core 0.1.0) lib/core/social/declarative_proposition.ex:575: Core.Social.DeclarativeProposition.complete_grammar/2
+
+     warning: clauses with the same name and arity (number of arguments) should be grouped together, "def build/2" was previously defined (lib/core/semantic/clarified_event.ex:22)
+     │
+ 125 │   def build(_, _), do: :not_applicable
+     │       ~
+     │
+     └─ lib/core/semantic/clarified_event.ex:125:7
+
+     warning: clauses with the same name and arity (number of arguments) should be grouped together, "defp run_prod_pipeline/3" was previously defined (lib/core.ex:142)
+     │
+ 340 │   defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
+     │        ~
+     │
+     └─ lib/core.ex:340:8
+
+     warning: function wrap_si/2 is unused
+     │
+ 387 │   defp wrap_si(%SemanticInput{} = si, _orig_sentence), do: si
+     │        ~
+     │
+     └─ lib/core.ex:387:8: Core (module)
+
+     warning: clauses with the same name and arity (number of arguments) should be grouped together, "defp maybe_put_symbolic_realization/2" was previously defined (lib/core/response/meta.ex:97)
+     │
+ 129 │   defp maybe_put_symbolic_realization(summary, _), do: summary
+     │        ~
+     │
+     └─ lib/core/response/meta.ex:129:8
+
+==> symbrella_web
+     warning: the following conditional expression will always succeed:
+
+         is_map(defn)
+
+     because it evaluates to:
+
+         dynamic(true)
+
+     where "defn" was given the type:
+
+         # type: dynamic(%{..., related: term()})
+         # from: lib/symbrella_web/live/brain_live.ex:440:14
+         defn = SymbrellaWeb.Region.Registry.defn(region_key)
+
+     type warning found at:
+     │
+ 443 │           is_map(defn) and Map.has_key?(defn, :__struct__) -> Map.from_struct(defn)
+     │           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ (symbrella_web 0.1.0) lib/symbrella_web/live/brain_live.ex:443: SymbrellaWeb.BrainLive.region_meta_for/1
+
+     warning: this clause in cond will always match:
+
+         is_map(defn)
+
+     since it has type:
+
+         dynamic(true)
+
+     where "defn" was given the type:
+
+         # type: dynamic(%{..., related: term()})
+         # from: lib/symbrella_web/live/brain_live.ex:440:14
+         defn = SymbrellaWeb.Region.Registry.defn(region_key)
+
+     type warning found at:
+     │
+ 444 │           is_map(defn) -> defn
+     │                        ~
+     │
+     └─ (symbrella_web 0.1.0) lib/symbrella_web/live/brain_live.ex:444:24: SymbrellaWeb.BrainLive.region_meta_for/1
+
+     warning: clauses with the same name and arity (number of arguments) should be grouped together, "defp evidence_for/2" was previously defined (lib/symbrella_web/cognitive_trace_store.ex:142)
+     │
+ 333 │   defp evidence_for(_, _), do: %{}
+     │        ~
+     │
+     └─ lib/symbrella_web/cognitive_trace_store.ex:333:8
+
+     warning: clauses with the same name and arity (number of arguments) should be grouped together, "def handle_event/3" was previously defined (lib/symbrella_web/live/social_live.ex:63)
+     │
+ 201 │   def handle_event("close_analysis", _params, socket) do
+     │       ~
+     │
+     └─ lib/symbrella_web/live/social_live.ex:201:7
+
+     warning: the following conditional expression will always succeed:
+
+         is_map(defn)
+
+     because it evaluates to:
+
+         dynamic(true)
+
+     where "defn" was given the type:
+
+         # type: dynamic(%{..., related: term()})
+         # from: lib/symbrella_web/components/brain/regions.ex:229:14
+         defn = SymbrellaWeb.Region.Registry.defn(selected)
+
+     type warning found at:
+     │
+ 232 │           is_map(defn) and Map.has_key?(defn, :__struct__) -> Map.from_struct(defn)
+     │           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ (symbrella_web 0.1.0) lib/symbrella_web/components/brain/regions.ex:232: SymbrellaWeb.Components.Brain.Regions.meta_from_registry/1
+
+     warning: this clause in cond will always match:
+
+         is_map(defn)
+
+     since it has type:
+
+         dynamic(true)
+
+     where "defn" was given the type:
+
+         # type: dynamic(%{..., related: term()})
+         # from: lib/symbrella_web/components/brain/regions.ex:229:14
+         defn = SymbrellaWeb.Region.Registry.defn(selected)
+
+     type warning found at:
+     │
+ 233 │           is_map(defn) -> defn
+     │                        ~
+     │
+     └─ (symbrella_web 0.1.0) lib/symbrella_web/components/brain/regions.ex:233:24: SymbrellaWeb.Components.Brain.Regions.meta_from_registry/1
+
+✔ negcache cleared: /home/default/Symbrella/_build/test/lib/core/priv/negcache
+✔ negcache cleared: /home/default/Symbrella/apps/core/priv/negcache
+TAP version 13
+# Subtest: eight phases preserve source call order
+ok 1 - eight phases preserve source call order
+  ---
+  duration_ms: 2.290713
+  type: 'test'
+  ...
+# Subtest: interactive template remains and regeneration is idempotent
+ok 2 - interactive template remains and regeneration is idempotent
+  ---
+  duration_ms: 8.90741
+  type: 'test'
+  ...
+# Subtest: new calls appear automatically
+ok 3 - new calls appear automatically
+  ---
+  duration_ms: 0.747968
+  type: 'test'
+  ...
+# Subtest: missing phases fail without generating
+ok 4 - missing phases fail without generating
+  ---
+  duration_ms: 0.417116
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 62.657281
+Architecture Explorer refreshed from source.
+default@pop-os:~/Symbrella$
