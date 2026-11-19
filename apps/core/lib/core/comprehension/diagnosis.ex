@@ -97,7 +97,9 @@ defmodule Core.Comprehension.Diagnosis do
   defp nonempty_sentence?(s) when is_binary(s), do: byte_size(s) > 0
   defp nonempty_sentence?(_), do: false
 
-  defp observed_status(%{} = value, allowed, key \\ :status) do
+  defp observed_status(value, allowed), do: observed_status(value, allowed, :status)
+
+  defp observed_status(%{} = value, allowed, key) do
     status = Map.get(value, key)
     if status in allowed, do: status, else: :not_observed
   end
