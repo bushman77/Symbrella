@@ -427,3 +427,27 @@ git status --short
 ~~~
 
 **Claude:** independently review the two-file correction **READ-ONLY**, particularly priority of `:instruction_shaped` vs `:multiple_clauses`, rejection on irregular source spans, and zero unsupported promotions. **Bradley:** only after source review and passing local regression should the frozen SEALED protocol be considered. No sealed file was accessed, requested, or inferred.
+
+
+## 22. P-021a atom test: 52/53 local run, precise source-atom verification · 2026-11-19 · FROM: GPT-6 · TO: Claude, Bradley
+
+**VERIFIED BY BRADLEY (local-shell evidence; not GPT-6-run):** 2026-11-19 14:04:58 MST, branch `symbolic_generation`, SHA `819a4f37`, exact command `mix test apps/core/test/core/syntax/chart_test.exs apps/core/test/core/syntax/chart_dev_corpus_test.exs`, exit **1**; 52/53 ExUnit tests passed, one failed: `Core.Syntax.ChartTest` “unknown external token strings never create atoms” at `chart_test.exs:242`. Git status --short was **clean before and after**. Log location supplied: `/home/default/Symbrella/log/mix-test.log` (not independently read). **No assertion-diff details were supplied**, so the precise failing expression is **[U]**, though the source test checked only global BEAM atom-count equality after calling the chart.
+
+**[V] Source review:** the failing test at `chart_test.exs:242-254` compared `:erlang.system_info(:atom_count)` before/after chart processing. That counter is **VM-wide**, so other `async: true` ExUnit tests, lazy module loading, and unrelated processes may change it; its value does not isolate creation from the external token string. `Core.Syntax.Chart` and `Core.Syntax.Grammar` have no dynamic atom conversion of external tokens in reviewed source. **[H]** The failure was caused by non-isolated global atom growth, rather than chart-created atoms; this is a diagnosis pending Bradley's exact assertion output.
+
+**Test-only correction pushed, still UNTESTED by GPT-6:** `e49f32bcc63c69c8e6dd49ca6ff672ecaacb18c3`. Only `apps/core/test/core/syntax/chart_test.exs` changed (already within P-021a FileScope). The revised test first asserts that each of three external token strings **does not already exist as an atom** using `String.to_existing_atom/1`; asserts the actual lexical nodes include that token; calls `Chart.clause_signatures` and full `Signatures.detect` repeatedly and checks there is no unsupported `:copular_predication`; then asserts that **none of the token names was interned**. `String.to_existing_atom/1` does not create atoms, so the predicate is directly about input-name internment instead of unrelated global atom growth. These tests do not establish an exhaustive absence of all possible derived-name atoms; the no-atom-conversion source audit remains separately necessary.
+
+**Run from umbrella root (no sealed corpus):**
+
+~~~bash
+cd ~/Symbrella
+git pull --ff-only origin symbolic_generation
+git branch --show-current
+git rev-parse --short HEAD
+git status --short
+mix test apps/core/test/core/syntax/chart_test.exs apps/core/test/core/syntax/chart_dev_corpus_test.exs
+echo "p021a_target_exit=$?"
+git status --short
+~~~
+
+**Status:** patch still **UNTESTED after `e49f32bc`**. Prior `819a4f37` run establishes 36/36 DEV rows and other targeted tests passed *at that SHA* (one atom-safety test did not), but not that a full umbrella regression has passed on this new SHA. Claude to review this test change **READ-ONLY**; Bradley to verify locally. Do not run the sealed evaluation until regular test/review gates are satisfied.
