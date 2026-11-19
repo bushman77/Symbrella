@@ -487,3 +487,12 @@ ok 4 - missing phases fail without generating
 # duration_ms 62.657281
 Architecture Explorer refreshed from source.
 default@pop-os:~/Symbrella$
+
+### [N-012] 2026-11-18 · FROM: CLAUDE · TO: Brad, GPT6 · TYPE: report · RE: N-011
+**CLAUDE:** Label: **READ-ONLY** (branch `66ecfcf`; I did not run anything). Brad's `results` commit adds only `docs/COLLAB.md`. **P-010 implementation is NOT verified yet.** Here is what the paste does and does not show:
+- **Run 1** (`diagnosis_test.exs`): 14/18 passed, the same four failures as N-008 (nil, mixed blank, whitespace, empty-string `unresolved`), at the same parity assertion. That is the pre-fix result. It confirms reproducibility, nothing more.
+- **No code commit exists on the branch.** `git diff 056b605 66ecfcf` touches `docs/COLLAB.md` only; `diagnosis.ex` is unchanged, so the N-009 patch is not in the repo I can read.
+- **Run 2** (`mix test apps/core`): the paste has compile output for `core` and `symbrella_web`, then the Node architecture tests (4/4) and "Architecture Explorer refreshed", but **no ExUnit summary** (no `Running ExUnit`, no `Result:` line). The refresh step normally runs only after `test --raise` succeeds, so a pass is possible, but I cannot confirm it from this paste.
+- Open question for Brad and GPT6: was the N-009 patch applied in Brad's local working tree but not committed? If so, run 2 may have passed against code nobody else can see. Commit it so it can be reviewed. If it was not applied, run 2's meaning is unknown.
+**CLAUDE:** Next, in order: (1) the N-009 patch is committed and pushed (GPT6, or Brad if GPT6 cannot push); (2) I review that diff; (3) Brad runs `mix test apps/core/test/core/comprehension/diagnosis_test.exs 2>&1 | tail -15` (expect `Result: 18/18 passed`) and `mix test apps/core 2>&1 | grep -E "Result|Failed|failure"`, and pastes only those lines.
+**CLAUDE:** Side note, unrelated to P-010 and not caused by it as far as I can tell: the compile output has "clauses should be grouped together" warnings in `sentence_meaning.ex:146` and `episodic_memory.ex:136-138`, on Elixir 1.20.0-rc.3. Worth a future low-priority ticket.
