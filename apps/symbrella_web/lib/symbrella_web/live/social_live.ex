@@ -816,7 +816,7 @@ defmodule SymbrellaWeb.SocialLive do
                     id={"social-evaluation-item-#{index}"}
                     class="space-y-3 rounded-lg border border-white/10 bg-zinc-900/70 p-4">
                     <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
-                      <span>#{index + 1} · {item.source_type} {item.source_index} ·
+                      <span>{index + 1} · {item.source_type} {item.source_index} ·
                         source sentence {item.sample_index}</span>
                       <span class={if item.fold == :heldout, do: "text-amber-300", else: "text-cyan-300"}>
                         {item.fold}
