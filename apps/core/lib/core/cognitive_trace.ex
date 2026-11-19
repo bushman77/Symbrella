@@ -131,7 +131,13 @@ defmodule Core.CognitiveTrace do
 
       :speech_act_binding ->
         case Map.get(result, :speech_act_frame) do
-          %{speech_act: act} when act in [:greeting, :gratitude, :farewell, :wellbeing_query] ->
+          %{speech_act: :social_update_query, components: components}
+          when components in [[:social_update_query],
+                              [:greeting, :social_update_query]] ->
+            %{speech_act: :social_update_query, social_components: components}
+
+          %{speech_act: act}
+          when act in [:greeting, :gratitude, :farewell, :wellbeing_query] ->
             %{speech_act: act}
 
           _ ->
