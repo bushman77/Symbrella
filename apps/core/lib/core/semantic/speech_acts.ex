@@ -16,7 +16,7 @@ defmodule Core.Semantic.SpeechActs do
 
   @type frame :: %{
           version: 1,
-          speech_act: :greeting | :gratitude | :farewell | :wellbeing_query,
+          speech_act: :greeting | :gratitude | :farewell | :wellbeing_query | :social_update_query,
           speaker: :user,
           addressee: :self | :unspecified | :other,
           vocative: map() | nil,
@@ -49,7 +49,10 @@ defmodule Core.Semantic.SpeechActs do
               lexical_evidence(Map.fetch!(captures, "greeting"), si))}
 
           _ ->
-            other_direct_social_act(text)
+            case social_update_act(text) do
+              {:ok, _} = update -> update
+              :not_applicable -> other_direct_social_act(text)
+            end
         end
 
       _ ->
@@ -64,6 +67,45 @@ defmodule Core.Semantic.SpeechActs do
   # conjunctions, multi-participant addressees and quoted sentences.
   defp greeting_pattern do
     ~r/\A\s*(?<greeting>hello|hi+|heya?|hiya|yo|sup|good\s+(?:morning|afternoon|eve(?:n+i+|i+)ng))(?:\s+there)?(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*[.!?]*\s*\z/iu
+  end
+
+  # A closed, whole-utterance check-in grammar. We separately record a
+  # greeting (when present) and an informal social-update question. Neither
+  # unit is promoted to a dictionary-verified meaning or a new Syntax
+  # signature: this is provisional, surface-only conversational evidence.
+  # Requiring the complete question and a final '?' prevents prefix matches,
+  # quotations, reported speech and substantive follow-on instructions.
+  defp social_update_act(text) do
+    case Regex.named_captures(social_update_pattern(), text) do
+      %{} = captures ->
+        greeting = Map.get(captures, "greeting")
+        components =
+          if is_binary(greeting) and greeting != "",
+            do: [:greeting, :social_update_query],
+            else: [:social_update_query]
+
+        {addressee, vocative} = resolve_addressee(Map.get(captures, "vocative"))
+
+        frame =
+          social_frame(:social_update_query, text, addressee, vocative,
+            :unspecified, %{level: :surface_only, status: :provisional, witness: nil})
+          |> Map.put(:components, components)
+          |> Map.put(:construction,
+            if(length(components) == 2,
+              do: :greeting_plus_social_update,
+              else: :social_update_question))
+
+        {:ok, frame}
+
+      _ ->
+        :not_applicable
+    end
+  end
+
+  # Accept common chat contraction spellings ("what's", "whats", "what is").
+  # There is deliberately no wildcard tail or quoted-content matching.
+  defp social_update_pattern do
+    ~r/\A\s*(?:(?<greeting>hey|hello|hi+|heya?|hiya|yo)(?:\s*[,!]\s*|\s+))?what(?:'s|’s|s|\s+is)\s+new\s+with\s+you(?:\s*,\s*(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*\?\s*\z/iu
   end
 
   # Short whole-utterance grammars. These receive *surface-only* provenance,
