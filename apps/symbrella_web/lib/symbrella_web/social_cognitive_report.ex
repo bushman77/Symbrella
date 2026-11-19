@@ -12,6 +12,9 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   @max_replies 8
   @max_sentences_per_source 24
   @max_total_sentences 48
+  @evaluation_replies 24
+  @evaluation_sentences_per_source 3
+  @evaluation_total_sentences 50
   @max_sentence_chars 600
   @max_source_chars 12_000
 
@@ -29,7 +32,10 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
     {samples, dropped_by_source} =
       Enum.reduce(sources, {[], 0}, fn source, {acc, dropped} ->
         sentences = split_sentences(source.text)
-        kept = Enum.take(sentences, @max_sentences_per_source)
+        per_source_limit =
+          if target == :evaluation, do: @evaluation_sentences_per_source,
+            else: @max_sentences_per_source
+        kept = Enum.take(sentences, per_source_limit)
 
         next =
           kept
@@ -43,7 +49,10 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
         {acc ++ next, dropped + max(length(sentences) - length(kept), 0)}
       end)
 
-    selected = Enum.take(samples, @max_total_sentences)
+    total_limit =
+      if target == :evaluation, do: @evaluation_total_sentences,
+        else: @max_total_sentences
+    selected = Enum.take(samples, total_limit)
 
     analyses =
       Enum.map(selected, fn sample ->
@@ -69,7 +78,11 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
               %{status: :unavailable, reason: :invalid_probe_response}
           end
 
-        sample |> Map.put(:excerpt, String.slice(sample.text, 0, 240)) |> Map.delete(:text) |> Map.merge(metadata)
+        excerpt_limit = if target == :evaluation, do: @max_sentence_chars, else: 240
+        sample
+        |> Map.put(:excerpt, String.slice(sample.text, 0, excerpt_limit))
+        |> Map.delete(:text)
+        |> Map.merge(metadata)
       end)
 
     # Preserve the original source boundary throughout cognition. A reply
@@ -116,7 +129,12 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
       mode: :read_only_shadow,
       analyzed_segments: length(analyses),
       target: target_info(target, sources),
-      omitted_replies: if(target == :thread, do: max(length(comments) - @max_replies, 0), else: 0),
+      omitted_replies:
+        cond do
+          target == :thread -> max(length(comments) - @max_replies, 0)
+          target == :evaluation -> max(length(comments) - @evaluation_replies, 0)
+          true -> 0
+        end,
       omitted_sentences: dropped_by_source + length(samples) - length(selected),
       segments: analyses,
       sections: sections,
@@ -129,6 +147,16 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   end
 
   def analyze(_, _), do: {:error, :invalid_social_analysis_input}
+
+  # Deliberately samples more distinct conversation sources than the regular
+  # inspector, while keeping each source's contribution small. No new API calls.
+  defp select_sources(topic, comments, :evaluation) do
+    {:ok, [post_source(topic)] ++
+      (comments
+       |> Enum.take(@evaluation_replies)
+       |> Enum.with_index(1)
+       |> Enum.map(fn {comment, index} -> reply_source(comment, index) end))}
+  end
 
   defp select_sources(topic, comments, :thread) do
     {:ok, [post_source(topic)] ++
@@ -161,6 +189,7 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
   end
 
   defp target_info(:thread, _), do: %{kind: :thread, label: "Entire conversation"}
+  defp target_info(:evaluation, _), do: %{kind: :evaluation, label: "Evaluation sample"}
 
   defp target_info(_target, [source]) do
     %{kind: source.source_type, label: source.label, index: source.source_index,
@@ -169,8 +198,9 @@ defmodule SymbrellaWeb.SocialCognitiveReport do
 
   # A single reply has no original-post semantic ledger or cross-speaker
   # inference. An explicitly selected post can still present its own question.
-  defp maybe_add_conversation(report, _topic, _comments, {:reply, _}, _analyses, _discourse),
-    do: report
+  defp maybe_add_conversation(report, _topic, _comments, target, _analyses, _discourse)
+       when target == :evaluation or (is_tuple(target) and elem(target, 0) == :reply),
+       do: report
 
   defp maybe_add_conversation(report, topic, comments, :thread, analyses, discourse),
     do: Map.put(report, :conversation,
