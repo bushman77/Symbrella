@@ -140,7 +140,8 @@ defmodule SymbrellaWeb.SocialLive do
 
   @impl true
   def handle_event("label_evaluation", %{"index" => raw_index} = params, socket) do
-    with %{items: items} = evaluation <- socket.assigns.evaluation,
+    with true <- is_binary(raw_index) and byte_size(raw_index) <= 5,
+         %{items: items} = evaluation <- socket.assigns.evaluation,
          {index, ""} <- Integer.parse(raw_index),
          true <- index >= 0,
          {:ok, item} <- Enum.fetch(items, index) do
