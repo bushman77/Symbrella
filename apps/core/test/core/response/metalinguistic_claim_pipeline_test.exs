@@ -105,7 +105,13 @@ defmodule Core.Response.MetalinguisticClaimPipelineTest do
     si = run("it's a greeting", sid, response: :auto)
 
     assert si.metalinguistic_claim.kind == :metalinguistic_claim
-    assert si.response_text =~ ~s|you're saying that "florgix" is a "greeting"|
+    assert si.response_text =~ ~s|you're saying that "florgix" is a "greeting"|,
+           "selected_action=#{inspect(si.selected_action)} " <>
+             "intent=#{inspect(si.intent)} " <>
+             "wm_transition=#{inspect(get_in(si, [:wm_context, :focus_transition]))} " <>
+             "wm_admitted?=#{inspect(si.wm_context == Core.Brain.WM.Comprehension.admitted_context(sid))} " <>
+             "wm_attention=#{inspect(get_in(si, [:wm_context, :attention]))} " <>
+             "response_source=#{inspect(get_in(si, [:response_meta, :response_source]))}"
     assert si.response_text =~ "haven't independently verified"
     assert si.response_meta.response_reflection.status ==
       :metalinguistic_classification_acknowledged

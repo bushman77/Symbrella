@@ -29,6 +29,10 @@ defmodule Core.Response.AttentionFallback do
   def generate(text, %{risk_bucket: :low} = features, %{action: action}, si)
       when is_binary(text) and byte_size(text) <= 2048 and is_map(si) and
              action in [:answer, :offer_options, :act_first, :ask_first] do
+    # The current-turn WM admission and original-source verification apply to
+    # both kinds of reply. A replay-verified classification is an explicit
+    # discourse link, not a continuing attention topic: it may be spoken even
+    # when generic attention focus has transitioned to :release.
     with nil <- LexicalDefinition.requested_term(text),
          false <- Map.get(features, :intent) == :define,
          session when is_binary(session) and byte_size(session) in 1..128 <-
@@ -38,8 +42,24 @@ defmodule Core.Response.AttentionFallback do
          %{} = context <- Map.get(si, :wm_context),
          %{} = admitted <- WMComprehension.admitted_context(session),
          true <- context == admitted,
-         :conversation_context_only <- Map.get(context, :verification),
-         %{scope: :session, salience: salience, goal_terms: goal_terms} <-
+         :conversation_context_only <- Map.get(context, :verification) do
+      case acknowledge_classification(session, text, si, context,
+             get_in(context, [:attention, :salience])) do
+        {:ok, _, _} = acknowledgment -> acknowledgment
+        :not_applicable -> attention_continuation(text, features, action, si, session, context)
+      end
+    else
+      _ -> :not_applicable
+    end
+  end
+
+
+  def generate(_, _, _, _), do: :not_applicable
+
+  defp attention_continuation(text, features, action, si, session, context) do
+    # Existing topic-focus gate remains unchanged for fuzzy repair, lexical
+    # reports, and generic WM continuation; :release still abstains here.
+    with %{scope: :session, salience: salience, goal_terms: goal_terms} <-
            Map.get(context, :attention),
          true <- is_number(salience) and salience > 0.0,
          true <- is_list(goal_terms) and goal_terms != [],
@@ -47,11 +67,7 @@ defmodule Core.Response.AttentionFallback do
       report =
         case confirm_pending_fuzzy(session, text, context, salience) do
           {:ok, _, _} = confirmation -> confirmation
-          :not_applicable ->
-            case acknowledge_classification(session, text, si, context, salience) do
-              {:ok, _, _} = reply -> reply
-              :not_applicable -> comprehension_report(text, si, context, goal_terms, salience)
-            end
+          :not_applicable -> comprehension_report(text, si, context, goal_terms, salience)
         end
 
       case report do
@@ -89,7 +105,6 @@ defmodule Core.Response.AttentionFallback do
     end
   end
 
-  def generate(_, _, _, _), do: :not_applicable
 
   # A bare confirmation is meaningful only while the *last* discourse
   # event in this session is the actually issued fuzzy question. WM admission

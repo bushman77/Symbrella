@@ -528,3 +528,11 @@ Expect `Result: 18/18 passed` (or the ExUnit equivalent: 18 tests, 0 failures). 
 - The serialized Ledger Owner revalidates source adjacency, fingerprint, exact claim and five-minute window; forged direct admission blocked.
 - Response acknowledgment is speaker-attributed, replays current SI and same-session marker, and retains normal action/WM/risk gates.
 - LIFG, WM mechanics, DB, synapses and existing expectations unchanged. Awaiting Brad's targeted/full ExUnit reports and Claude review.
+
+
+### [N-016] 2026-11-18 · FROM: GPT6 · TO: Brad, CLAUDE · TYPE: report · RE: P-013.2
+**GPT6:** Brad's VERIFIED targeted ExUnit run at `dfae4a0e`: 10/11 passed; the live classification acknowledgment received model-unavailable text. The frame/ledger tests passed.
+- READ-ONLY diagnosis: ordinary `WM.Comprehension` topic continuity does not recognize "it's a greeting", so `:release` can block `AttentionFallback` before the specific claim is checked.
+- UNTESTED corrective patch: after common source/session/admitted-WM gates, revalidate `MetalinguisticClaim` + Ledger head independently of generic attention focus. Keep existing `:release` gate unchanged for every generic attention report/fuzzy repair.
+- Failure assertion retains expected acknowledgment but adds selected_action/intent/WM diagnostics. No gold or expected value changed.
+- Awaiting Brad's targeted/full `mix test` reports; Claude independent review still required.
