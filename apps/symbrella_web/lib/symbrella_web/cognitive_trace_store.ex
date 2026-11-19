@@ -120,10 +120,68 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
   defp region_for(:hippocampus_persist), do: :hippocampus
   defp region_for(_), do: nil
 
+  @degradation_reasons [
+    :no_lifg_choices, :weak_decision_rate_high, :fallback_rate_high,
+    :unresolved_content_tokens
+  ]
+  @structural_states [:preferred, :unresolved, :no_complete_candidate, :ambiguous]
+  @sentence_meaning_states [
+    :not_yet_interpreted, :provisional, :structurally_interpreted
+  ]
+  @audit_states [:consistent, :inconsistent, :unassessed]
+  @feedback_modes [:bounded_reanalysis, :observe_only, :not_observed]
+  @repair_hints [
+    :not_indicated, :review_missing_choices, :review_unresolved_content,
+    :review_lexical_evidence, :reason_not_observed
+  ]
+  @gap_gates [
+    :not_degraded, :needs_uncertainty, :needs_unresolved_content,
+    :needs_session, :needs_user_origin, :needs_input, :eligible_for_review
+  ]
+
   defp evidence_for(:lifg_selection, %{} = raw), do: numeric(raw, [:choices])
   defp evidence_for(:comprehension_summary, %{} = raw) do
-    Map.merge(numeric(raw, [:understood, :uncertain, :unresolved]),
-      %{degraded: Map.get(raw, :degraded) == true})
+    base =
+      Map.merge(numeric(raw, [:understood, :uncertain, :unresolved]),
+        %{degraded: Map.get(raw, :degraded) == true})
+
+    # Old/partial traces never fabricate detailed diagnostic classifications.
+    if is_list(Map.get(raw, :reasons)) do
+      diagnosis = %{
+        reasons:
+          raw
+          |> Map.get(:reasons)
+          |> Enum.filter(&(&1 in @degradation_reasons))
+          |> Enum.uniq()
+          |> Enum.take(4),
+        weak_rate: safe_rate(Map.get(raw, :weak_rate)),
+        fallback_rate: safe_rate(Map.get(raw, :fallback_rate)),
+        structural_status:
+          allow_atom(Map.get(raw, :structural_status), @structural_states, :not_observed),
+        sentence_meaning_status:
+          allow_atom(Map.get(raw, :sentence_meaning_status),
+            @sentence_meaning_states, :not_observed),
+        integration_status:
+          allow_atom(Map.get(raw, :integration_status), @audit_states, :not_observed),
+        feedback_mode:
+          allow_atom(Map.get(raw, :feedback_mode), @feedback_modes, :not_observed),
+        feedback_applied:
+          allow_atom(Map.get(raw, :feedback_applied), [true, false, :not_observed],
+            :not_observed),
+        repair_hint:
+          allow_atom(Map.get(raw, :repair_hint), @repair_hints, :reason_not_observed),
+        curiosity_gap_gate:
+          allow_atom(Map.get(raw, :curiosity_gap_gate), @gap_gates, :not_observed)
+      }
+
+      base
+      |> Map.merge(diagnosis)
+      |> Map.merge(numeric(raw, [
+        :choice_count, :unresolved_content_count, :verified_lexical_count
+      ]))
+    else
+      base
+    end
   end
   defp evidence_for(:atl_integration, %{} = raw),
     do: %{slate_present: Map.get(raw, :slate_present) == true}
@@ -297,6 +355,10 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
 
   defp allow_atom(value, allowed, fallback),
     do: if(value in allowed, do: value, else: fallback)
+
+  defp safe_rate(n) when is_number(n) and n >= 0.0 and n <= 1.0,
+    do: Float.round(n * 1.0, 6)
+  defp safe_rate(_), do: nil
 
   defp numeric(map, keys) do
     for key <- keys, value = Map.get(map, key), is_integer(value),
