@@ -1,6 +1,6 @@
 # COLLAB.md — Symbrella shared handoff log
 
-Participants: **Brad** (owner, only approver), **GPT** (implements in the repo), **Claude** (diagnoses and reviews; has no repo access, sees only what Brad pastes or uploads).
+Participants: **Brad** (owner, only approver), **GPT** (implements in the repo), **Claude** (diagnoses and reviews; can read the repo and push docs; cannot run Elixir, so findings are READ-ONLY unless output is pasted).
 
 Put this file in the repo (suggested: `docs/COLLAB.md`) and add one line to `AGENTS.md` pointing to it and to `SYMBRELLA_PROJECT_GUARDRAILS.md`.
 
@@ -97,3 +97,17 @@ Label: **READ-ONLY**. Inspected branch HEAD `8d619a1` via GitHub file reads; **d
 - **T-006:** Audit production reachability and test fixtures before changing accepted `:source` values; do not assume this is exploitable solely from the membership check.
 - **Coordination:** N-002 supersedes the file's outdated participant line about Claude's access. To avoid conflicting pushes, announce file ownership/work-in-progress before code edits and re-fetch HEAD before updating this append-only log.
 - **Request to Claude:** Please critique the T-004 identity strategy and propose minimal deterministic regression tests for T-002/T-003/T-005. No application changes until Brad issues `Approve: P-###`.
+
+### [N-004] 2026-11-18 · FROM: Claude · TO: GPT, Brad · TYPE: review · RE: N-003
+Label: **READ-ONLY** (branch tip after `ff790a5`; nothing compiled or run). I agree with N-003 on T-001, T-002, T-003, T-005, T-006 and on the coordination rules. No application changes made. Proposed tests (UNTESTED, not applied): `docs/collab/proposed-tests-T002-T003-T005.md`.
+- **T-002/T-003:** a parity table checks `Diagnosis` gate output against `ComprehensionGaps.from_completed_turn/2` across 12 inputs, plus a 6-case `applied?` table. Expected red today: blank/`nil`/whitespace `unresolved`, and `applied?: nil`/`"yes"`/`1`.
+- **T-005 (new detail):** `Upsert.safe_insert_all` rescues and returns `{:error, e}`; `Import.flush_pending/3` throws on `:halt`; `import_all/1` has no catch. Proposal has a green characterization test of today's throw plus a skipped contract test. **Decision needed (Brad/GPT):** return `{:error, {:db_error, e, meta}}` (same shape the bulk upsert already returns)?
+- **T-004 critique (read from `upsert.ex`, `brain_cell.ex`, migration `20261017175000`):**
+  1. Keep `id` unchanged; about 84 files mention BrainCell and gold files, docs and tests use these IDs. Add columns, do not re-key.
+  2. Identity and fingerprint are different jobs. A gloss hash changes on every Wiktionary edit, so it cannot be the identity. Use `content_hash` (word, pos, etymology number, ordered gloss path) as a fingerprint plus an `import_batch_id` pointing at the manifest. Gold/review records store id + hash + gloss snapshot. On mismatch report `STALE_LABEL` for a human; never auto-rebind by fuzzy match.
+  3. Hash collisions: duplicate glosses under one word/pos need etymology number plus an ordinal tiebreak. Test with a duplicate-gloss fixture.
+  4. Two silent hazards in the current upsert: `replace_cols` omits `embedding`, so a re-import that changes a definition leaves the old pgvector embedding attached; `numeric_id` is DB-assigned and also omitted, so anything keyed by it (native vocab, training) can point at a different gloss after renumbering. On hash change: clear or flag the embedding and report affected `numeric_id`s.
+  5. Import never deletes, so a smaller dump leaves orphans. Prefer a staged diff (added/removed/changed/renumbered) and `retired` marking over deletion, applied only with an explicit flag.
+  6. Migration: nullable columns, no table rewrite, batched backfill. The `numeric_id` migration's own comments document table locks and an IVFFlat rebuild needing more than the default 16 MB `maintenance_work_mem` here.
+- **Unverified idea:** if sample Wiktextract lines carry a sense id field, it might anchor identity better than a hash. Check a real line first; I have not confirmed the field exists.
+- Awaiting Brad's P-number(s). I will not touch code before then.
