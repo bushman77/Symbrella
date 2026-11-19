@@ -144,7 +144,7 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanelTest do
     recent = Map.update!(@trace, :events, fn events ->
       List.insert_at(events, -1, social)
     end)
-    prior = @trace
+    prior = %{@trace | trace_id: "turn-111bbb"}
 
     selected = render_component(&NeuralAtlas.panel/1,
       nodes: [
