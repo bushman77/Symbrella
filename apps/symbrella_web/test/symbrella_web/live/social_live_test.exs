@@ -307,6 +307,134 @@ defmodule SymbrellaWeb.SocialLiveTest do
     end
   end
 
+  defmodule FakeEvaluationAnalyzer do
+    def analyze(input, opts) do
+      observer = Application.fetch_env!(:symbrella_web, :social_test_observer)
+      send(observer, {:evaluation_requested, input.topic.id, opts})
+
+      probe = fn text, probe_opts ->
+        send(observer, {:evaluation_probe, text, probe_opts})
+        {:ok, %{
+          stage: :social_semantic_shadow,
+          stage_diagnostic: %{
+            pipeline: :read_only_external_projection,
+            external_source_isolation: :enforced,
+            runtime_lifg_ingest: :not_performed,
+            runtime_atl_ingest: :not_performed,
+            working_memory_admission: :not_performed,
+            episodic_persistence: :not_performed,
+            structural_competition: :no_complete_candidate
+          },
+          lifg: %{status: :scored, chosen_count: 2},
+          sentence_meaning: %{status: :not_yet_interpreted},
+          comprehension: %{degraded?: true, reasons: [:weak_decision_rate_high]}
+        }}
+      end
+
+      SymbrellaWeb.SocialEvaluation.analyze(input, Keyword.put(opts, :probe, probe))
+    end
+  end
+
+  test "evaluation is opt-in, reviewable, read-only, and discards labels", %{conn: conn} do
+    prior_evaluator = Application.get_env(:symbrella_web, :social_evaluator)
+    prior_observer = Application.get_env(:symbrella_web, :social_test_observer)
+    Application.put_env(:symbrella_web, :social_evaluator, FakeEvaluationAnalyzer)
+    Application.put_env(:symbrella_web, :social_test_observer, self())
+
+    try do
+      {:ok, view, _} = live(conn, ~p"/social/#{FakeClient.id(1)}")
+
+      assert has_element?(view, "#social-evaluate-thread")
+      refute has_element?(view, "#social-evaluation-modal")
+      refute_receive {:evaluation_requested, _, _}, 30
+
+      prior_activity = SymbrellaWeb.SocialBrainActivity.latest()
+      html = view |> element("#social-evaluate-thread") |> render_click()
+
+      assert_receive {:evaluation_requested, post_id, []}
+      assert post_id == FakeClient.id(1)
+      assert has_element?(view, "#social-evaluation-modal[role='dialog']")
+      assert has_element?(view, "#social-evaluation-development")
+      assert has_element?(view, "#social-evaluation-heldout")
+      assert has_element?(view, "#social-evaluation-item-0")
+      assert has_element?(view, "#social-evaluation-expected-0")
+      assert has_element?(view, "#social-evaluation-family-0")
+      assert has_element?(view, "#social-evaluation-review-0")
+      assert has_element?(view, "#social-evaluation-copy[phx-hook='ClipboardCopy']")
+      assert html =~ "No learning"
+      assert html =~ "untrusted"
+      assert html =~ "No eligible excerpts" or html =~ "unique sentence excerpts"
+
+      assert SymbrellaWeb.SocialBrainActivity.latest() == prior_activity
+      assert_receive {:evaluation_probe, _, probe_opts}
+      assert probe_opts[:brain_observation?] == false
+      assert probe_opts[:emit_telemetry?] == false
+
+      view |> element("#social-evaluation-item-0 form") |>
+        render_change(%{
+          "expected" => "interpret",
+          "family" => "statement",
+          "review" => "incorrect"
+        })
+
+      assert has_element?(view, "#social-evaluation-expected-0 option[value='interpret'][selected]")
+      assert has_element?(view, "#social-evaluation-family-0 option[value='statement'][selected]")
+      assert has_element?(view, "#social-evaluation-review-0 option[value='incorrect'][selected]")
+      assert render(view) =~ "1 labeled"
+
+      # The export exists only in the current LiveView; nothing is uploaded.
+      assert has_element?(view, "#social-evaluation-jsonl")
+      view |> element("#social-evaluation-close") |> render_click()
+      refute has_element?(view, "#social-evaluation-modal")
+
+      view |> element("#social-evaluate-thread") |> render_click()
+      assert has_element?(view, "#social-evaluation-expected-0 option[value='unlabeled'][selected]")
+      assert SymbrellaWeb.SocialBrainActivity.latest() == prior_activity
+
+      view |> element("#social-evaluation-close") |> render_click()
+      view |> element("#social-refresh") |> render_click()
+      refute has_element?(view, "#social-evaluation-modal")
+    after
+      if is_nil(prior_evaluator) do
+        Application.delete_env(:symbrella_web, :social_evaluator)
+      else
+        Application.put_env(:symbrella_web, :social_evaluator, prior_evaluator)
+      end
+
+      if is_nil(prior_observer) do
+        Application.delete_env(:symbrella_web, :social_test_observer)
+      else
+        Application.put_env(:symbrella_web, :social_test_observer, prior_observer)
+      end
+    end
+  end
+
+  test "evaluation labels cannot be applied to unselected indexes or on the social index", %{conn: conn} do
+    prior = Application.get_env(:symbrella_web, :social_evaluator)
+    prior_observer = Application.get_env(:symbrella_web, :social_test_observer)
+    Application.put_env(:symbrella_web, :social_evaluator, FakeEvaluationAnalyzer)
+    Application.put_env(:symbrella_web, :social_test_observer, self())
+
+    try do
+      {:ok, view, _} = live(conn, ~p"/social")
+      refute has_element?(view, "#social-evaluate-thread")
+      render_hook(view, "evaluate_thread", %{})
+      refute has_element?(view, "#social-evaluation-modal")
+
+      {:ok, thread, _} = live(conn, ~p"/social/#{FakeClient.id(1)}")
+      thread |> element("#social-evaluate-thread") |> render_click()
+      render_hook(thread, "label_evaluation", %{"index" => "99", "expected" => "interpret"})
+      render_hook(thread, "label_evaluation", %{"index" => "-1", "expected" => "interpret"})
+      render_hook(thread, "label_evaluation", %{"index" => "incorrect", "expected" => "interpret"})
+      assert has_element?(thread, "#social-evaluation-expected-0 option[value='unlabeled'][selected]")
+    after
+      if is_nil(prior), do: Application.delete_env(:symbrella_web, :social_evaluator),
+        else: Application.put_env(:symbrella_web, :social_evaluator, prior)
+      if is_nil(prior_observer), do: Application.delete_env(:symbrella_web, :social_test_observer),
+        else: Application.put_env(:symbrella_web, :social_test_observer, prior_observer)
+    end
+  end
+
   test "rejects invalid thread identifier without sending a request", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/social/not-a-valid-id")
     assert has_element?(view, "#social-error")
