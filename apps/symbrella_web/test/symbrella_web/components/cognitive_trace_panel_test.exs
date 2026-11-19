@@ -132,6 +132,40 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanelTest do
     refute other =~ ~s(id="atlas-comprehension-diagnosis")
   end
 
+  test "renders only the selected turn's ordered social speech-act components" do
+    social = %{
+      stage: :speech_act_binding, region: nil, status: :ok,
+      duration_us: 120, at_ms: 1140,
+      evidence: %{
+        speech_act: :social_update_query,
+        social_components: [:greeting, :social_update_query]
+      }
+    }
+    recent = Map.update!(@trace, :events, fn events ->
+      List.insert_at(events, -1, social)
+    end)
+    prior = @trace
+
+    selected = render_component(&NeuralAtlas.panel/1,
+      nodes: [
+        %{key: :lifg, label: "LIFG", subtitle: "Lexical", description: "Lexical",
+          modules: [Brain.LIFG], telemetry: [], related: [:atl]},
+        %{key: :atl, label: "ATL", subtitle: "Integration", description: "Integration",
+          modules: [Brain.ATL], telemetry: [], related: [:lifg]}
+      ],
+      selected: :lifg, layer: :trace,
+      traces: [prior, recent], trace_id: recent.trace_id)
+
+    assert selected =~ "speech act: social_update_query"
+    assert selected =~ "social components: greeting + social_update_query"
+    assert selected =~ ~s(data-stage="speech_act_binding")
+
+    # No component evidence is invented in the original, legacy trace.
+    legacy = render_component(&CognitiveTracePanel.panel/1,
+      trace: prior, traces: [prior])
+    refute legacy =~ "social components: greeting + social_update_query"
+  end
+
   test "shows an honest empty state before the first instrumented chat turn" do
     html = render_component(&CognitiveTracePanel.panel/1, traces: [], trace: nil)
     assert html =~ ~s(id="atlas-trace-empty")
