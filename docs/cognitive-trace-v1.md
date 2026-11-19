@@ -132,6 +132,50 @@ live action scores, safety/permission enforcement, command dispatch,
 response text, or memory admission. It also does **not** make a shadow
 recommendation authoritative.
 
+### P-007: Comprehension diagnosis and repair readiness (observe-only)
+
+The Phase 6 `:comprehension_summary` receipt now includes an independently
+allowlisted diagnosis generated from the already-computed SemanticInput:
+
+- Actual degradation **reason codes** (`:no_lifg_choices`,
+  `:weak_decision_rate_high`, `:fallback_rate_high`,
+  `:unresolved_content_tokens`) and bounded LIFG choice/content counts
+- Weak and fallback selection rates (0..1), without raw candidate details
+- Number of **independently verified lexical constructions**, distinct from
+  raw LIFG winners, structural interpretation and whole-message understanding
+- Observed structural-competition, sentence-meaning and integration-audit
+  status; unknown/unrecognized states explicitly remain `:not_observed`
+- Existing ATL-to-LIFG feedback mode and whether that earlier stage
+  **reported** applying a bounded revision
+- A non-executing review hint and the prerequisites of
+  `Core.Curiosity.ComprehensionGaps.from_completed_turn/2`
+
+The current curiosity-gap projection conservatively requires degraded
+comprehension, **both** uncertain and unresolved content, matching session
+and user-origin evidence, and a nonempty sentence. Thus an observed turn with
+one uncertain term and zero unresolved terms reports
+`:needs_unresolved_content`: this describes an existing review gate, not a
+new question or a reason to promote any lexical interpretation.
+
+Select **Neural Atlas → Turn trace** to see the new
+**Comprehension diagnosis · selected turn** panel below the timed stages.
+It shows reason labels, lexical selection rates, verified lexical count,
+structural/integration statuses, existing feedback and diagnostic review hints.
+Legacy traces without full diagnosis metadata fail closed to an explicit
+no-detail state. The panel is bound to the selected turn, not the latest
+turn in the background.
+
+Both Core's producer and the Phoenix `CognitiveTraceStore` sanitize the
+metadata. This observer never logs the utterance, token text, lexical IDs,
+dictionary definitions, memory or response content; telemetry cannot turn
+unknown statuses into recognized causes.
+
+P-007 **does not retry, rerank, ask follow-up questions, modify ACC/FPC,
+change memory, or authorize new lexical revisions**. Existing ATL/LIFG
+feedback behavior is left untouched. A degraded summary reports evidence
+quality, not a failed execution span or proof that no structural interpretation
+exists.
+
 This is **not** a distributed tracer. Internally spawned, uninstrumented
 processes are not automatically included. The dashboard never attributes
 a Telemetry or Bus receipt to a chat turn without a matching turn-scoped span.
@@ -142,6 +186,8 @@ From the umbrella root:
 
 ```sh
 mix test apps/core/test/core/cognitive_trace_test.exs \
+  apps/core/test/core/comprehension/diagnosis_test.exs \
+  apps/core/test/core/comprehension/summary_test.exs \
   apps/core/test/core/brain/action_selection_test.exs \
   apps/core/test/core/response/attach_test.exs \
   apps/core/test/core/semantic_input_sense_candidates_test.exs
