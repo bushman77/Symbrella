@@ -43,6 +43,57 @@ defmodule SymbrellaWeb.CognitiveTraceStoreTest do
     refute Map.has_key?(event.evidence, :token)
   end
 
+  test "keeps only allowlisted comprehension diagnoses for the selected turn" do
+    raw = %{
+      degraded: true, understood: 0, uncertain: 1, unresolved: 0,
+      reasons: [:weak_decision_rate_high, :fallback_rate_high,
+                :unrecognized_diagnosis, "PRIVATE REASON", :fallback_rate_high],
+      choice_count: 3, unresolved_content_count: 0, verified_lexical_count: 0,
+      weak_rate: 0.666667, fallback_rate: 0.333333,
+      structural_status: :preferred, sentence_meaning_status: :provisional,
+      integration_status: :consistent, feedback_mode: :bounded_reanalysis,
+      feedback_applied: false, repair_hint: :review_lexical_evidence,
+      curiosity_gap_gate: :needs_unresolved_content,
+      sentence: "PRIVATE UTTERANCE", selected_sense: "PRIVATE ID",
+      response: "PRIVATE RESPONSE"
+    }
+
+    {_, traced} = record(state(), "turn-ff0071", :comprehension_summary, :ok, 100, raw)
+    [event] = traced.events
+    assert event.evidence.degraded
+    assert event.evidence.reasons ==
+             [:weak_decision_rate_high, :fallback_rate_high]
+    assert event.evidence.choice_count == 3
+    assert event.evidence.verified_lexical_count == 0
+    assert event.evidence.weak_rate == 0.666667
+    assert event.evidence.fallback_rate == 0.333333
+    assert event.evidence.structural_status == :preferred
+    assert event.evidence.sentence_meaning_status == :provisional
+    assert event.evidence.integration_status == :consistent
+    assert event.evidence.feedback_applied == false
+    assert event.evidence.repair_hint == :review_lexical_evidence
+    assert event.evidence.curiosity_gap_gate == :needs_unresolved_content
+    refute inspect(event.evidence) =~ "PRIVATE"
+    assert length(traced.events) == 1
+
+    malicious = %{
+      raw | reasons: ["PRIVATE", :unlisted],
+            choice_count: 100_001, weak_rate: 9.0,
+            fallback_rate: -1.0, structural_status: :injected_status,
+            curiosity_gap_gate: :untrusted, feedback_applied: "yes"
+    }
+    {_, bad} = record(state(), "turn-ff0072", :comprehension_summary, :ok, 105, malicious)
+    [sanitized] = bad.events
+    assert sanitized.evidence.reasons == []
+    refute Map.has_key?(sanitized.evidence, :choice_count)
+    assert sanitized.evidence.weak_rate == nil
+    assert sanitized.evidence.fallback_rate == nil
+    assert sanitized.evidence.structural_status == :not_observed
+    assert sanitized.evidence.curiosity_gap_gate == :not_observed
+    assert sanitized.evidence.feedback_applied == :not_observed
+    refute inspect(sanitized) =~ "PRIVATE"
+  end
+
   test "observed history keeps 20 turns, 40 events each, and expires old turns" do
     first =
       Enum.reduce(1..25, state(), fn i, acc ->
