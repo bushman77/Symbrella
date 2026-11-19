@@ -89,8 +89,9 @@ defmodule Core.Comprehension.DiagnosisTest do
     assert Diagnosis.assess(%{user | experience_origin: :system}).curiosity_gap_gate ==
              :needs_user_origin
     assert Diagnosis.assess(%{user | sentence: nil}).curiosity_gap_gate == :needs_input
-    assert Diagnosis.assess(%{user | comprehension: %{summary | unresolved: []}}).
-             curiosity_gap_gate == :needs_unresolved_content
+    without_unresolved =
+      Diagnosis.assess(%{user | comprehension: %{summary | unresolved: []}})
+    assert without_unresolved.curiosity_gap_gate == :needs_unresolved_content
   end
 
   test "unknown metadata fails closed to bounded enum fields" do
