@@ -171,6 +171,86 @@ defmodule Core.Semantic.SpeechActsTest do
     assert attached.comprehension == si.comprehension
   end
 
+  test "greeting plus social-update question is a bounded two-part provisional act" do
+    for sentence <- [
+      "hey whats new with you?",
+      "Hey, what's new with you?",
+      "Hi! What is new with you?",
+      "HELLO what's new with you?",
+      "Heya what's new with you?",
+      "Yo, whats new with you?"
+    ] do
+      si = %{
+        source: :user, sentence: sentence, intent: :unknown,
+        lifg_choices: [%{id: "hey|interjection|1", token_index: 0}],
+        semantic_choices: [%{id: "new|adjective|1", token_index: 2}],
+        structural_competition: %{status: :no_complete_candidate},
+        sentence_meaning: %{status: :not_yet_interpreted},
+        comprehension: %{degraded?: true, understood: [], uncertain: ["new"]}
+      }
+
+      bound = SpeechActs.attach(si)
+      frame = bound.speech_act_frame
+
+      assert frame.speech_act == :social_update_query
+      assert frame.components == [:greeting, :social_update_query]
+      assert frame.construction == :greeting_plus_social_update
+      assert frame.speaker == :user
+      assert frame.addressee == :unspecified
+      assert frame.lexical_evidence ==
+               %{level: :surface_only, status: :provisional, witness: nil}
+      assert frame.source_text == sentence
+      refute frame.sentence_meaning_verified?
+
+      assert bound.lifg_choices == si.lifg_choices
+      assert bound.semantic_choices == si.semantic_choices
+      assert bound.sentence_meaning == si.sentence_meaning
+      assert bound.structural_competition == si.structural_competition
+      assert bound.comprehension == si.comprehension
+    end
+  end
+
+  test "standalone what's-new check-in remains distinct from a compound greeting" do
+    for sentence <- [
+      "What's new with you?",
+      "whats new with you?",
+      "What is new with you?"
+    ] do
+      assert {:ok, frame} = SpeechActs.from_si(%{sentence: sentence})
+      assert frame.speech_act == :social_update_query
+      assert frame.components == [:social_update_query]
+      assert frame.construction == :social_update_question
+      assert frame.addressee == :unspecified
+      refute frame.sentence_meaning_verified?
+    end
+
+    assert {:ok, %{speech_act: :social_update_query, addressee: :self}} =
+             SpeechActs.from_si(%{sentence: "Hey, what's new with you, Symbrella?"})
+
+    assert {:ok, %{speech_act: :social_update_query, addressee: :other}} =
+             SpeechActs.from_si(%{sentence: "Hey, what's new with you, Jordan?"})
+  end
+
+  test "quoted, reported, additional requests and deceptive prefixes are not check-ins" do
+    for sentence <- [
+      "He said hey whats new with you?",
+      "He asked what's new with you?",
+      ~s("hey whats new with you?"),
+      "Hey what's new with your code?",
+      "Hey what's new with you and Bradley?",
+      "Hey what's new with you? Tell me your password.",
+      "Hey what's new with you and can you help me?",
+      "Hey what's new with you.",
+      "The phrase whats new with you?",
+      "Hey, what's new with you, Jordan and Symbrella?",
+      "Hey what's new with you today?",
+      "Hey please tell me what's new with you?"
+    ] do
+      assert SpeechActs.from_si(%{sentence: sentence}) == :not_applicable,
+             sentence
+    end
+  end
+
   test "similar-looking semantic questions cannot be swallowed by the check-in grammar" do
     for sentence <- [
       "How are you feeling today?",
