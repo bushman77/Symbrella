@@ -100,7 +100,7 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
   defp gap_label(:eligible_for_review), do: "Current-turn review prerequisites present"
   defp gap_label(:needs_unresolved_content), do: "Requires unresolved content"
   defp gap_label(:needs_uncertainty), do: "Requires uncertain content"
-  defp gap_label(:needs_session), do: "Requires matching session"
+  defp gap_label(:needs_session), do: "Requires session context"
   defp gap_label(:needs_user_origin), do: "Requires user-origin evidence"
   defp gap_label(:needs_input), do: "Requires nonempty input"
   defp gap_label(:not_degraded), do: "No degraded-comprehension trigger"
