@@ -45,6 +45,10 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
       {:choices, value} -> "LIFG choices: #{value}"
       {:slate_present, value} -> "ATL slate present: #{value}"
       {:speech_act, value} -> "speech act: #{value}"
+      {:social_components, [:greeting, :social_update_query]} ->
+        "social components: greeting + social_update_query"
+      {:social_components, [:social_update_query]} ->
+        "social components: social_update_query"
       {:available, value} -> "prefrontal available: #{value}"
       {:planners, value} when is_list(value) -> "planner receipts: #{length(value)}"
       {:controls, value} when is_map(value) -> "merged controls: #{map_size(value)}"
