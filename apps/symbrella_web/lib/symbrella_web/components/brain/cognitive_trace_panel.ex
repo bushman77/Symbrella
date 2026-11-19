@@ -63,6 +63,10 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
 
   def evidence_label(_), do: ""
 
+  @diagnostic_reasons [
+    :no_lifg_choices, :weak_decision_rate_high, :fallback_rate_high,
+    :unresolved_content_tokens
+  ]
   @diagnostic_fields [
     :reasons, :weak_rate, :fallback_rate, :structural_status,
     :sentence_meaning_status, :integration_status, :feedback_mode,
@@ -75,7 +79,10 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
     |> Enum.reverse()
     |> Enum.find_value(fn
       %{stage: :comprehension_summary, status: :ok, evidence: %{} = evidence} ->
-        if is_list(Map.get(evidence, :reasons)) and
+        reasons = Map.get(evidence, :reasons)
+
+        if is_list(reasons) and length(reasons) <= 4 and
+             Enum.all?(reasons, &(&1 in @diagnostic_reasons)) and
              Enum.all?(@diagnostic_fields, &Map.has_key?(evidence, &1)),
           do: evidence, else: nil
 
@@ -256,7 +263,7 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
         <div class="mt-4 space-y-2 border-t border-zinc-800 pt-3 text-xs">
           <p data-diagnosis-field="feedback">
             ATL-to-LIFG feedback: {@diagnosis.feedback_mode} ·
-            revision applied: {@diagnosis.feedback_applied}
+            revision applied: {to_string(@diagnosis.feedback_applied)}
           </p>
           <p data-diagnosis-field="repair-hint" class="text-cyan-200">
             Diagnostic review: {review_label(@diagnosis.repair_hint)}
