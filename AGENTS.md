@@ -322,3 +322,8 @@ And **never** do this:
 <!-- phoenix:liveview-end -->
 
 <!-- usage-rules-end -->
+
+## Collaboration and guardrails
+
+- Read `SYMBRELLA_PROJECT_GUARDRAILS.md` before changing code: approval tokens (`Approve: P-###`), acyclic deps `db <- brain <- core <- web`, LIFG lives in `apps/brain`, no new WM bypasses.
+- `docs/COLLAB.md` is the shared handoff log between Brad, GPT and Claude. Read its rules first, append entries, never edit other authors' entries, and never edit expected values to make a failing test pass.
