@@ -836,8 +836,9 @@ defmodule SymbrellaWeb.SocialLive do
                     <p :if={item.reason_codes != []} class="text-xs text-amber-200">
                       Degradation reasons: {Enum.join(item.reason_codes, ", ")}
                     </p>
-                    <form phx-change="label_evaluation" phx-value-index={index}
+                    <form phx-change="label_evaluation"
                       class="grid gap-3 sm:grid-cols-3">
+                      <input type="hidden" name="index" value={index} />
                       <label class="flex flex-col gap-1 text-xs text-zinc-300">
                         Expected outcome
                         <select id={"social-evaluation-expected-#{index}"}
