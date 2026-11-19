@@ -3,8 +3,8 @@
 **Owner and sole approver:** Bradley  
 **Collaborators:** GPT-6 (architecture, implementation on approval, independent review) and Claude (independent architecture/review)  
 **Working branch:** `symbolic_generation`  
-**Direction set:** 2026-11-19  
-**Status:** Shared project objective and coordination plan. **Not an implementation approval.**
+**Direction confirmed by Bradley:** 2026-11-19  
+**Status:** Bradley-confirmed shared development direction. **Not an implementation approval.**
 
 > **Bradley's intent:** Symbrella must be able to attempt to understand language she encounters outside direct conversation—starting with Colony's `/social` route—by using her actual cognitive architecture. We are not building a separate, weaker “social analyzer.” The origin of input affects how much it can be trusted, remembered, learned or acted upon; it must not prevent genuine cognitive processing.
 
@@ -98,6 +98,8 @@ Architectural requirements:
 
 ### S0 / P-020 — establish a trustworthy cognitive/neuronal receipt
 
+**Proposed phased scope after N-029/N-030:** S0a (Core/web stage and failure visibility first); S0b (exact-ID activation snapshots only if needed, explicitly not a causal acknowledgment); S0c (cell-level acknowledgments under separately approved Brain FileScope only if a delivery ambiguity remains). These are proposals, not approved patches.
+
 **Status: PROPOSED. No production edits authorized.** Instrument what already executes, rather than making the graph brighter.
 
 - Record the actual invoked computation stages, LIFG options, low-margin/weak rates, structural block reasons, and source-gated abstentions in a privacy-bounded form.
@@ -148,12 +150,12 @@ We should be able to show that:
 
 | Item | Status | Next unresolved requirement |
 | --- | --- | --- |
-| **P-013.4** | **VERIFIED BY Brad** at code `af2282bb`: 3,015 passed, 3 skipped, 0 failed | Claude's independent Owner/Trace review remains pending |
+| **P-013.4** | **VERIFIED BY Brad** at code `af2282bb`: 3,015 passed, 3 skipped, 0 failed; **READ-ONLY reviewed** by Claude in N-029 and GPT-6 in N-030 | No blocking defect identified; comment correction and additional tests require separate approval |
 | **P-014** | **VERIFIED BY Brad** at `d3964ee7`: 3,014 passed, 3 skipped | Compiler warning-free status and forced compile exit remain unverified |
 | **P-014.1** | Three tracked root junk-file deletions existed before/after tests | No cleanup without a separate approval |
 | **P-015** | Cold-repeat/flag-matrix proposal | DB write audit, disposable environment, independent holdout |
 | **P-016/P-017/P-018** | Design proposals only | Reconsider after social comprehension measurements; Explain privacy decision |
-| **P-020 (S0)** | **PROPOSED, NOT APPROVED** | Review exact delivery-receipt/API scope and obtain Brad's approval |
+| **P-020 (S0)** | **PROPOSED, NOT APPROVED** | Scope S0a as first small instrumentation step; S0b/S0c conditional and separately scoped; obtain Brad's approval |
 
 ## 9. Immediate collaborative handoff
 
@@ -225,3 +227,10 @@ No P-013.4 change is requested. A test-only follow-up (items 4) and a comment co
 
 ### [N-031] 2026-11-19 · FROM: GPT6 · TO: CLAUDE, Bradley · TYPE: verification · RE: N-030 / umbrella regression baseline
 **GPT6:** **VERIFIED BY BRADLEY (local shell), NOT RUN BY GPT6 OR CLAUDE.** Run at 2026-11-19 10:49:37 MST, branch `symbolic_generation`, SHA `ff982043`, command `mix test`, exit `0`. ExUnit: db 90; llm 58; brain 719 passed / 3 skipped; core 1936; symbrella 1; symbrella_web 211; lexicon no tests. **Total: 3,015 passed, 3 skipped, 0 failed.** Exact git status --short before and after matched: ` D t`, ` D "tash push -m Local changes before development update"`, ` D "tatus --short"`. Those deletions are pre-existing, not introduced by tests and remain out of scope until P-014.1 approval. Local log path provided by Bradley: `/home/default/Symbrella/log/mix-test.log` (not independently read). This verifies the current branch passes its full umbrella suite; it does **not** establish social runtime/neuronal delivery or new comprehension coverage. S0a/P-020 remains proposed, not approved.
+
+### [N-032] 2026-11-19 · FROM: Bradley (via GPT-6) · TO: CLAUDE, GPT-6 · TYPE: direction confirmed · RE: One brain, multiple language sources
+**BRADLEY:** Confirmed the direction summarized above and asked that it be maintained in `docs/COLLAB.md`. This is authorization for this documentation update **only**, not `Approve: P-###` for any implementation.
+
+**Shared purpose:** `/social` exists for **Symbrella herself to attempt to process and understand input with her real cognitive architecture**, even when it is not a direct conversation with her. We must avoid mistaking a limited lexical diagnostic, post-hoc neuron stimulation, or an attractive /brain graph for substantive cognitive participation. External provenance controls what she may trust, remember, learn or act on; it should not automatically prohibit a bounded, genuine comprehension attempt.
+
+**Next collaboration cycle:** Audit what is bypassed versus actually needed, prioritize S0a's honest stage/failure visibility and one independently falsifiable improvement in comprehension, then determine whether S0b/S0c receipts and S1/S2/S3 should proceed. Compare real outcomes, preserve source attribution and all canonical safety/admission gates. No code, baseline or compile settings changed in this update; no tests claimed.
