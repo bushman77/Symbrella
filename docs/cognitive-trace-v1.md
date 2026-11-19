@@ -151,8 +151,9 @@ allowlisted diagnosis generated from the already-computed SemanticInput:
   `Core.Curiosity.ComprehensionGaps.from_completed_turn/2`
 
 The current curiosity-gap projection conservatively requires degraded
-comprehension, **both** uncertain and unresolved content, matching session
-and user-origin evidence, and a nonempty sentence. Thus an observed turn with
+comprehension, **both** uncertain and unresolved content, session context
+and user-origin evidence, and a nonempty sentence. The downstream caller
+still has to verify that the session identity matches. Thus an observed turn with
 one uncertain term and zero unresolved terms reports
 `:needs_unresolved_content`: this describes an existing review gate, not a
 new question or a reason to promote any lexical interpretation.
