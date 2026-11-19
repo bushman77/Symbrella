@@ -273,6 +273,126 @@ defmodule Core.Response.SymbolicGenerationTest do
     assert attached.response_meta.response_reflection.llm_called? == false
   end
 
+  test "mixed social update follows the revalidated native plan without invented experiences" do
+    alias Core.Response.SemanticStrategy
+
+    for {text, reply, components} <- [
+      {"hey whats new with you?",
+       "Hey! I'm here and ready to talk. What's new with you?",
+       [:greeting, :social_update_query]},
+      {"Hey, what's new with you?",
+       "Hey! I'm here and ready to talk. What's new with you?",
+       [:greeting, :social_update_query]},
+      {"What is new with you?",
+       "I'm here and ready to talk. What's new with you?",
+       [:social_update_query]}
+    ] do
+      si =
+        %{
+          source: :user, sentence: text, text: text,
+          intent: :smalltalk, confidence: 0.4,
+          session_id: "mixed-checkin-#{System.unique_integer([:positive])}",
+          comprehension: %{
+            degraded?: true, understood: [], uncertain: ["new", "hey"],
+            unresolved: [], reasons: [:weak_decision_rate_high]
+          },
+          structural_competition: %{status: :no_complete_candidate},
+          sentence_meaning: %{kind: :unknown, status: :not_yet_interpreted},
+          semantic_choices: [
+            %{id: "new|adjective|1", token_index: 2, score: 0.16}
+          ]
+        }
+        |> SpeechActs.attach()
+
+      assert si.speech_act_frame.components == components
+      assert si.speech_act_frame.lexical_evidence.level == :surface_only
+      assert si.comprehension.degraded?
+      assert si.sentence_meaning.status == :not_yet_interpreted
+
+      assert %{operation: :respond_to_social_act,
+               status: :eligible, realizer: :symbolic_generation,
+               factual_authority?: false} = plan = SemanticStrategy.select(si)
+
+      assert {:ok, ^reply, :symbolic_generation, strategy_reflection} =
+               SemanticStrategy.realize(plan, text,
+                 %{risk_bucket: :low, intent: :smalltalk},
+                 %{action: :answer}, si)
+
+      assert strategy_reflection.social_components == components
+      assert strategy_reflection.semantic_verified? == false
+      assert strategy_reflection.factual_claims? == false
+      assert strategy_reflection.llm_called? == false
+
+      {_tone, actual, meta} = Response.plan(si, %{})
+      assert actual == reply
+      assert meta.response_source == :symbolic_generation
+      assert meta.response_reflection.interpreted_speech_act == :social_update_query
+      assert meta.response_reflection.social_components == components
+      assert meta.response_reflection.provenance == :surface_social_act
+      assert meta.response_reflection.semantic_verified? == false
+      assert meta.response_reflection.factual_claims? == false
+      assert meta.response_reflection.llm_called? == false
+    end
+  end
+
+  test "response attachment preserves mixed-act metadata and initial action" do
+    text = "hey whats new with you?"
+    si =
+      %{
+        source: :user, sentence: text, text: text,
+        intent: :smalltalk, confidence: 0.4,
+        session_id: "social-attach-#{System.unique_integer([:positive])}",
+        selected_action: :answer_user,
+        action_meta: %{selected: :answer_user, safety_gate: :approved},
+        comprehension: %{degraded?: true, uncertain: ["new"], unresolved: [],
+                         understood: [], reasons: [:weak_decision_rate_high]}
+      }
+      |> SpeechActs.attach()
+
+    attached = Core.Response.Attach.maybe_build_response_plan(si, [])
+    assert attached.response_text == "Hey! I'm here and ready to talk. What's new with you?"
+    assert attached.response_meta.response_source == :symbolic_generation
+    assert attached.response_meta.response_reflection.social_components ==
+             [:greeting, :social_update_query]
+    assert attached.decision_lineage.initial_action == :answer_user
+    assert attached.decision_lineage.final_action == :answer_user
+    assert attached.decision_lineage.reconciliation == :unchanged
+    assert attached.comprehension == si.comprehension
+  end
+
+  test "forged, foreign-addressee and unsafe social-update frames cannot produce native replies" do
+    text = "Hey, what's new with you, Jordan?"
+    other = SpeechActs.attach(%{sentence: text})
+
+    assert other.speech_act_frame.addressee == :other
+    assert :not_applicable =
+             SymbolicGeneration.generate(text,
+               %{risk_bucket: :low, intent: :smalltalk},
+               %{action: :answer}, other)
+
+    own_text = "hey whats new with you?"
+    si = SpeechActs.attach(%{sentence: own_text})
+    forged = put_in(si.speech_act_frame.components, [:greeting])
+    stale = %{si | sentence: "hey please explain the code?"}
+
+    for input <- [forged, stale] do
+      assert :not_applicable =
+               SymbolicGeneration.generate(own_text,
+                 %{risk_bucket: :low, intent: :smalltalk},
+                 %{action: :answer}, input)
+    end
+
+    assert :not_applicable =
+             SymbolicGeneration.generate(own_text,
+               %{risk_bucket: :high, intent: :smalltalk},
+               %{action: :answer}, si)
+
+    assert :not_applicable =
+             SymbolicGeneration.generate(own_text,
+               %{risk_bucket: :low, intent: :smalltalk},
+               %{action: :suppress}, si)
+  end
+
   test "wellbeing questions to other people never produce Symbrella's check-in" do
     sentence = "How are you today, Bradley?"
 
