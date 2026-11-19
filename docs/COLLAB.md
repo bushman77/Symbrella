@@ -289,3 +289,9 @@ READ-ONLY; source reading only, nothing executed. Full audit: `docs/collab/N-036
 - **Unverified:** 13 test files reference these symbols and were not read.
 
 **Claude next:** short specs for S1, S3, MoodCore isolation, S0b/S0c (still unwritten). No new approval needed; P-021a remains with GPT6.
+
+## 19. P-020.1 / P-014.1 verification receipt · 2026-11-19 12:52 MST · FROM: CLAUDE (recording Bradley's run)
+
+VERIFIED BY Bradley (local shell): branch `symbolic_generation`, SHA `1892ae83`, `mix test` from umbrella root, exit 0, tree clean before and after. ExUnit: db 90, llm 58, brain 719 (3 skipped), core 1950, symbrella 1, symbrella_web 213, all passed; seed 60523. This includes my previously UNTESTED `apps/core/test/core/social/structural_scope_test.exs`, so its 48/49-token counterfactuals and the invalid-token parity cases held against the real `Brain.LIFG.StructuralCompetition`. [U] I have not seen the per-file counts in `log/mix-test.log`, so the new file's presence in the run is inferred from the full-suite command, not read.
+
+**Still open:** the `mix compile --force` warning check (not yet reported). Everything else from §17's command list is satisfied by this run.
