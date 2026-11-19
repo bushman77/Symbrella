@@ -142,7 +142,7 @@ defmodule Core.Semantic.SpeechActs do
     is_binary(id) and String.starts_with?(id, norm <> "|interjection|") and
       is_binary(definition) and
       Regex.match?(
-        ~r/\A\s*(?:(?:an?|the)\s+)?(?:(?:informal|formal|casual|colloquial|friendly|polite)\s+)?(?:greeting|salutation)\s*[.!]?\s*\z/iu,
+        ~r/\A\s*(?:\([^()]*\)\s*)*(?:(?:an?|the)\s+)?(?:(?:informal|formal|casual|colloquial|friendly|polite)\s+)?(?:greeting|salutation)\s*[.!]?\s*\z/iu,
         definition
       )
   end

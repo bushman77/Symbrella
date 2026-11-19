@@ -25,6 +25,44 @@ defmodule Core.Response.SymbolicGenerationTest do
     :ok
   end
 
+  test "P-013 tagged howdy gloss is revalidated before symbolic reply" do
+    cell = %{
+      id: "howdy|interjection|1",
+      norm: "howdy",
+      pos: "interjection",
+      definition: "(us, informal, regional) An informal greeting."
+    }
+
+    lookup = fn
+      "howdy" -> [cell]
+      _ -> []
+    end
+
+    si =
+      %{
+        sentence: "howdy!",
+        text: "howdy!",
+        intent: :greet,
+        semantic_choices: [],
+        lifg_choices: []
+      }
+      |> SpeechActs.attach(greeting_lookup: lookup)
+
+    assert {:ok, "Hello.", meta} =
+             SymbolicGeneration.generate(
+               "howdy!",
+               %{risk_bucket: :low, intent: :greet},
+               %{action: :answer},
+               si,
+               greeting_lookup: lookup
+             )
+
+    assert meta.provenance == :dictionary_greeting_gloss
+    assert meta.lexical_witness.id == cell.id
+    refute meta.semantic_verified?
+    refute meta.llm_called?
+  end
+
   test "P-013 dictionary-backed howdy is realized only with revalidated evidence" do
     cell = %{id: "howdy|interjection|1", norm: "howdy", pos: "interjection",
       definition: "An informal greeting."}

@@ -6,6 +6,69 @@ defmodule Core.Semantic.SpeechActsTest do
   @hello %{id: "hello|interjection|1", token_index: 0,
            pos: :interjection, score: 0.1619, source: :active_cells}
 
+  test "P-013 tagged dictionary glosses license direct greetings" do
+    for definition <- [
+          "An informal greeting.",
+          "(us, informal, regional) An informal greeting.",
+          "(us) (informal) A salutation."
+        ] do
+      cell = %{
+        id: "howdy|interjection|1",
+        norm: "howdy",
+        pos: "interjection",
+        definition: definition
+      }
+
+      lookup = fn
+        "howdy" -> [cell]
+        _ -> []
+      end
+
+      assert {:ok, frame} =
+               SpeechActs.from_si(
+                 %{sentence: "howdy!"},
+                 greeting_lookup: lookup
+               )
+
+      assert frame.speech_act == :greeting
+      assert frame.lexical_evidence.level ==
+               :dictionary_interjection_greeting
+      assert frame.lexical_evidence.witness.id == cell.id
+      refute frame.sentence_meaning_verified?
+    end
+  end
+
+  test "P-013 tagged non-greeting interjections remain rejected" do
+    examples = [
+      {"aloha", "(Hawaii) A greeting or farewell."},
+      {"shalom", "(Hebrew) A greeting or farewell."},
+      {"sharp-sharp", "(South Africa) A greeting or farewell."},
+      {"how", "(historical) Used in representations of Native American speech."},
+      {"wotcha", "(colloquial) Alternative form of watcha."},
+      {"hiyah", "(informal) Alternative form of hi."}
+    ]
+
+    for {word, definition} <- examples do
+      cell = %{
+        id: "#{word}|interjection|2",
+        norm: word,
+        pos: "interjection",
+        definition: definition
+      }
+
+      lookup = fn
+        ^word -> [cell]
+        _ -> []
+      end
+
+      assert :not_applicable =
+               SpeechActs.from_si(
+                 %{sentence: word <> "!"},
+                 greeting_lookup: lookup
+               )
+    end
+  end
+
   test "P-013 dictionary attestation licenses a bare greeting, not a new sense" do
     cells = [
       %{id: "howdy|noun|1", norm: "howdy", pos: "noun",
