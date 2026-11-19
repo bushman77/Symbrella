@@ -177,6 +177,44 @@ feedback behavior is left untouched. A degraded summary reports evidence
 quality, not a failed execution span or proof that no structural interpretation
 exists.
 
+### P-008: Mixed social check-in interpretation (provisional)
+
+`Core.Semantic.SpeechActs` now recognizes a tightly bounded full-utterance
+social-update question such as `What's new with you?` and the two-part
+`hey whats new with you?` / `Hey, what's new with you?`.
+The parser records `:social_update_query` and a typed, ordered component
+sequence `[:greeting, :social_update_query]` for the compound case, or
+`[:social_update_query]` for a standalone question. The question mark and
+complete phrase are required. Quoted, reported, elaborated, non-question,
+instruction-bearing, and other-directed examples do not authorize a
+personal response.
+
+This is a **surface-only, provisional speech-act interpretation**. It does
+not change the original LIFG winners, ATP/ATL evidence, sentence signatures,
+structural competition, sentence meaning or degraded-comprehension flags.
+A mixed social turn may therefore still show
+`no_complete_candidate`, `not_yet_interpreted` and weak lexical evidence,
+while also having a verified *surface grammar match* for its conversational
+function. The two observations answer different questions.
+
+`Core.Response.SemanticStrategy` and `Core.Response.SymbolicGeneration`
+reuse the existing exact same-turn recomputation guard to realize a
+low-risk, limited response for a matched check-in, without fabricating
+offline personal experiences or claiming to have verified a dictionary
+sense. Existing response risk, action, addressee and permissions gates
+remain in force; neither a high-risk context nor a foreign addressee
+can authorize the social reply.
+
+The Phase 6 `:speech_act_binding` trace records the allowlisted act and
+ordered component atoms only. `CognitiveTraceStore` independently rejects
+unrecognized component combinations. It does not store the user's input,
+reply, lexical choices or quoted text. The Turn trace timeline renders
+`social components: greeting + social_update_query` when it is actually
+observed for the selected turn.
+
+No existing substantive grammar is generalized; unsupported requests
+continue to abstain rather than gaining fabricated semantic proof.
+
 This is **not** a distributed tracer. Internally spawned, uninstrumented
 processes are not automatically included. The dashboard never attributes
 a Telemetry or Bus receipt to a chat turn without a matching turn-scoped span.
@@ -187,6 +225,8 @@ From the umbrella root:
 
 ```sh
 mix test apps/core/test/core/cognitive_trace_test.exs \
+  apps/core/test/core/semantic/speech_acts_test.exs \
+  apps/core/test/core/response/symbolic_generation_test.exs \
   apps/core/test/core/comprehension/diagnosis_test.exs \
   apps/core/test/core/comprehension/summary_test.exs \
   apps/core/test/core/brain/action_selection_test.exs \
