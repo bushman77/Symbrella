@@ -111,13 +111,15 @@ defmodule SymbrellaWeb.SocialEvaluation do
 
     next =
       Enum.reduce(
-        [{"expected", @expected}, {"family", @families}, {"review", @reviews}],
+        [{"expected", :expected, @expected},
+         {"family", :family, @families},
+         {"review", :review, @reviews}],
         prior,
-        fn {field, allowed}, acc ->
+        fn {field, key, allowed}, acc ->
           case Map.get(params, field) do
             value when is_binary(value) ->
               case Map.fetch(allowed, value) do
-                {:ok, parsed} -> Map.put(acc, String.to_existing_atom(field), parsed)
+                {:ok, parsed} -> Map.put(acc, key, parsed)
                 :error -> acc
               end
 
@@ -229,13 +231,7 @@ defmodule SymbrellaWeb.SocialEvaluation do
               @meaning_statuses
             ),
             reason_codes:
-              segment
-              |> get_in([:result, :comprehension, :reasons])
-              |> case do
-                reasons when is_list(reasons) ->
-                  reasons |> Enum.filter(&(&1 in @degradation_reasons)) |> Enum.uniq()
-                _ -> []
-              end
+              allowed_reasons(get_in(segment, [:result, :comprehension, :reasons]))
           }
 
           {[item | items], MapSet.put(seen, id), duplicates}
@@ -246,6 +242,15 @@ defmodule SymbrellaWeb.SocialEvaluation do
   end
 
   defp build_items(_), do: {[], 0}
+
+  defp allowed_reasons(reasons) when is_list(reasons) do
+    reasons
+    |> Enum.filter(&(&1 in @degradation_reasons))
+    |> Enum.uniq()
+    |> Enum.take(4)
+  end
+
+  defp allowed_reasons(_), do: []
 
   defp observed(%{
          status: :analyzed,
@@ -314,11 +319,15 @@ defmodule SymbrellaWeb.SocialEvaluation do
           do: Map.update!(acc, :infrastructure_failures, &(&1 + 1)),
           else: acc
 
-      case label.review do
-        :correct -> Map.update!(acc, :human_correct, &(&1 + 1))
-        :incorrect -> Map.update!(acc, :human_incorrect, &(&1 + 1))
-        :uncertain -> Map.update!(acc, :human_uncertain, &(&1 + 1))
-        _ -> acc
+      if label.expected in [:interpret, :abstain, :needs_context] do
+        case label.review do
+          :correct -> Map.update!(acc, :human_correct, &(&1 + 1))
+          :incorrect -> Map.update!(acc, :human_incorrect, &(&1 + 1))
+          :uncertain -> Map.update!(acc, :human_uncertain, &(&1 + 1))
+          _ -> acc
+        end
+      else
+        acc
       end
     end)
   end
