@@ -35,8 +35,8 @@ defmodule Core.Comprehension.Diagnosis do
 
     stats = Map.get(summary, :stats)
     stats = if is_map(stats), do: stats, else: %{}
-    feedback = Map.get(si, :lifg_feedback)
-    feedback = if is_map(feedback), do: feedback, else: %{}
+    reported_feedback = Map.get(si, :lifg_feedback)
+    feedback = if is_map(reported_feedback), do: reported_feedback, else: %{}
 
     degraded? = Map.get(summary, :degraded?) == true
 
@@ -55,7 +55,7 @@ defmodule Core.Comprehension.Diagnosis do
         observed_status(Map.get(si, :integration_audit), @audit_statuses),
       feedback_mode: observed_status(feedback, @feedback_modes, :mode),
       feedback_applied:
-        if(is_map(Map.get(si, :lifg_feedback)),
+        if(is_map(reported_feedback) and Map.has_key?(feedback, :applied?),
           do: Map.get(feedback, :applied?) == true, else: :not_observed),
       repair_hint: repair_hint(degraded?, reasons),
       curiosity_gap_gate: gap_gate(si, summary, degraded?)
