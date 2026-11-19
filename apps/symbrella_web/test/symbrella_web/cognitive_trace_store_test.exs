@@ -31,6 +31,40 @@ defmodule SymbrellaWeb.CognitiveTraceStoreTest do
     assert unchanged2 == c
   end
 
+  test "mixed social check-ins retain only a bounded, ordered act pair" do
+    raw = %{
+      speech_act: :social_update_query,
+      social_components: [:greeting, :social_update_query],
+      source_text: "PRIVATE INPUT", chosen_id: "PRIVATE SENSE",
+      sentence_meaning_verified?: true
+    }
+
+    {_, traced} = record(state(), "turn-f008ee", :speech_act_binding, :ok, 100, raw)
+    [event] = traced.events
+    assert event.evidence ==
+             %{speech_act: :social_update_query,
+               social_components: [:greeting, :social_update_query]}
+    refute inspect(event) =~ "PRIVATE"
+
+    {_, single} = record(state(), "turn-f008ef", :speech_act_binding, :ok, 100,
+      %{speech_act: :social_update_query,
+        social_components: [:social_update_query]})
+    assert hd(single.events).evidence.social_components == [:social_update_query]
+
+    for bad <- [
+      %{speech_act: :social_update_query,
+        social_components: [:greeting, :unknown_request], source_text: "PRIVATE"},
+      %{speech_act: :social_update_query,
+        social_components: [:greeting, :social_update_query, :unsafe]},
+      %{speech_act: :unknown_act,
+        social_components: [:greeting, :social_update_query]}
+    ] do
+      {_, rejected} =
+        record(state(), "turn-f008a1", :speech_act_binding, :ok, 100, bad)
+      assert hd(rejected.events).evidence == %{}
+    end
+  end
+
   test "degraded summaries are retained without user text or arbitrary metadata" do
     extra = %{degraded: true, understood: 0, uncertain: 3,
               unresolved: 1, user_text: "secret", token: "private"}
