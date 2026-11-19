@@ -295,3 +295,96 @@ READ-ONLY; source reading only, nothing executed. Full audit: `docs/collab/N-036
 VERIFIED BY Bradley (local shell): branch `symbolic_generation`, SHA `1892ae83`, `mix test` from umbrella root, exit 0, tree clean before and after. ExUnit: db 90, llm 58, brain 719 (3 skipped), core 1950, symbrella 1, symbrella_web 213, all passed; seed 60523. This includes my previously UNTESTED `apps/core/test/core/social/structural_scope_test.exs`, so its 48/49-token counterfactuals and the invalid-token parity cases held against the real `Brain.LIFG.StructuralCompetition`. [U] I have not seen the per-file counts in `log/mix-test.log`, so the new file's presence in the run is inferred from the full-suite command, not read.
 
 **Compile check, VERIFIED BY Bradley 12:55 MST:** `set -o pipefail; mix compile --force 2>&1 | tee log/compile-force.log; echo "exit=$?"` → exit=0. All seven apps recompiled (lexicon 1, db 43, llm 21, brain 182, core 306, symbrella 3, symbrella_web 84 files) with no warning lines in the pasted output. The pasted output was the log as relayed by Bradley, not read from `log/compile-force.log` by me. Everything in §17's command list is now satisfied. Per-test names for `structural_scope_test.exs` are still not shown in any log (`--trace` would show them); this is optional.
+
+
+## 20. P-021a implementation handoff · 2026-11-19 · FROM: GPT-6 · TO: Claude, Bradley
+
+**Authorization:** Bradley assigned GPT-6 P-021a in §17, with exactly the five code/test paths in N-035 §3.7. **IMPLEMENTED but UNTESTED by GPT-6.** Commit `ee4ca2a1a873a05e744711293dac62ef75b6216b` on `symbolic_generation`. A reviewed diff confirms exactly two new Core.Syntax modules, one modified Core.Syntax.Signatures module and two new tests. **No Brain, Composition, SentenceMeaning, ColonyCognition, model prompt, chat pipeline, prior test/fixture or baseline changed.** This COLLAB update is a separate **documentation-only** commit expressly requested as the handoff; it is not an extra production FileScope change.
+
+### What was built [V: source inspected, not executed]
+
+- `Core.Syntax.Grammar` is a closed, data-backed rule inventory and function-word tables. Rules: nominal head; adjective/noun modifiers; bare, determiner, quantifier, pronoun, proper-noun and independently witnessed possessive subjects; PP over a nominal/pronoun; subject-vs-predicate PP attachment; copula + attested adjective/past participle complement; optional VP PP/adverb; full-span subject+VP predication. One signature ID only: `:copular_predication`.
+- `Core.Syntax.Chart` is pure bottom-up span combination with fixed role keys and stable sort/dedup. Each source-aligned, fully covered hypothesis carries only grammatical roles, permitted POS features, tense/polarity/lexical-witness evidence and `factual_authority?: false`. Adjective plus participle attestation yields **one** complement candidate carrying both evidence atoms, not a fabricated passive event. A `by` PP remains `:by_phrase_adjunct_uninterpreted`, never `:agent`.
+- `Signatures.detect/1` retains the original expression and return order for **every non-`:colony_external`** source; only Colony receives appended chart signatures. A `@doc false chart_nodes/1` accessor exposes the existing lexical node builder; chart recomputation is deterministic from the current SI. The existing `Brain.LIFG.StructuralCompetition.resolve/1` remains the sole preference gate and is **not modified**.
+- Guard conditions reject unsupported negation, modals, inversions, embedded instruction-shaped/multiple clauses, malformed source index/gaps, unconstrained proper-noun number, missing morphology, agreement mismatch and unsupported PP depth. Deeper attachment combinations that cannot be represented with fixed, distinguishing role keys fail closed rather than collapsing candidates.
+- Budgets: **48 base tokens**, **6 items per span**, **400 items total**, **12 full-span results**. Any exceeded cap returns no signature (`:chart_budget_exceeded`) rather than a truncated candidate. Tests lower per-span/total/result caps to exercise the exact same fail-closed path and check the 48/49-token boundary. Because full-span items are also bounded at 6 per span, the 12-result cap is a redundant defensive ceiling under the current grammar. No dynamic atoms are generated from input text.
+
+**Divergences and corrections to N-035, deliberately conservative:** (1) `NP -> Det? Q?` is split into fixed determiner/quantifier alternatives; simultaneous Det+Quantifier is not admitted in P-021a. (2) Added the general `Det + witnessed PossessiveNP` combination to avoid losing the initial determiner of “The agent's site.” (3) Number `:unknown` **abstains**, rather than licensing singular or plural copula, until evidence for that case exists. (4) We sort by stable role/structure keys rather than speculative fewer-constituent preference; budget overflow aborts the entire chart, so sorting cannot select a preferred truncated parse. (5) PP nesting is deliberately restricted to one representable level and two adjuncts rather than adding dynamic role names. (6) Grammar reconstructs PP objects from chart NPs/pronouns and reuses existing possessive signatures; it does not replace old NP/PP detectors. All these decisions are testable, conservative and intended to prevent unsupported promotions.
+
+### Visible DEV rows: expected versus **actual**
+
+**Important:** These are the 36 *published development corpus* rows (not the sealed set). The “expected” column describes **P-021a grammatical L1**, not future P-021b's SUP/SUP+q semantic output. The `chart_dev_corpus_test.exs` uses fixed **synthetic attested POS/morphology rows**, so it does **not** prove live LTM coverage. **Actual is UNTESTED for every row because GPT-6 has no Elixir/Mix runtime.** No assertion about a passing DEV row has been made.
+
+| ID | DEV expected grammatical result | Actual at handoff | Rationale / expected blocker |
+| --- | --- | --- | --- |
+| D01 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Minimal NP + is + adjective. |
+| D02 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Plural attested on "pages"; agrees with "are". |
+| D03 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Past copula recorded, no event asserted. |
+| D04 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Demonstrative determiner. |
+| D05 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Subject NP complete before copula. |
+| D06 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Needs NP rule beyond today's six windows (`signatures.ex:13-22` has no D-N-N). |
+| D07 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Do not invent an event or agent. |
+| D08 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | A `by` phrase is not an agent without evidence. |
+| D09 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | PP with nested NP; nested NP is not a sibling tile. |
+| D10 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Reuse existing possessive NP evidence. |
+| D11 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Possessive subject plus adjunct. |
+| D12 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Quantifier is recorded, never evaluated. |
+| D13 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Same. |
+| D14 | L1 full-span hypothesis (semantic support deferred to P-021b) | **UNTESTED** | Optional modifier at clause end. |
+| D15 | no L1 / ABSTAIN(coverage_gap) | **UNTESTED** | Extension target (`VP -> Cop Adv? Comp`). Must come from a rule row, not a new detector. |
+| D16 | no L1 / ABSTAIN(negation) | **UNTESTED** | Must never yield a positive proposition. |
+| D17 | no L1 / ABSTAIN(negation) | **UNTESTED** | Contraction contains negation. |
+| D18 | no L1 / ABSTAIN(modal) | **UNTESTED** | Non-finite copula after a modal. |
+| D19 | no L1 / ABSTAIN(modal) | **UNTESTED** | Same. |
+| D20 | no L1 / ABSTAIN(interrogative) | **UNTESTED** | Copula precedes subject. |
+| D21 | no L1 / ABSTAIN(interrogative) | **UNTESTED** | Inversion. |
+| D22 | no L1 / ABSTAIN(agreement_conflict) | **UNTESTED** | Plural attested head with singular copula. |
+| D23 | no L1 / ABSTAIN(agreement_conflict) | **UNTESTED** | Singular head with plural copula. |
+| D24 | no L1 / ABSTAIN(lexical_witness_missing) | **UNTESTED** | Unattested subject head. |
+| D25 | no L1 / ABSTAIN(lexical_witness_missing) | **UNTESTED** | Unattested complement. |
+| D26 | no L1 / ABSTAIN(lexical_witness_missing) | **UNTESTED** | A fine PP must not rescue a missing witness. |
+| D27 | no L1 / ABSTAIN(coverage_gap) | **UNTESTED** | Exact token coverage required. |
+| D28 | no L1 / ABSTAIN(coverage_gap) | **UNTESTED** | Trailing NP has no attachment. |
+| D29 | no L1 / ABSTAIN(no_clause_core) | **UNTESTED** | No copula. |
+| D30 | no L1 / ABSTAIN(instruction_shaped) | **UNTESTED** | Output must contain no action-capable field. |
+| D31 | no L1 / ABSTAIN(instruction_shaped) | **UNTESTED** | Instruction-shaped external text. |
+| D32 | no L1 / ABSTAIN(multiple_clauses) | **UNTESTED** | No clause segmentation in P-021a; the injected clause must not surface. |
+| D33 | no L1 / ABSTAIN(multiple_clauses) | **UNTESTED** | Same. |
+| D34 | no L1 / ABSTAIN(structured_record) | **UNTESTED** | Not declarative grammar. |
+| D35 | no L1 / ABSTAIN(structured_record) | **UNTESTED** | URL is not a noun phrase. |
+| D36 | no L1 / ABSTAIN(lexical_witness_missing) | **UNTESTED** | A hex address is not an attested adjective or participle. |
+
+### Tests added (unrun)
+
+- `apps/core/test/core/syntax/chart_test.exs`: exact full-span roles, direct unchanged Brain adjudication, fixed grammar/POS witnesses, adjective+participle merge, conservative by-phrase, non-Colony differential with fixed existing-test sentences, repeat-run equality, missing lexical/morphology abstention, negation/modal/inversion/embedded instruction refusals, agreement, budget boundaries and lowered caps, ambiguous attachment surviving in different role keys and yielding Brain `:unresolved`, and no new atoms from untrusted token content. The chat differential is **same-runtime source comparison plus static isolation of the unchanged original detector**, not a separately executed historical `55d4823d` artifact.
+- `apps/core/test/core/syntax/chart_dev_corpus_test.exs`: parses all 36 DEV rows into individual tests and asserts P-021a L1 candidate or closed abstention with no action-capable/agent fields. Failure text identifies row, expected and actual reason.
+
+**Known gaps / [U]:** no Elixir syntax check, no local ExUnit, no runtime per-row results, no actual Colony LTM POS validation, no sealed partition, and no proof of improved sentence meaning (P-021b is untouched). Broad LTM ambiguity can saturate a 6-item span and correctly force abstention. Brain examines only its first 64 detected signatures; a chart signature appended after a very large legacy signature list may remain unseen, requiring a **separate scoped decision** rather than silently reordering chat outputs. P-021a can yield a grammatical hypothesis that Composition correctly refuses to turn into meaning. Further attachment depth, noun phrase types and ungrounded singular/plural forms are intentionally outside this first rule inventory.
+
+### Verification commands for Bradley (umbrella root; all UNTESTED by GPT-6)
+
+~~~bash
+cd ~/Symbrella
+git fetch origin
+git pull --ff-only origin symbolic_generation
+git branch --show-current
+git rev-parse HEAD
+git status --short
+
+mix test apps/core/test/core/syntax/chart_test.exs apps/core/test/core/syntax/chart_dev_corpus_test.exs
+echo "p021a_target_exit=$?"
+
+mix test apps/core/test/core/syntax/signatures_test.exs apps/core/test/core/syntax/structural_competition_test.exs
+echo "p021a_existing_syntax_exit=$?"
+
+mix test
+echo "p021a_umbrella_exit=$?"
+
+set -o pipefail
+mix compile --force 2>&1 | tee log/compile-force.log
+echo "p021a_compile_exit=$?"
+
+git status --short
+~~~
+
+**Please send any exact failure output before sealed evaluation.** Claude should **review this patch READ-ONLY first**: especially rule-table generality, ELIXIR compile/test constructs, full-span/role ambiguity, budgets and legacy-source byte equality. Bradley then runs local targeted/full tests and separately controls sealed testing (at most twice, counts only). No sealed data was read, requested, or inferred by GPT-6.
