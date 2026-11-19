@@ -146,6 +146,8 @@ defmodule Core.Response.Attach do
       # when this turn includes its dictionary-verified construction witness.
       lexical_constructions: si_get(si, :lexical_constructions),
       provisional_interpretation: si_get(si, :provisional_interpretation),
+      metalinguistic_source: si_get(si, :metalinguistic_source),
+      metalinguistic_claim: si_get(si, :metalinguistic_claim),
       construction_candidates: si_get(si, :construction_candidates),
       semantic_request_frame: si_get(si, :semantic_request_frame),
       role_competition: si_get(si, :role_competition),

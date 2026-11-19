@@ -10,6 +10,7 @@ defmodule Core.Discourse.Ledger.Owner do
   use GenServer
 
   alias Core.Semantic.FinitePastDiscourse
+  alias Core.Semantic.MetalinguisticClaim
 
   @table :core_discourse_ledger
   @default_keep 4096
@@ -47,6 +48,16 @@ defmodule Core.Discourse.Ledger.Owner do
   def append_verified_finite_past(_, _, _, _),
     do: {:error, :invalid_finite_past_evidence}
 
+  @spec append_verified_metalinguistic(String.t(), map(), map(), integer()) ::
+          {:ok, pos_integer()} | {:error, atom()}
+  def append_verified_metalinguistic(session, si, candidate, now_ms)
+      when is_binary(session) and is_map(si) and is_map(candidate) and is_integer(now_ms) do
+    GenServer.call(__MODULE__,
+      {:append_verified_metalinguistic, session, si, candidate, now_ms})
+  end
+  def append_verified_metalinguistic(_, _, _, _),
+    do: {:error, :invalid_metalinguistic_evidence}
+
   @spec entries(String.t()) :: [map()]
   def entries(session) when is_binary(session) do
     case :ets.lookup(@table, session) do
@@ -69,6 +80,14 @@ defmodule Core.Discourse.Ledger.Owner do
                   _from, state),
     do: {:reply, {:error, :verified_finite_past_required}, state}
 
+  def handle_call({:append, _session, %{kind: :metalinguistic_claim}},
+                  _from, state),
+    do: {:reply, {:error, :verified_metalinguistic_required}, state}
+
+  def handle_call({:append, _session, %{kind: :uninterpreted, source_term: _}},
+                  _from, state),
+    do: {:reply, {:error, :verified_metalinguistic_required}, state}
+
   def handle_call({:append, session, record}, _from, state)
       when is_binary(session) and is_map(record) do
     persist(session, record, state)
@@ -90,6 +109,43 @@ defmodule Core.Discourse.Ledger.Owner do
       {:ok, ^candidate} -> persist(session, candidate, state)
       _ -> {:reply, {:error, :invalid_finite_past_evidence}, state}
     end
+  end
+
+  def handle_call({:append_verified_metalinguistic, session, si, candidate, now_ms},
+                  _from, state) do
+    same_session? =
+      is_binary(session) and byte_size(session) in 1..128 and
+        Map.get(si, :session_id) == session and
+        Map.get(si, :source) in [:user, :prod, :test]
+
+    valid? =
+      if same_session? do
+        case candidate do
+          %{kind: :uninterpreted, source_term: _} ->
+            MetalinguisticClaim.isolated_marker(si, now_ms) == candidate
+
+          %{kind: :metalinguistic_claim, source_seq: seq} ->
+            source = Map.get(si, :metalinguistic_source)
+            latest =
+              case :ets.lookup(@table, session) do
+                [{^session, _last_seq, [head | _]}] -> head
+                _ -> nil
+              end
+
+            is_map(latest) and is_map(source) and
+              Map.take(latest, MetalinguisticClaim.source_fields()) == source and
+              MetalinguisticClaim.valid_source?(source, now_ms) and
+              seq == latest.seq and
+              MetalinguisticClaim.verified(si) == {:ok, candidate}
+
+          _ -> false
+        end
+      else
+        false
+      end
+
+    if valid?, do: persist(session, candidate, state),
+      else: {:reply, {:error, :invalid_metalinguistic_evidence}, state}
   end
 
   def handle_call({:clear, session}, _from, state) do

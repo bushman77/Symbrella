@@ -13,6 +13,7 @@ defmodule Core.Response.AttentionFallback do
   alias Core.Response.LexicalDefinition
   alias Core.Semantic.TemporalSentence
   alias Core.Semantic.ProvisionalInterpretation
+  alias Core.Semantic.MetalinguisticClaim
   alias Core.Text.Fuzzy
 
   @max_terms 2
@@ -46,7 +47,11 @@ defmodule Core.Response.AttentionFallback do
       report =
         case confirm_pending_fuzzy(session, text, context, salience) do
           {:ok, _, _} = confirmation -> confirmation
-          :not_applicable -> comprehension_report(text, si, context, goal_terms, salience)
+          :not_applicable ->
+            case acknowledge_classification(session, text, si, context, salience) do
+              {:ok, _, _} = reply -> reply
+              :not_applicable -> comprehension_report(text, si, context, goal_terms, salience)
+            end
         end
 
       case report do
@@ -115,6 +120,32 @@ defmodule Core.Response.AttentionFallback do
         dictionary_learned?: false,
         llm_called?: false
       }}
+    else
+      _ -> :not_applicable
+    end
+  end
+
+  # Speaker-attributed only. The ledger must still hold the same immediate
+  # antecedent; a copied or fabricated SI frame cannot authorize a reply.
+  defp acknowledge_classification(session, text, si, context, salience) do
+    with true <- current_turn?(text, context),
+         {:ok, %{kind: :metalinguistic_claim,
+                 source_term: term, class_term: class,
+                 factual_authority?: false}} <- MetalinguisticClaim.verified(si),
+         true <- Ledger.valid_metalinguistic_source?(
+           session, Map.get(si, :metalinguistic_source)) do
+      {:ok,
+       ~s|I understand you're saying that "#{term}" is a "#{class}". I haven't independently verified that classification.|,
+       %{
+         status: :metalinguistic_classification_acknowledged,
+         provenance: :revalidated_immediate_same_session_lexeme,
+         evidence_level: :speaker_claimed,
+         attention_salience: salience,
+         semantic_verified?: false,
+         factual_claims?: false,
+         dictionary_learned?: false,
+         llm_called?: false
+       }}
     else
       _ -> :not_applicable
     end

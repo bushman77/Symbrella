@@ -28,10 +28,13 @@ defmodule Core.Discourse.Ledger do
   alias Core.Semantic.ProvisionalInterpretation
   alias Core.Semantic.ParticipantQuestions
   alias Core.Semantic.FinitePastDiscourse
+  alias Core.Semantic.MetalinguisticClaim
 
   @fuzzy_confirmation_window_ms 5 * 60 * 1_000
 
   @max_query_bytes 256
+  # Privacy exception P-013.2: one <=40-byte isolated lexeme plus SHA-256, only
+  # with explicit opt-in. Markers remain in bounded, non-durable session ETS.
   @max_public_candidates 5
   @max_clarified_followup_questions 3
 
@@ -45,7 +48,7 @@ defmodule Core.Discourse.Ledger do
     if enabled?(opts) and valid_session?(session) and
          Map.get(si, :source) in [:user, :prod, :test] and
          is_binary(sentence) and sentence != "" do
-      payload = semantic_record(si, opts)
+      payload = metalinguistic_record(si, opts)
       case owner_append(session, payload, si, opts) do
         {:ok, sequence} ->
           Trace.append(si, :discourse_ledger,
@@ -61,6 +64,22 @@ defmodule Core.Discourse.Ledger do
     end
   end
   def record(si, _), do: si
+
+  @doc "A current same-session word marker; never search older records."
+  def metalinguistic_source(session, now_ms \\ System.system_time(:millisecond)) do
+    case entries(session) do
+      [latest | _] when is_map(latest) ->
+        source = Map.take(latest, MetalinguisticClaim.source_fields())
+        if MetalinguisticClaim.valid_source?(source, now_ms), do: source, else: nil
+      _ -> nil
+    end
+  end
+
+  @doc "Replay a marker against the exact current session head and freshness."
+  def valid_metalinguistic_source?(session, source) when is_map(source) do
+    metalinguistic_source(session) == source
+  end
+  def valid_metalinguistic_source?(_, _), do: false
 
   @doc "Return retained records, newest first, within exactly this session."
   @spec entries(term()) :: [map()]
@@ -388,6 +407,17 @@ defmodule Core.Discourse.Ledger do
   def recall(si, opts \\ [])
   def recall(%{} = si, opts) when is_list(opts) do
     if enabled?(opts) do
+      si =
+        if Keyword.get(opts, :metalinguistic_claims?, false) == true do
+          now_ms = Keyword.get(opts, :metalinguistic_now_ms, System.system_time(:millisecond))
+          case metalinguistic_source(Map.get(si, :session_id), now_ms) do
+            %{} = marker -> Map.put(si, :metalinguistic_source, marker)
+            _ -> si
+          end
+        else
+          si
+        end
+
       case resolve(Map.get(si, :session_id), Map.get(si, :sentence)) do
         {:ok, candidate} ->
           Map.put(si, :discourse_context, %{
@@ -444,6 +474,30 @@ defmodule Core.Discourse.Ledger do
   def clear(session) do
     if valid_session?(session) and is_pid(Process.whereis(Owner)),
       do: Owner.clear(session), else: :ok
+  end
+
+  # The feature is disabled unless explicitly opted in on the Core call.
+  # A normal uninterpreted turn remains unchanged when no isolated fragment
+  # has been independently replay-verified.
+  defp metalinguistic_record(si, opts) do
+    if Keyword.get(opts, :metalinguistic_claims?, false) == true do
+      case MetalinguisticClaim.verified(si) do
+        {:ok, claim} ->
+          claim
+        _ ->
+          ordinary = semantic_record(si, opts)
+          now_ms = Keyword.get(opts, :metalinguistic_now_ms,
+            System.system_time(:millisecond))
+
+          if ordinary.kind == :uninterpreted do
+            MetalinguisticClaim.isolated_marker(si, now_ms) || ordinary
+          else
+            ordinary
+          end
+      end
+    else
+      semantic_record(si, opts)
+    end
   end
 
   defp semantic_record(si, opts) do
@@ -1118,6 +1172,24 @@ defmodule Core.Discourse.Ledger do
   # Finite-past records require a *second* proof revalidation at the ETS
   # owner's admission boundary. Raw Owner.append/2 refuses this record kind.
   # Other existing Ledger kinds retain their previous admission behavior.
+  defp owner_append(session,
+         %{kind: :metalinguistic_claim} = payload, si, opts) do
+    now_ms = Keyword.get(opts, :metalinguistic_now_ms,
+      System.system_time(:millisecond))
+    if is_pid(Process.whereis(Owner)),
+      do: Owner.append_verified_metalinguistic(session, si, payload, now_ms),
+      else: {:error, :unavailable}
+  end
+
+  defp owner_append(session,
+         %{kind: :uninterpreted, source_term: _} = payload, si, opts) do
+    now_ms = Keyword.get(opts, :metalinguistic_now_ms,
+      System.system_time(:millisecond))
+    if is_pid(Process.whereis(Owner)),
+      do: Owner.append_verified_metalinguistic(session, si, payload, now_ms),
+      else: {:error, :unavailable}
+  end
+
   defp owner_append(session,
          %{kind: :reported_finite_past_locative_candidate} = payload, si, opts) do
     lookup = Keyword.get(opts, :finite_past_lemma_lookup, &Db.brain_cells_for_norm/1)

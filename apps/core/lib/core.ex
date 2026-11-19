@@ -264,6 +264,7 @@ defmodule Core do
     |> StateDump.capture(:sentence_meaning)
     |> Core.Semantic.ProvisionalInterpretation.attach()
     |> StateDump.capture(:provisional_interpretation)
+    |> Core.Semantic.MetalinguisticClaim.attach(opts)
     # Prior, independently reviewed experience may propose a bounded same-POS
     # revision. Default is audit-only; live selection requires two explicit gates.
     |> Core.Brain.SynapticFeedback.attach(opts)
