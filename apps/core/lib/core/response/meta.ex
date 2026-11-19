@@ -91,6 +91,8 @@ defmodule Core.Response.Meta do
     |> maybe_put_metalinguistic_acknowledgment(reflection)
   end
 
+  defp reflection_summary(_), do: nil
+
   # Carry only bounded non-factual acknowledgment evidence into Explain.
   # Never copy source_term or class_term, which are user-provided lexemes.
   defp maybe_put_metalinguistic_acknowledgment(summary,
@@ -103,8 +105,6 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_metalinguistic_acknowledgment(summary, _), do: summary
-
-  defp reflection_summary(_), do: nil
 
   # This evidence is a selected lexical witness, not a verified dictionary
   # interpretation. Expose it separately so Explain cannot overstate it.
@@ -124,6 +124,8 @@ defmodule Core.Response.Meta do
     |> maybe_put_social_components(reflection)
   end
 
+  defp maybe_put_symbolic_realization(summary, _), do: summary
+
   # Preserve only the two closed, validated P-008 social-act sequences.
   # Arbitrary component lists from a reflection never cross into Explain.
   defp maybe_put_social_components(summary,
@@ -139,8 +141,6 @@ defmodule Core.Response.Meta do
   end
 
   defp maybe_put_social_components(summary, _), do: summary
-
-  defp maybe_put_symbolic_realization(summary, _), do: summary
 
   # Open-question diagnostics describe a recognized request, not a
   # verified opinion or external event. Keep only bounded status fields:

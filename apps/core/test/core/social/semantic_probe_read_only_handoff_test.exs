@@ -56,7 +56,9 @@ defmodule Core.Social.SemanticProbeReadOnlyHandoffTest do
       )
 
     assert result.sentence_meaning.provenance == :external_unverified
-    refute Map.get(result.sentence_meaning, :factual_authority?, false)
+    refute Enum.any?(result.sentence_meaning, fn {key, value} ->
+      key == :factual_authority? and value not in [nil, false]
+    end)
     assert result.reported_proposition.verification == :external_unverified
     assert result.stage_diagnostic.working_memory_admission == :not_performed
     assert result.stage_diagnostic.episodic_persistence == :not_performed

@@ -102,9 +102,11 @@ defmodule Core.Response.EpisodicMemory do
 
   @spec reply(String.t()) :: result()
   def reply(text) when is_binary(text), do: reply(text, nil, %{})
+  def reply(_), do: nil
 
   @spec reply(String.t(), term()) :: result()
   def reply(text, session_id) when is_binary(text), do: reply(text, session_id, %{})
+  def reply(_, _), do: nil
 
   @spec reply(String.t(), term(), map()) :: result()
   def reply(text, _session_id, semantic_context) when is_binary(text) and is_map(semantic_context) do
@@ -133,8 +135,6 @@ defmodule Core.Response.EpisodicMemory do
     end
   end
 
-  def reply(_), do: nil
-  def reply(_, _), do: nil
   def reply(_, _, _), do: nil
 
   # Current asserted typed events answer by requested participant role.

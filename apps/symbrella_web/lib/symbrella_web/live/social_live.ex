@@ -167,6 +167,11 @@ defmodule SymbrellaWeb.SocialLive do
       evaluation_export: "")}
   end
 
+  @impl true
+  def handle_event("close_analysis", _params, socket) do
+    {:noreply, assign(socket, analysis_open?: false)}
+  end
+
   defp analyze_piece(socket, target) do
     if socket.assigns.live_action == :show and socket.assigns.topic do
       input = %{topic: socket.assigns.topic, comments: socket.assigns.comments}
@@ -195,11 +200,6 @@ defmodule SymbrellaWeb.SocialLive do
     else
       {:noreply, socket}
     end
-  end
-
-  @impl true
-  def handle_event("close_analysis", _params, socket) do
-    {:noreply, assign(socket, analysis_open?: false)}
   end
 
   @impl true

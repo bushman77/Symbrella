@@ -262,9 +262,10 @@ defmodule Brain.WM.AdmissionTest do
     Enum.each(candidates, fn candidate ->
       assert {[], 0, 0} = Admission.run(cfg, [candidate], [])
 
-      assert_receive {:gate, %{score: 0.0},
+      assert_receive {:gate, %{score: blocked_score},
                       %{id: id, decision: :block, gate: :basal_ganglia,
                         reason: :invalid_scoped_source_evidence}}
+      assert blocked_score === 0.0
       assert id == candidate.id
     end)
   end
@@ -377,8 +378,9 @@ defmodule Brain.WM.AdmissionTest do
     }
 
     assert {[], 0, 0} = Admission.run(state(), [candidate], [])
-    assert_receive {:gate, %{score: 0.0},
+    assert_receive {:gate, %{score: blocked_score},
                     %{decision: :block, reason: :invalid_scoped_source_evidence}}
+    assert blocked_score === 0.0
   end
 
   test "normalization keeps stage2 evidence but final decision comes from BG" do

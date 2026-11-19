@@ -570,19 +570,23 @@ defmodule Core.Social.DeclarativeProposition do
                        :attested_base_present_verb, :attested_nominal_object],
               &(&1 in Map.get(sig, :evidence, [])))
         end) and
-        Enum.any?(Map.get(si, :active_cells, []), fn cell ->
-          tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
-          is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :subject) and
-            Map.get(cell, :pos) == "noun" and
-            "tag:form-of" in tags and "tag:plural" in tags
+        Enum.any?(Map.get(si, :active_cells, []), fn
+          %{} = cell ->
+            tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+            Map.get(cell, :token_index) == Map.get(indices, :subject) and
+              Map.get(cell, :pos) == "noun" and
+              "tag:form-of" in tags and "tag:plural" in tags
+          _ -> false
         end) and
-        Enum.any?(Map.get(si, :active_cells, []), fn cell ->
-          tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
-          is_map(cell) and Map.get(cell, :token_index) == Map.get(indices, :predicate) and
-            Map.get(cell, :pos) == "verb" and
-            normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == clause.predicate and
-            not Enum.any?(["tag:form-of", "tag:past", "tag:participle"],
-              &(&1 in tags))
+        Enum.any?(Map.get(si, :active_cells, []), fn
+          %{} = cell ->
+            tags = Map.get(cell, :semantic_atoms, []) |> List.wrap()
+            Map.get(cell, :token_index) == Map.get(indices, :predicate) and
+              Map.get(cell, :pos) == "verb" and
+              normalize(Map.get(cell, :norm) || Map.get(cell, :word)) == clause.predicate and
+              not Enum.any?(["tag:form-of", "tag:past", "tag:participle"],
+                &(&1 in tags))
+          _ -> false
         end)
 
     predicate_supported? =

@@ -322,6 +322,8 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
     }
   end
 
+  defp evidence_for(_, _), do: %{}
+
   defp bounded_statuses(items) when is_list(items) do
     items
     |> Enum.take(12)
@@ -329,8 +331,6 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
   end
 
   defp bounded_statuses(_), do: []
-
-  defp evidence_for(_, _), do: %{}
 
   defp safe_controls(%{} = raw) do
     for key <- @control_keys,

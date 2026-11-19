@@ -152,6 +152,8 @@ defmodule Core do
     |> CognitiveTrace.step(:phase_8_memory, &phase_eight(&1, opts))
   end
 
+  defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
+
   # Phase 3: Retrieve and prepare lexical candidates, including MWE hypotheses.
   defp phase_three(si, opts) do
     si
@@ -338,8 +340,6 @@ defmodule Core do
     |> StateDump.capture(:reflective_accountability)
   end
 
-  defp run_prod_pipeline(other, _opts, _lifg_opts), do: other
-
   @brain_merge_blocklist MapSet.new([
                            :sentence,
                            :sentence_signatures,
@@ -384,15 +384,4 @@ defmodule Core do
     do: ResponseAttach.maybe_build_response_plan(si, opts)
 
   defp maybe_build_response_plan(si, _opts), do: si
-
-  defp wrap_si(%SemanticInput{} = si, _orig_sentence), do: si
-
-  defp wrap_si(tokens, sentence) when is_list(tokens),
-    do: %SemanticInput{sentence: sentence, tokens: tokens, source: :test, trace: []}
-
-  defp wrap_si(other, _sentence) when is_binary(other),
-    do: %SemanticInput{sentence: other, tokens: [], source: :test, trace: []}
-
-  defp wrap_si(_other, sentence),
-    do: %SemanticInput{sentence: sentence, tokens: [], source: :test, trace: []}
 end

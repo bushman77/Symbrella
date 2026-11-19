@@ -20,8 +20,9 @@ defmodule Core.Semantic.CompositionPastTenseExpressionTest do
     assert {:ok, :truth} =
              Expression.type_of({:event_tense, :past, {:var, "e"}}, %{"e" => :event})
 
-    refute Expression.type_of({:event_tense, :future, {:var, "e"}},
-             %{"e" => :event}) == {:ok, :truth}
+    assert {:error, :invalid_expression} =
+             Expression.type_of({:event_tense, :future, {:var, "e"}},
+               %{"e" => :event})
 
     refute Expression.type_of({:event_tense, :past, {:var, "x"}},
              %{"x" => :entity}) == {:ok, :truth}

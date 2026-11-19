@@ -439,10 +439,10 @@ defmodule SymbrellaWeb.BrainLive do
       try do
         defn = RegionRegistry.defn(region_key)
 
-        cond do
-          is_map(defn) and Map.has_key?(defn, :__struct__) -> Map.from_struct(defn)
-          is_map(defn) -> defn
-          true -> %{}
+        case defn do
+          %_{} = structure -> Map.from_struct(structure)
+          %{} = map -> map
+          _ -> %{}
         end
       rescue
         _ -> %{}

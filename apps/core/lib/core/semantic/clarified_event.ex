@@ -84,6 +84,8 @@ defmodule Core.Semantic.ClarifiedEvent do
     end
   end
 
+  def build(_, _), do: :not_applicable
+
   defp valid_original_role_binding?(
          :validated_original_provisional_frame,
          %{
@@ -121,8 +123,6 @@ defmodule Core.Semantic.ClarifiedEvent do
   end
 
   defp original_interpretation(_, _), do: nil
-
-  def build(_, _), do: :not_applicable
 
   @doc """
   Select the requested role from the recomposed, speaker-attributed frame.

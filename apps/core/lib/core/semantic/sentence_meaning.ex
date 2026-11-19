@@ -110,6 +110,16 @@ defmodule Core.Semantic.SentenceMeaning do
     attach_compositional_evidence(si, base)
   end
 
+  def build(_),
+    do: %{
+      version: 1,
+      sentence: nil,
+      definition: nil,
+      kind: :unknown,
+      status: :not_yet_interpreted,
+      source: :invalid_input
+    }
+
   # A full two-clause temporal interpretation already carries its own
   # independently replayed event/temporal proof and all lexical witnesses.
   # Do not let a partial single-clause compositional candidate overwrite it.
@@ -142,16 +152,6 @@ defmodule Core.Semantic.SentenceMeaning do
         meaning
     end
   end
-
-  def build(_),
-    do: %{
-      version: 1,
-      sentence: nil,
-      definition: nil,
-      kind: :unknown,
-      status: :not_yet_interpreted,
-      source: :invalid_input
-    }
 
   # A preferred grammatical construction is meaningful *evidence* but not
   # authorization to assert an event. Keep its roles and alternatives visible

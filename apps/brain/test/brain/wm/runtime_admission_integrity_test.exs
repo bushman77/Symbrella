@@ -117,10 +117,11 @@ defmodule Brain.WM.RuntimeAdmissionIntegrityTest do
 
     refute Enum.any?(wm, &(&1.id == id))
 
-    assert_receive {:admission_event, [:brain, :gate, :decision], %{score: 0.0},
+    assert_receive {:admission_event, [:brain, :gate, :decision], %{score: blocked_score},
                     %{id: ^id, source: :verified_semantics,
                       gate: :basal_ganglia, decision: :block,
                       reason: :invalid_scoped_source_evidence}}
+    assert blocked_score === 0.0
     refute Enum.any?(Brain.snapshot_wm().wm, &(&1.id == id))
   end
 

@@ -60,7 +60,7 @@ defmodule Core.Discourse.LedgerTest do
 
   test "verified nominal is recoverable after many unrelated turns", %{sid: sid} do
     original = nominal(sid, ~w(The small black bird))
-    assert {:ok, proof} = Composition.verified(original)
+    assert {:ok, _proof} = Composition.verified(original)
 
     result = Ledger.record(original)
     assert result.sentence == original.sentence
