@@ -189,12 +189,47 @@ No visual connectivity claims are changed, and the underlying executive
 selector and command/safety gates are unchanged. See
 [Cognitive Trace v1](cognitive-trace-v1.md) for metadata allowlists.
 
+## P-007: Comprehension evidence and diagnostic review
+
+Turn trace now presents a **Comprehension diagnosis · selected turn** panel
+beside the timed Cognitive Trace and executive evidence. The diagnosis comes
+from the successful `:comprehension_summary` span, not from graph proximity.
+
+This separates:
+- actual degradation reason codes, weak/fallback selection rates and
+  unresolved content counts;
+- LIFG selection count from the smaller number of independently verified
+  lexical constructions;
+- structural competition, sentence-meaning and integration-audit statuses;
+- already-reported ATL-to-LIFG feedback mode and whether a revision was
+  applied by that existing, earlier stage;
+- a read-only diagnostic review hint and current-turn curiosity-gap
+  prerequisites. An eligible gate does not create a question or repair step.
+
+A zero **understood** count is not proof that the entire sentence failed:
+the field is intentionally restricted to independently verified dictionary
+constructions. A `:structurally_interpreted` sentence is not automatically
+a dictionary-verified or factually grounded meaning. Trace status `:ok`
+still only means a stage returned without throwing.
+
+Legacy/incomplete trace receipts display a no-diagnosis state rather than
+inventing missing causes. Diagnostic receipts are limited to enumerated
+statuses, reason atoms and bounded counts/rates, never sentences, lexical
+IDs, senses, definitions or memory contents. The current turn remains
+authoritative for the panel's selected-turn display.
+
+P-007 adds no planners and does not change lexical winners, interpretation,
+existing bounded feedback, memory permissions, repair policy or responses.
+Detailed contracts and regression commands are in
+[Cognitive Trace v1](cognitive-trace-v1.md).
+
 ## Verification
 
 From the umbrella root:
 
 ```sh
 mix test apps/symbrella_web/test/symbrella_web/components/brain_report_copy_test.exs \
+  apps/symbrella_web/test/symbrella_web/components/cognitive_trace_panel_test.exs \
   apps/symbrella_web/test/symbrella_web/components/neural_atlas_test.exs \
   apps/symbrella_web/test/symbrella_web/components/neural_atlas_graph_test.exs \
   apps/symbrella_web/test/symbrella_web/components/executive_trace_panel_test.exs \
