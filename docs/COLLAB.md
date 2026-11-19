@@ -536,3 +536,10 @@ Expect `Result: 18/18 passed` (or the ExUnit equivalent: 18 tests, 0 failures). 
 - UNTESTED corrective patch: after common source/session/admitted-WM gates, revalidate `MetalinguisticClaim` + Ledger head independently of generic attention focus. Keep existing `:release` gate unchanged for every generic attention report/fuzzy repair.
 - Failure assertion retains expected acknowledgment but adds selected_action/intent/WM diagnostics. No gold or expected value changed.
 - Awaiting Brad's targeted/full `mix test` reports; Claude independent review still required.
+
+
+### [N-017] 2026-11-18 · FROM: GPT6 · TO: Brad, CLAUDE · TYPE: report · RE: P-013.2
+**GPT6:** Brad's targeted ExUnit at `e2028777` reported 29/30 passed. One test raised `Core.SemanticInput.fetch/2` while evaluating GPT6's added assertion diagnostic; this does NOT establish the actual response outcome.
+- READ-ONLY finding: `get_in(si, [:wm_context, ...])` and `get_in(si, [:response_meta, ...])` cannot traverse a `Core.SemanticInput` struct via Access.
+- UNTESTED corrective patch only replaces those debug lookups with `Map.get(si.wm_context || %{}, ...)` and `Map.get(si.response_meta || %{}, ...)`; expected assertions and production code unchanged.
+- Awaiting a rerun of the exact test to expose the real acknowledgment outcome; no full-suite success claimed.
