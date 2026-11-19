@@ -106,13 +106,14 @@ defmodule Core.Response.SymbolicGeneration do
         lexical_evidence: lexical,
         source_text: ^user_text
       } = frame
-      when act in [:greeting, :gratitude, :farewell, :wellbeing_query] and
+      when act in [:greeting, :gratitude, :farewell, :wellbeing_query,
+                   :social_update_query] and
              addressee in [:self, :unspecified] and is_map(lexical) ->
         # Check the bound frame against the *current* sentence and current
         # lexical winners. A stale or forged frame cannot produce a reply.
         with {:ok, ^frame} <- SpeechActs.from_si(si),
              true <- supported_lexical_evidence?(act, lexical) do
-          {:ok, realize(act, anchor), social_provenance(frame)}
+          {:ok, realize(act, anchor, frame), social_provenance(frame)}
         else
           _ -> :not_applicable
         end
@@ -162,12 +163,29 @@ defmodule Core.Response.SymbolicGeneration do
       factual_claims?: false,
       llm_called?: false
     }
+    |> maybe_social_components(Map.get(frame, :components))
   end
 
   defp reciprocal_act(:greeting), do: :reciprocate_greeting
   defp reciprocal_act(:gratitude), do: :acknowledge_gratitude
   defp reciprocal_act(:farewell), do: :reciprocate_farewell
   defp reciprocal_act(:wellbeing_query), do: :respond_to_checkin
+  defp reciprocal_act(:social_update_query), do: :respond_to_social_update
+
+  defp maybe_social_components(meta, components)
+       when components in [[:social_update_query], [:greeting, :social_update_query]],
+       do: Map.put(meta, :social_components, components)
+  defp maybe_social_components(meta, _), do: meta
+
+  # A direct social-update request is a question about the conversational
+  # exchange, not evidence of personal offline experiences or facts.
+  defp realize(:social_update_query, _, %{components: [:greeting, :social_update_query]}),
+    do: "Hey! I'm here and ready to talk. What's new with you?"
+
+  defp realize(:social_update_query, _, %{components: [:social_update_query]}),
+    do: "I'm here and ready to talk. What's new with you?"
+
+  defp realize(act, anchor, _frame), do: realize(act, anchor)
 
   defp realize(:greeting, :morning), do: "Good morning."
   defp realize(:greeting, :afternoon), do: "Good afternoon."
