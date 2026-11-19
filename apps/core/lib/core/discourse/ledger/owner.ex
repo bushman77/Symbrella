@@ -121,8 +121,13 @@ defmodule Core.Discourse.Ledger.Owner do
     valid? =
       if same_session? do
         case candidate do
-          %{kind: :uninterpreted, source_term: _} ->
-            MetalinguisticClaim.isolated_marker(si, now_ms) == candidate
+          %{kind: :uninterpreted, source_term: _, observed_at_ms: observed_at_ms}
+          when is_integer(observed_at_ms) ->
+            # Replay the original event timestamp, not a newly sampled clock.
+            # The caller's admission time is independently bounded to prevent
+            # accepting future-dated or stale reconstructed source markers.
+            now_ms >= observed_at_ms and now_ms - observed_at_ms <= 1_000 and
+              MetalinguisticClaim.isolated_marker(si, observed_at_ms) == candidate
 
           %{kind: :metalinguistic_claim, source_seq: seq} ->
             source = Map.get(si, :metalinguistic_source)

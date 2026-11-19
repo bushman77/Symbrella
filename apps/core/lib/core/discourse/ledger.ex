@@ -48,14 +48,39 @@ defmodule Core.Discourse.Ledger do
     if enabled?(opts) and valid_session?(session) and
          Map.get(si, :source) in [:user, :prod, :test] and
          is_binary(sentence) and sentence != "" do
-      payload = metalinguistic_record(si, opts)
-      case owner_append(session, payload, si, opts) do
+      # Share one observation time between marker construction and Owner replay.
+      # Opt-in only; all existing non-metalinguistic Ledger paths are unchanged.
+      record_opts =
+        if Keyword.get(opts, :metalinguistic_claims?, false) == true do
+          Keyword.put_new_lazy(opts, :metalinguistic_now_ms, fn ->
+            System.system_time(:millisecond)
+          end)
+        else
+          opts
+        end
+
+      payload = metalinguistic_record(si, record_opts)
+      case owner_append(session, payload, si, record_opts) do
         {:ok, sequence} ->
           Trace.append(si, :discourse_ledger,
             decision: :recorded,
             reason: :session_semantic_timeline,
             meta: %{sequence: sequence, kind: payload.kind,
               factual_authority?: false})
+
+        {:error, reason} when reason in [:invalid_metalinguistic_evidence, :unavailable] ->
+          # A failed admission is observable without exposing the term, claim,
+          # session identifier, source fingerprint, or serialized SI.
+          if Keyword.get(record_opts, :metalinguistic_claims?, false) == true and
+               (payload.kind == :metalinguistic_claim or
+                Map.has_key?(payload, :source_term)) do
+            Trace.append(si, :discourse_ledger,
+              decision: :rejected,
+              reason: :metalinguistic_admission_rejected,
+              meta: %{failure: reason, factual_authority?: false})
+          else
+            si
+          end
 
         _ -> si
       end

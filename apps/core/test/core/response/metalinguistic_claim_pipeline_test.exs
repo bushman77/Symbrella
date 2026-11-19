@@ -46,6 +46,37 @@ defmodule Core.Response.MetalinguisticClaimPipelineTest do
       Owner.append(sid, %{kind: :uninterpreted, source_term: "forged"})
   end
 
+  test "Owner accepts a bounded later clock without changing the source marker" do
+    sid = session()
+    other = session()
+    on_exit(fn -> Ledger.clear(sid); Ledger.clear(other) end)
+
+    stamped_at = 1_000
+    first = run("florgix!", sid, metalinguistic_now_ms: stamped_at)
+    [stored] = Ledger.entries(sid)
+    marker = Map.delete(stored, :seq)
+
+    assert marker.observed_at_ms == stamped_at
+    assert marker.source_term == "florgix"
+    assert {:ok, 2} =
+      Owner.append_verified_metalinguistic(sid, first, marker, stamped_at + 1)
+    assert {:ok, 3} =
+      Owner.append_verified_metalinguistic(sid, first, marker, stamped_at + 1_000)
+
+    assert {:error, :invalid_metalinguistic_evidence} =
+      Owner.append_verified_metalinguistic(sid, first, marker, stamped_at - 1)
+    assert {:error, :invalid_metalinguistic_evidence} =
+      Owner.append_verified_metalinguistic(sid, first, marker, stamped_at + 1_001)
+    assert {:error, :invalid_metalinguistic_evidence} =
+      Owner.append_verified_metalinguistic(sid, first,
+        %{marker | source_term: "forged"}, stamped_at + 1)
+    assert {:error, :invalid_metalinguistic_evidence} =
+      Owner.append_verified_metalinguistic(other, first, marker, stamped_at + 1)
+
+    assert length(Ledger.entries(sid)) == 3
+    assert Ledger.entries(other) == []
+  end
+
   test "the last turn, session boundary and five-minute window are mandatory" do
     sid = session()
     other = session()
