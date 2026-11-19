@@ -451,3 +451,20 @@ git status --short
 ~~~
 
 **Status:** patch still **UNTESTED after `e49f32bc`**. Prior `819a4f37` run establishes 36/36 DEV rows and other targeted tests passed *at that SHA* (one atom-safety test did not), but not that a full umbrella regression has passed on this new SHA. Claude to review this test change **READ-ONLY**; Bradley to verify locally. Do not run the sealed evaluation until regular test/review gates are satisfied.
+
+## 23. P-021a independent review · 2026-11-19 · FROM: CLAUDE · TO: Bradley, GPT6 (N-037)
+
+READ-ONLY source review of `55d4823d..4fca72ed`; I ran no Elixir. Only executed evidence is Bradley's run (53 passed, exit 0). Full review: `docs/collab/N-037-p021a-independent-review.md`. Sealed set not read or used.
+
+**Verdict: CONDITIONAL GO.** Architecture, determinism, fail-closed budgets, no atom creation, Brain integration and attachment-ambiguity survival hold up under independent reading. **Not ready for the sealed run.**
+
+- **B1 (blocker):** negation is a closed surface list; `"Nothing is ready."` (`nothing` noun) emits `:copular_predication` with evidence `:positive_polarity` (`grammar.ex:12`, `chart.ex:138,541`). Also `nobody/none/hardly/barely...`.
+- **B2 (blocker):** agreement gaps promote ungrammatical clauses: `"I is ready."` (`grammar.ex:17,19`); determiner–noun and quantifier–noun number unchecked (`"A pages are ready."`, `"Each pages are ready."`); quantifier needs no dictionary POS (`chart.ex:309,391-407`).
+- **M1:** Brain `take(64)` precedes the complete-clause filter (`brain structural_competition.ex:41-43`) and the chart signature is appended last (`signatures.ex:113`). Fix: prepend for Colony only.
+- **M2:** the 6-item span cap is exhausted by one polysemous token (7 items), abstaining the whole sentence labelled as a budget overflow; real probe reads 8 POS rows/word.
+- **M3:** the "non-colony isolation" test is vacuous (0/11 of its words are in the fixture lexicon; compares two non-Colony sources). Chat equality is static evidence only.
+- **M4:** Brain `:preferred` is weak (0.68 floor never binds; `matched>=2`); also a Colony `:copular_predication` now surfaces as `sentence_meaning :provisional` and `social_evaluation` counts it. **Sealed scoring must use the structural outcome, not `sentence_meaning.status`.**
+- Minor: m1–m7 in N-037 (same-roles feature collapse, `:pos_adverb` unknown to Brain, proper-noun PP object conflict, untracked `core` in Brad's tree, etc.).
+
+**Required before sealed:** B1, B2, M1, M3 + full regression on the corrected SHA. **Before P-021b:** M2 measured, the six invariants in N-037 §5.
+**Proposed next ticket P-021a.1** (needs Bradley's `Approve: P-021a.1`): FileScope `grammar.ex`, `chart.ex`, `signatures.ex` (`detect/1` ordering only), `chart_test.exs`, NEW `chart_adversarial_test.exs`. No Brain, SentenceMeaning, Composition or Colony file. Reproducer cases listed in N-037 §6 are UNRUN. GPT6: please challenge any finding with file:line evidence; B1's LTM dependence ([H]) and M2's frequency are the two I most want measured.
