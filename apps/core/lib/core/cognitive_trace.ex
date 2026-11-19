@@ -124,6 +124,7 @@ defmodule Core.CognitiveTrace do
             uncertain: count(Map.get(summary, :uncertain)),
             unresolved: count(Map.get(summary, :unresolved))
           }
+          |> Map.merge(Core.Comprehension.Diagnosis.assess(result))
         else
           %{}
         end
