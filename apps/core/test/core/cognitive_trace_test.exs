@@ -55,6 +55,55 @@ defmodule Core.CognitiveTraceTest do
     refute Map.has_key?(evidence, :sentence)
   end
 
+  test "comprehension diagnosis emits causes and verification boundaries without input text" do
+    summary = %{
+      degraded?: true,
+      reasons: [:weak_decision_rate_high, :fallback_rate_high],
+      understood: [], uncertain: ["PRIVATE TERM"], unresolved: [],
+      lexical_meanings: [],
+      stats: %{total: 3, weak_rate: 0.666667, fallback_rate: 0.333333,
+               unresolved_content: 0}
+    }
+    CognitiveTrace.with_trace("turn-ca55e0ab", fn ->
+      CognitiveTrace.stage(:comprehension_summary, fn ->
+        %{
+          sentence: "PRIVATE UTTERANCE",
+          source: :user, session_id: "PRIVATE SESSION",
+          comprehension: summary,
+          structural_competition: %{status: :preferred},
+          sentence_meaning: %{status: :provisional},
+          integration_audit: %{status: :consistent},
+          lifg_feedback: %{mode: :bounded_reanalysis, applied?: false,
+                           applied_revisions: [%{from: "PRIVATE ID"}]}
+        }
+      end)
+    end)
+
+    assert_receive {:observed, _, %{stage: :turn, status: :started}}
+    assert_receive {:observed, _, %{stage: :comprehension_summary, status: :ok,
+                                   evidence: diagnosis}}
+    assert diagnosis.degraded == true
+    assert diagnosis.understood == 0
+    assert diagnosis.uncertain == 1
+    assert diagnosis.unresolved == 0
+    assert diagnosis.reasons == [:weak_decision_rate_high, :fallback_rate_high]
+    assert diagnosis.choice_count == 3
+    assert diagnosis.weak_rate == 0.666667
+    assert diagnosis.fallback_rate == 0.333333
+    assert diagnosis.verified_lexical_count == 0
+    assert diagnosis.structural_status == :preferred
+    assert diagnosis.sentence_meaning_status == :provisional
+    assert diagnosis.integration_status == :consistent
+    assert diagnosis.feedback_mode == :bounded_reanalysis
+    assert diagnosis.feedback_applied == false
+    assert diagnosis.repair_hint == :review_lexical_evidence
+    assert diagnosis.curiosity_gap_gate == :needs_unresolved_content
+    refute inspect(diagnosis) =~ "PRIVATE"
+    refute Map.has_key?(diagnosis, :sentence)
+    refute Map.has_key?(diagnosis, :lexical_meanings)
+    assert_receive {:observed, _, %{stage: :turn, status: :ok}}
+  end
+
   test "exceptions preserve failure and restore trace isolation" do
     assert_raise ArgumentError, "intended", fn ->
       CognitiveTrace.with_trace("turn-aacc0011", fn ->
