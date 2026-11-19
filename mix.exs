@@ -133,8 +133,7 @@ defmodule Symbrella.Umbrella.MixProject do
          "ecto.create -r Db --quiet",
          "ecto.migrate -r Db --quiet",
          "negcache.clean",
-         "test --raise",
-         &__MODULE__.update_architecture/1
+         "test --raise"
        ]}
     ]
   end
