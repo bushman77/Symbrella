@@ -151,6 +151,12 @@ defmodule SymbrellaWeb.BrainLive do
                 <strong>{@social_activity.runtime_active_neurons_at_completion}</strong>
               </p>
               <p>Supported meanings: <strong>{@social_activity.supported_interpretations}</strong></p>
+              <p :if={Map.has_key?(@social_activity, :weak_lifg_choices)}>
+                Weak LIFG selections: <strong>{@social_activity.weak_lifg_choices}</strong>
+              </p>
+              <p :if={Map.has_key?(@social_activity, :low_margin_choices)}>
+                Low-margin selections: <strong>{@social_activity.low_margin_choices}</strong>
+              </p>
               <p>Sources sampled: <strong>{@social_activity.participants}</strong></p>
               <p>Evidence links: <strong>{@social_activity.relations}</strong></p>
             </div>
@@ -181,6 +187,16 @@ defmodule SymbrellaWeb.BrainLive do
                     {reply.metrics.interpreted_sentences} supported meanings</p>
                 </div>
               </section>
+            </div>
+            <div :if={map_size(Map.get(@social_activity, :structural_reasons, %{})) > 0}
+              id="brain-social-structural-reasons" class="mt-3 space-y-1 text-sm">
+              <h3 class="font-semibold text-cyan-200">Structural scope observations</h3>
+              <p :for={{reason, count} <- Enum.sort(Map.get(@social_activity, :structural_reasons, %{}))}>
+                {reason}: <strong>{count}</strong> sentences
+              </p>
+              <p class="text-xs text-zinc-500">
+                Signature coverage only; private structural eligibility gates are not reproduced here.
+              </p>
             </div>
             <p class="mt-2 text-xs text-zinc-500">Memory-only aggregate, retained for up to five minutes.</p>
           <% else %>

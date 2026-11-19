@@ -40,6 +40,18 @@ defmodule Core.Social.SemanticProbeReadOnlyHandoffTest do
     assert result.brain_observation.status == :disabled
     assert result.brain_observation.stimuli_issued == 0
     assert result.stage_diagnostic.comprehension_received_meaning == true
+    assert result.stage_ledger.lifg_options[:semantic_control?] == false
+    assert result.stage_ledger.lifg_options[:sense_focus?] == false
+    assert result.stage_ledger.lifg == :scored
+    assert result.stage_ledger.weak_choices == 0
+    assert result.stage_ledger.neuron_observation == :disabled
+    assert result.stage_ledger.structural_scope.scope ==
+      :observed_signatures_not_authoritative_eligibility
+    assert result.stage_ledger.structural_scope.reason in [
+      :no_base_tokens, :noncontiguous_token_indices, :no_sentence_signatures,
+      :no_full_span_signature, :complete_signature_eligibility_unknown,
+      :not_applicable, :structural_token_budget_exceeded
+    ]
     assert is_list(result.comprehension.recognized_topics)
   end
 

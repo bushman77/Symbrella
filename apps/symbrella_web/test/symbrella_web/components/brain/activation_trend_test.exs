@@ -58,6 +58,17 @@ defmodule SymbrellaWeb.Components.Brain.ActivationTrendTest do
     assert html =~ "stroke=\"#f59e0b\""
   end
 
+  test "a zero latest sample is not mislabeled as no reports ever received" do
+    samples =
+      []
+      |> ActivationTrend.capture(%{"test|noun|1" => 0.015}, 1_000)
+      |> ActivationTrend.capture(%{}, 1_500)
+
+    html = render_component(&ActivationTrend.panel/1, samples: samples)
+    assert html =~ "No neurons active in the latest snapshot"
+    refute html =~ "No neuron activation reports received yet"
+  end
+
   test "bad snapshot is not interpreted as an empty observation" do
     samples = ActivationTrend.capture([], %{"a" => 1.0}, 100)
     assert ActivationTrend.capture(samples, nil, 200) == samples

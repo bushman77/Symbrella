@@ -118,8 +118,13 @@ defmodule SymbrellaWeb.Components.Brain.ActivationTrend do
         <circle :if={@samples != []} cx={@latest_x} cy={@mean_y} r="2.5" fill="#0ea5e9" />
         <circle :if={@samples != []} cx={@latest_x} cy={@peak_y} r="2.5" fill="#f59e0b" />
       </svg>
-      <p :if={@latest.count == 0} class="text-xs text-zinc-500 dark:text-zinc-400">
+      <p :if={@latest.count == 0 and Enum.all?(@samples, &(&1.count == 0))}
+        class="text-xs text-zinc-500 dark:text-zinc-400">
         No neuron activation reports received yet.
+      </p>
+      <p :if={@latest.count == 0 and Enum.any?(@samples, &(&1.count > 0))}
+        class="text-xs text-zinc-500 dark:text-zinc-400">
+        No neurons active in the latest snapshot; earlier activity was observed.
       </p>
       <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
         Runtime only · starts when this page opens · neuron half-life:

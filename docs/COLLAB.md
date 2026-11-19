@@ -138,7 +138,7 @@ The benchmark should include independent Claude-authored holdouts, nonce substit
 | `P-015` | Cold-repeat/flag-matrix proposal. Audit every `:prod` DB write first, use a disposable DB and controlled runner; separate test contract from a potential `apps/core`-cwd `mix run` with explicit `System.halt(0)`. |
 | `P-016/P-017` | Typed read-only `Core.Discourse.Claims` projection with kind-completeness test and real consumers, not a replacement for comprehension. |
 | `P-018` | Extend existing Explain/CognitiveTrace/StateDump UI only after consumer and privacy review. |
-| `P-020 / S0a–c` | **PROPOSED, NOT APPROVED**. S0a first, S0b if needed, S0c only with separate Brain FileScope approval. |
+| `P-020 / S0a–c` | **APPROVED by Bradley 2026-11-19**. GPT-6 implemented S0a observability (UNTESTED); S0b conditional, S0c still requires separate Brain FileScope approval. |
 | `S1/S2/S3` | **PROPOSALS ONLY**. Resolve with controlled measurement, consumer audit and separate approval. |
 
 **Latest shared regression receipt (provided by Bradley):** 2026-11-19 10:49:37 MST; branch `symbolic_generation`; code SHA `ff982043`; `mix test`, exit `0`; **3,015 passed, 3 skipped, 0 failed**. `lexicon` has no tests. Bradley's local log: `/home/default/Symbrella/log/mix-test.log` (not independently opened). This does **not** verify future patches or social runtime causation.
@@ -172,3 +172,12 @@ git show 94e8d4c4:docs/COLLAB.md
 ~~~
 
 Keep future updates concise: add only decisions, evidence that changes priority, new approved scope and reproducible verification. Do not grow this file back into an unstructured message dump.
+
+## 11. P-020 S0a implementation handoff · 2026-11-19 · FROM: GPT6 · TO: CLAUDE, Bradley
+
+**Approval:** Bradley issued `Approve: P-020`. **Implementation: UNTESTED by GPT-6**; Elixir/Mix not available in its runtime. No production Brain module, cognitive scoring, memory/learning, source gate, neuron stimulation delta, or chart scale changed. S0b is conditional; S0c needs separate Brain FileScope authorization.
+
+- `Core.Social.SemanticProbe`: returns a bounded, per-sentence `stage_ledger` with actual LIFG shadow options, weak/low-margin choice counts, stage results and observed grammatical-signature span coverage. `:complete_signature_eligibility_unknown` means the private `Brain.LIFG.StructuralCompetition.complete_clause?/2` gate was not reproduced. An observed full-span signature is **not** a supported complete interpretation or authoritative eligibility receipt.
+- `SocialBrainActivity`: aggregate, enum-whitelisted structural reason counts; never raw lexemes or sense IDs. `SocialLive`: visible failure and sanitized telemetry if the memory-only activity recorder is unavailable, while keeping the completed analysis accessible. `BrainLive`: aggregate structural reasons. `ActivationTrend`: distinguishes a latest empty snapshot from no activity ever captured while the page has been open.
+- New assertions/tests: `apps/core/test/core/social/semantic_probe_read_only_handoff_test.exs`; `apps/symbrella_web/test/symbrella_web/social_brain_activity_test.exs`; `apps/symbrella_web/test/symbrella_web/live/social_live_test.exs`; `apps/symbrella_web/test/symbrella_web/components/brain/activation_trend_test.exs`. No baseline/Gold expectations edited to force green. No `mix format`.
+- **Verification pending:** Bradley should run explicit targeted tests and full `mix test` from umbrella root, capture SHA, commands, exact exit codes, Git status before/after, failures/warnings. Claude: independent READ-ONLY audit for privacy, status accuracy, and failure attribution. Neither pure stage computation nor requested activation proves Brain.Cell receipt or improved sentence comprehension.

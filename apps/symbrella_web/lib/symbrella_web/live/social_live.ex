@@ -24,6 +24,7 @@ defmodule SymbrellaWeb.SocialLive do
        error: nil,
        analysis_open?: false,
        cognitive_report: nil,
+       social_activity_record_status: :not_requested,
        evaluation_open?: false,
        evaluation: nil,
        evaluation_labels: %{},
@@ -39,6 +40,7 @@ defmodule SymbrellaWeb.SocialLive do
       assign(socket,
         page: page, error: nil, loading?: true,
         analysis_open?: false, cognitive_report: nil,
+        social_activity_record_status: :not_requested,
         evaluation_open?: false, evaluation: nil,
         evaluation_labels: %{},
         evaluation_summary: SocialEvaluation.summary(nil, %{}),
@@ -189,8 +191,9 @@ defmodule SymbrellaWeb.SocialLive do
       case outcome do
         {:ok, report} ->
           # Only the selected source is represented in the new /brain receipt.
-          _ = SocialBrainActivity.record(report)
+          recording = record_social_activity(report)
           {:noreply, assign(socket, analysis_open?: true, cognitive_report: report,
+            social_activity_record_status: recording,
             evaluation_open?: false, error: nil)}
 
         _ ->
@@ -200,6 +203,25 @@ defmodule SymbrellaWeb.SocialLive do
     else
       {:noreply, socket}
     end
+  end
+
+  defp record_social_activity(report) do
+    recorder = Application.get_env(:symbrella_web, :social_activity_recorder, SocialBrainActivity)
+
+    result =
+      try do
+        if Code.ensure_loaded?(recorder) and function_exported?(recorder, :record, 1),
+          do: recorder.record(report), else: :unavailable
+      catch
+        :exit, _ -> :unavailable
+      end
+
+    status = if(result == :ok, do: :recorded, else: :unavailable)
+
+    :telemetry.execute([:symbrella_web, :social, :activity_record],
+      %{count: 1}, %{source: :colony_external, status: status})
+
+    status
   end
 
   @impl true
@@ -402,6 +424,11 @@ defmodule SymbrellaWeb.SocialLive do
                     class="break-words text-sm font-semibold text-cyan-200">
                     Analyzed: {@cognitive_report.target.label}
                     {if(Map.has_key?(@cognitive_report.target, :author), do: " · " <> to_string(@cognitive_report.target.author), else: "")}
+                  </p>
+                  <p :if={@social_activity_record_status == :unavailable}
+                    id="social-activity-record-unavailable"
+                    class="text-sm text-amber-200">
+                    Cognitive analysis completed, but the /brain activity receipt could not be recorded.
                   </p>
                   <p class="text-sm text-zinc-400">
                     {@cognitive_report.analyzed_segments} sentence samples inspected · {Map.get(@cognitive_report, :omitted_sentences, 0)} sentence samples omitted from this selection.
@@ -932,6 +959,26 @@ defmodule SymbrellaWeb.SocialLive do
                         <p>Dictionary POS coverage: {@segment.result.syntax.audit.pos_covered_tokens} / {@segment.result.token_count} tokens</p>
                         <p>Lexical ambiguity: {if @segment.result.acc_shadow.uncertain?, do: "flagged", else: "not flagged"}</p>
                       </div>
+                      <section :if={is_map(Map.get(@segment.result, :stage_ledger))}
+                        class="space-y-2 rounded border border-cyan-400/20 p-3">
+                        <h4 class="font-semibold text-cyan-200 text-sm">Cognitive stage receipt · observed, not inferred</h4>
+                        <dl class="grid gap-2 text-xs sm:grid-cols-2">
+                          <div>LIFG decision: <strong>{@segment.result.stage_ledger.lifg}</strong> ·
+                            weak {@segment.result.stage_ledger.weak_choices} ·
+                            low margin {@segment.result.stage_ledger.low_margin_choices}</div>
+                          <div>Semantic control: <strong>{inspect(@segment.result.stage_ledger.lifg_options[:semantic_control?])}</strong> ·
+                            sense focus: <strong>{inspect(@segment.result.stage_ledger.lifg_options[:sense_focus?])}</strong></div>
+                          <div>Structural outcome: <strong>{@segment.result.stage_ledger.structural}</strong></div>
+                          <div>Structural scope: <strong>{@segment.result.stage_ledger.structural_scope.reason}</strong> ·
+                            {@segment.result.stage_ledger.structural_scope.full_span_signatures} full-span signatures</div>
+                          <div>Composition: <strong>{@segment.result.stage_ledger.composition}</strong> ·
+                            neuron request: <strong>{@segment.result.stage_ledger.neuron_observation}</strong></div>
+                        </dl>
+                        <p class="text-xs text-zinc-500">
+                          Full-span counts are evidence of coverage, not proof a grammar frame is eligible.
+                          Neuron request status does not establish cell delivery or factual truth.
+                        </p>
+                      </section>
                       <section :if={is_map(Map.get(@segment.result, :stage_diagnostic))}
                         class="space-y-2 rounded border border-amber-400/20 p-3">
                         <h4 class="text-sm font-semibold text-amber-200">Cognitive pipeline · read-only handoff</h4>

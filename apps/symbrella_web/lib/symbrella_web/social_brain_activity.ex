@@ -14,6 +14,10 @@ defmodule SymbrellaWeb.SocialBrainActivity do
 
   @topic "brain:social"
   @ttl_ms 300_000
+  @structural_reasons [:not_applicable, :no_base_tokens,
+    :structural_token_budget_exceeded, :noncontiguous_token_indices,
+    :no_sentence_signatures, :no_full_span_signature,
+    :complete_signature_eligibility_unknown]
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -72,7 +76,8 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       [:core, :social, :cognitive_shadow],
       Map.take(activity, [:segments, :lifg_choices, :atl_winners, :syntax_frames,
         :dictionary_rows, :pos_covered_tokens, :processed_tokens,
-        :supported_interpretations, :neuron_stimuli_issued])
+        :supported_interpretations, :neuron_stimuli_issued,
+        :weak_lifg_choices, :low_margin_choices])
       |> Map.merge(%{
         original_post_sentences: activity.source_breakdown.original_post.sentences,
         original_post_stimuli: activity.source_breakdown.original_post.neuron_stimuli,
@@ -85,6 +90,7 @@ defmodule SymbrellaWeb.SocialBrainActivity do
         sentence_status: if(activity.supported_interpretations > 0,
           do: :partially_interpreted, else: :not_yet_interpreted),
         provenance: :external_unverified,
+        signature_scope_observations: activity.structural_reasons,
         selected_source: activity.analyzed_target.kind,
         selected_reply_index: Map.get(activity.analyzed_target, :index)
       }
@@ -201,6 +207,13 @@ defmodule SymbrellaWeb.SocialBrainActivity do
       source_breakdown: scopes,
       reply_breakdown: reply_breakdown,
       neuron_stimuli_issued: count(segments, [:result, :brain_observation, :stimuli_issued]),
+      weak_lifg_choices: count(segments, [:result, :stage_ledger, :weak_choices]),
+      low_margin_choices: count(segments, [:result, :stage_ledger, :low_margin_choices]),
+      structural_reasons:
+        segments
+        |> Enum.map(&get_in(&1, [:result, :stage_ledger, :structural_scope, :reason]))
+        |> Enum.filter(&(&1 in @structural_reasons))
+        |> Enum.frequencies(),
       neuron_observation_statuses:
         segments
         |> Enum.map(&get_in(&1, [:result, :brain_observation, :status]))

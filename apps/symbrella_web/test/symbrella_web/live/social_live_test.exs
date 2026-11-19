@@ -275,6 +275,42 @@ defmodule SymbrellaWeb.SocialLiveTest do
     end
   end
 
+  defmodule UnavailableSocialActivityRecorder do
+    def record(_report), do: :unavailable
+  end
+
+  test "social analysis exposes missing activity receipts without hiding the report", %{conn: conn} do
+    prior_analyzer = Application.get_env(:symbrella_web, :social_cognitive_analyzer)
+    prior_recorder = Application.get_env(:symbrella_web, :social_activity_recorder)
+    Application.put_env(:symbrella_web, :social_cognitive_analyzer, FakeCognitiveAnalyzer)
+    Application.put_env(:symbrella_web, :social_activity_recorder, UnavailableSocialActivityRecorder)
+
+    handler_id = "social-record-#{System.unique_integer([:positive])}"
+    parent = self()
+    :ok = :telemetry.attach(handler_id, [:symbrella_web, :social, :activity_record],
+      fn _event, measurements, metadata, _config ->
+        send(parent, {:recording_telemetry, measurements, metadata})
+      end, nil)
+
+    try do
+      {:ok, view, _} = live(conn, ~p"/social/#{FakeClient.id(1)}")
+      view |> element("#social-analyze-post") |> render_click()
+      assert has_element?(view, "#social-activity-record-unavailable")
+      assert has_element?(view, "#social-analysis-segment-0")
+      assert_receive {:recording_telemetry, %{count: 1},
+        %{source: :colony_external, status: :unavailable}}
+    after
+      :telemetry.detach(handler_id)
+      if is_nil(prior_analyzer),
+        do: Application.delete_env(:symbrella_web, :social_cognitive_analyzer),
+        else: Application.put_env(:symbrella_web, :social_cognitive_analyzer, prior_analyzer)
+
+      if is_nil(prior_recorder),
+        do: Application.delete_env(:symbrella_web, :social_activity_recorder),
+        else: Application.put_env(:symbrella_web, :social_activity_recorder, prior_recorder)
+    end
+  end
+
   test "on-demand cognitive modal displays read-only stage results and can close", %{conn: conn} do
     previous = Application.get_env(:symbrella_web, :social_cognitive_analyzer)
     Application.put_env(:symbrella_web, :social_cognitive_analyzer, FakeCognitiveAnalyzer)

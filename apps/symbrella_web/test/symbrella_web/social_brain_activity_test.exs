@@ -26,6 +26,8 @@ defmodule SymbrellaWeb.SocialBrainActivityTest do
           lifg: %{chosen_count: 8},
           atl: %{winner_count: 8},
           brain_observation: %{stimuli_issued: 4},
+          stage_ledger: %{weak_choices: 3, low_margin_choices: 2,
+            structural_scope: %{reason: :no_full_span_signature}},
           syntax: %{signatures: [%{id: :noun_phrase}], audit: %{
             pos_covered_tokens: 8, ltm_source_rows: 11
           }}
@@ -52,6 +54,12 @@ defmodule SymbrellaWeb.SocialBrainActivityTest do
     assert shadow.neuron_stimuli_issued == 6
     assert shadow.syntax_frames == 1
     assert shadow.processed_tokens == 16
+    assert shadow.weak_lifg_choices == 3
+    assert shadow.low_margin_choices == 2
+    assert SocialBrainActivity.latest().weak_lifg_choices == 3
+    assert SocialBrainActivity.latest().low_margin_choices == 2
+    assert SocialBrainActivity.latest().structural_reasons ==
+      %{no_full_span_signature: 1}
 
     assert_receive {:aggregate_telemetry, [:core, :social, :neuron_observation],
                     %{stimuli_issued: 6, inspected_segments: 2},

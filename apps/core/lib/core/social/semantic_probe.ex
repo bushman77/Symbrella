@@ -109,7 +109,7 @@ defmodule Core.Social.SemanticProbe do
       |> Map.put(:ltm_reason, Map.get(ltm_lookup, :reason))
       |> Map.put(:missing_norms_count, Map.get(ltm_lookup, :missing_norms, 0))
 
-    {lifg, choices} = score_stage1(si, opts)
+    {lifg, choices, lifg_options} = score_stage1(si, opts)
 
     # Pure ATL reducer: never call Brain.ATL.ingest/3 here. That operation
     # updates its GenServer and is inappropriate for untrusted social text.
@@ -158,8 +158,30 @@ defmodule Core.Social.SemanticProbe do
         enabled?: Keyword.get(opts, :brain_observation?, false)
       )
 
+    stage_ledger = %{
+      source: :colony_external,
+      lexical_lookup: ltm_lookup.status,
+      lifg: lifg.status,
+      lifg_options: lifg_options,
+      weak_choices: Enum.count(lifg.choices, & &1.weak?),
+      low_margin_choices: Map.get(conflict_shadow(lifg), :low_margin_choices, 0),
+      atl: :pure_reduction,
+      structural: structural.status,
+      structural_scope: structural_scope(si, structural),
+      composition: if(is_map(derivation), do: :derived, else: :not_derived),
+      sentence_meaning: meaning.status,
+      attributed_proposition: Map.get(reported_proposition, :status, :not_interpreted),
+      neuron_observation: observation.status,
+      runtime_lifg_ingest: :not_invoked,
+      runtime_atl_ingest: :not_invoked,
+      global_working_memory: :not_invoked,
+      episodic_memory: :not_invoked,
+      factual_authority?: false
+    }
+
     result = %{
        stage: :social_semantic_shadow,
+       stage_ledger: stage_ledger,
        brain_observation: observation,
        stage_diagnostic: %{
          pipeline: :read_only_external_projection,
@@ -347,6 +369,12 @@ defmodule Core.Social.SemanticProbe do
       mwe_event: [:core, :social, :shadow_mwe]
     ]
 
+    observed_options =
+      shadow_opts
+      |> Keyword.take([:cerebellum_learn?, :reanalysis, :reanalysis?,
+        :mwe_fallback, :stage1_local_mwe_fallback?, :sense_focus?, :semantic_control?])
+      |> Map.new()
+
     case scorer.(si, shadow_opts) do
       {:ok, %{choices: choices, audit: audit}} when is_list(choices) and is_map(audit) ->
         selected =
@@ -359,14 +387,63 @@ defmodule Core.Social.SemanticProbe do
            chosen_count: length(choices),
            missing_candidates: Map.get(audit, :missing_candidates, 0),
            choices: Enum.map(selected, &compact_choice/1)
-         }, selected}
+         }, selected, observed_options}
 
       {:error, _} ->
-        {%{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, []}
+        {%{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, [], observed_options}
 
       _ ->
-        {%{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, []}
+        {%{status: :unavailable, chosen_count: 0, missing_candidates: nil, choices: []}, [], observed_options}
     end
+  end
+
+  # Observe source-aligned coverage, not Brain.LIFG.StructuralCompetition's
+  # private complete_clause?/2 eligibility. Full-span does not imply eligible.
+  defp structural_scope(si, structural) do
+    indices =
+      si
+      |> Map.get(:tokens, [])
+      |> Enum.filter(fn token ->
+        is_map(token) and is_integer(Map.get(token, :index)) and
+          Map.get(token, :n, 1) == 1 and
+          Map.get(token, :kind, :word) not in [:punct, "punct"]
+      end)
+      |> Enum.map(& &1.index)
+      |> Enum.sort()
+
+    last = List.last(indices)
+    signatures = si |> Map.get(:sentence_signatures, []) |> List.wrap()
+
+    full_span =
+      if is_integer(last) do
+        Enum.count(signatures, fn
+          %{span: {0, ^last}} -> true
+          _ -> false
+        end)
+      else
+        0
+      end
+
+    reason =
+      cond do
+        Map.get(structural, :status) != :no_complete_candidate -> :not_applicable
+        indices == [] -> :no_base_tokens
+        last >= 48 -> :structural_token_budget_exceeded
+        indices != Enum.to_list(0..last) -> :noncontiguous_token_indices
+        signatures == [] -> :no_sentence_signatures
+        full_span == 0 -> :no_full_span_signature
+        true -> :complete_signature_eligibility_unknown
+      end
+
+    %{
+      status: Map.get(structural, :status, :unavailable),
+      reason: reason,
+      sentence_signatures: min(length(signatures), 64),
+      full_span_signatures: min(full_span, 64),
+      eligible_candidates: structural |> Map.get(:candidates, []) |> List.wrap() |> length(),
+      scope: :observed_signatures_not_authoritative_eligibility,
+      factual_authority?: false
+    }
   end
 
   defp compact_choice(choice) do
