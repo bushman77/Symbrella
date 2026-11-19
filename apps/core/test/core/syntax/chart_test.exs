@@ -240,16 +240,30 @@ defmodule Core.Syntax.ChartTest do
   end
 
   test "unknown external token strings never create atoms" do
+    # A VM-wide atom count is not an isolation boundary: async ExUnit tests
+    # and lazy module loading can add unrelated atoms concurrently. Instead,
+    # assert that none of our actual, previously uninterned token surfaces
+    # becomes an atom after repeated parsing.
     warmup = input("The site is open.")
     Chart.diagnose(warmup, Signatures.chart_nodes(warmup))
 
-    unknown = String.duplicate("unknownlexeme", 16)
-    si = input("The #{unknown} is open.")
-    nodes = Signatures.chart_nodes(si)
-    before = :erlang.system_info(:atom_count)
+    for unknown <- [
+          "uninternedcolonytokenalpha",
+          "uninternedcolonytokenbeta",
+          String.duplicate("unknownlexeme", 16)
+        ] do
+      assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
 
-    for _ <- 1..10, do: assert Chart.clause_signatures(si, nodes) == []
+      si = input("The #{unknown} is open.")
+      nodes = Signatures.chart_nodes(si)
+      assert Enum.any?(nodes, &(&1.word == unknown))
 
-    assert :erlang.system_info(:atom_count) == before
+      for _ <- 1..10 do
+        assert Chart.clause_signatures(si, nodes) == []
+        refute Enum.any?(Signatures.detect(si), &(&1.id == :copular_predication))
+      end
+
+      assert_raise ArgumentError, fn -> String.to_existing_atom(unknown) end
+    end
   end
 end
