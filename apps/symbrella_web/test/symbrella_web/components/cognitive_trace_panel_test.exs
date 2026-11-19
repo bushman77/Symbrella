@@ -37,6 +37,101 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanelTest do
     refute html =~ "user message text"
   end
 
+  @diagnosis %{
+    degraded: true, understood: 0, uncertain: 1, unresolved: 0,
+    reasons: [:weak_decision_rate_high, :fallback_rate_high],
+    choice_count: 3, unresolved_content_count: 0, verified_lexical_count: 0,
+    weak_rate: 0.666667, fallback_rate: 0.333333,
+    structural_status: :preferred, sentence_meaning_status: :provisional,
+    integration_status: :consistent, feedback_mode: :bounded_reanalysis,
+    feedback_applied: false, repair_hint: :review_lexical_evidence,
+    curiosity_gap_gate: :needs_unresolved_content
+  }
+
+  test "shows detailed selected-turn evidence without equating a grammar parse with understanding" do
+    traced =
+      Map.update!(@trace, :events, fn events ->
+        Enum.map(events, fn
+          %{stage: :comprehension_summary} = event ->
+            %{event | evidence: @diagnosis}
+
+          event -> event
+        end)
+      end)
+
+    assert CognitiveTracePanel.diagnosis(traced) == @diagnosis
+
+    html = render_component(&CognitiveTracePanel.panel/1,
+      traces: [traced], trace: traced)
+    assert html =~ ~s(id="atlas-comprehension-diagnosis")
+    assert html =~ ~s(data-degradation-reason="weak_decision_rate_high")
+    assert html =~ ~s(data-degradation-reason="fallback_rate_high")
+    assert html =~ "High fallback-selection rate"
+    assert html =~ "Independently verified lexical constructions"
+    assert html =~ ~s(data-diagnosis-field="structural-status")
+    assert html =~ ~s(data-diagnosis-field="sentence-meaning-status")
+    assert html =~ ~s(data-diagnosis-field="integration-status")
+    assert html =~ ~s(data-diagnosis-field="feedback")
+    assert html =~ "bounded_reanalysis"
+    assert html =~ "66.7%"
+    assert html =~ "33.3%"
+    assert html =~ "Review weak or fallback lexical evidence"
+    assert html =~ "Requires unresolved content"
+    assert html =~ "does not retry"
+    refute html =~ ~s(id="atlas-comprehension-diagnosis-empty")
+  end
+
+  test "older and incomplete turn receipts show no inferred detailed diagnosis" do
+    assert CognitiveTracePanel.diagnosis(@trace) == nil
+    html = render_component(&CognitiveTracePanel.panel/1,
+      traces: [@trace], trace: @trace)
+    assert html =~ ~s(id="atlas-comprehension-diagnosis-empty")
+    refute html =~ ~s(id="atlas-comprehension-diagnosis")
+
+    incomplete =
+      Map.update!(@trace, :events, fn events ->
+        Enum.map(events, fn
+          %{stage: :comprehension_summary} = event ->
+            %{event | evidence: %{reasons: [:fallback_rate_high]}}
+
+          event -> event
+        end)
+      end)
+
+    assert CognitiveTracePanel.diagnosis(incomplete) == nil
+  end
+
+  test "atlas diagnoses only the chosen trace, not the newest unrelated turn" do
+    diagnosed =
+      Map.update!(@trace, :events, fn events ->
+        Enum.map(events, fn
+          %{stage: :comprehension_summary} = event ->
+            %{event | evidence: @diagnosis}
+
+          event -> event
+        end)
+      end)
+    newer = %{@trace | trace_id: "turn-bb0011"}
+
+    nodes = [
+      %{key: :lifg, label: "LIFG", subtitle: "Lexical", description: "Lexical",
+        modules: [Brain.LIFG], telemetry: [], related: [:atl]},
+      %{key: :atl, label: "ATL", subtitle: "Integration", description: "Integration",
+        modules: [Brain.ATL], telemetry: [], related: [:lifg]}
+    ]
+
+    chosen = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :lifg, layer: :trace,
+      traces: [newer, diagnosed], trace_id: diagnosed.trace_id)
+    assert chosen =~ ~s(id="atlas-comprehension-diagnosis")
+
+    other = render_component(&NeuralAtlas.panel/1,
+      nodes: nodes, selected: :lifg, layer: :trace,
+      traces: [newer, diagnosed], trace_id: newer.trace_id)
+    assert other =~ ~s(id="atlas-comprehension-diagnosis-empty")
+    refute other =~ ~s(id="atlas-comprehension-diagnosis")
+  end
+
   test "shows an honest empty state before the first instrumented chat turn" do
     html = render_component(&CognitiveTracePanel.panel/1, traces: [], trace: nil)
     assert html =~ ~s(id="atlas-trace-empty")
