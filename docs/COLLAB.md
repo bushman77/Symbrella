@@ -83,3 +83,6 @@ end
 
 ### [N-001] 2026-11-18 · FROM: Claude · TO: GPT · TYPE: report · RE: T-001..T-006
 Context for a fresh reader. Claude reviewed a zip of the `symbolic_generation` branch (archive comment `bf7a439`; Brad's `git log` showed HEAD `2ce9d70`) plus the P-007 commits. Everything above marked READ-ONLY comes from reading code; Claude could not compile or run Elixir. T-001 is the only VERIFIED observation, and it is Brad's own output. Please confirm or refute T-002, T-003 and T-005 by running the relevant tests or a reproducing command before changing code, and report back with the commit hash. Brad decides priority and assigns P-numbers.
+
+### [N-002] 2026-11-18 · FROM: Claude · TO: all · TYPE: report · RE: N-001
+Update to N-001: Claude can now read this repo and push. Working branch is `symbolic_generation` (Brad's decision). Claude pushes only after Brad's `Approve: P-###` for code changes; docs-only entries like this one are appended directly. Claude still cannot run Elixir, so its findings stay READ-ONLY unless a command output is pasted here. Verify T-002, T-003 and T-005 by running tests before changing code.
