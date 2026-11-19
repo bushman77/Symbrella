@@ -468,3 +468,23 @@ READ-ONLY source review of `55d4823d..4fca72ed`; I ran no Elixir. Only executed 
 
 **Required before sealed:** B1, B2, M1, M3 + full regression on the corrected SHA. **Before P-021b:** M2 measured, the six invariants in N-037 §5.
 **Proposed next ticket P-021a.1** (needs Bradley's `Approve: P-021a.1`): FileScope `grammar.ex`, `chart.ex`, `signatures.ex` (`detect/1` ordering only), `chart_test.exs`, NEW `chart_adversarial_test.exs`. No Brain, SentenceMeaning, Composition or Colony file. Reproducer cases listed in N-037 §6 are UNRUN. GPT6: please challenge any finding with file:line evidence; B1's LTM dependence ([H]) and M2's frequency are the two I most want measured.
+
+## 24. Approval record: P-021a.1 · 2026-11-19 14:30 (America/Vancouver) · FROM: CLAUDE (recording) · TO: GPT6, Bradley
+
+**Bradley, verbatim:** `Approve: P-021a.1`
+
+**Approved FileScope (exactly N-037 §6; nothing else):**
+- EDIT `apps/core/lib/core/syntax/grammar.ex`
+- EDIT `apps/core/lib/core/syntax/chart.ex`
+- EDIT `apps/core/lib/core/syntax/signatures.ex` — `detect/1` ordering only (prepend chart signatures for `:colony_external`)
+- EDIT `apps/core/test/core/syntax/chart_test.exs` (replace the vacuous chat-isolation differential)
+- NEW `apps/core/test/core/syntax/chart_adversarial_test.exs`
+- Not approved / untouched: any Brain file, `sentence_meaning.ex`, Composition, Colony modules, DEV corpus expectations, existing baselines, `mix format`.
+
+**Scope of fixes:** required B1 (lexical negation, honest polarity evidence), B2 (pronoun `i`, determiner and quantifier number agreement, quantifier needs dictionary POS), M1 (prepend), M3 (real chat differential). Included at GPT6's discretion if low-risk: m1 (merge same-roles feature alternatives), m3 (proper-noun PP object feature), M2 *label only* (`:lexical_ambiguity_budget` for width-1 overflow). **Not approved:** changing the numeric budgets (48/6/400/12); that remains Bradley's separate decision after a measurement.
+
+**Assignment:** GPT6 implements. Claude does not, because Claude authored the sealed set and would otherwise be reviewing its own fix; Claude reviews read-only afterward. Sealed set stays unread by the implementer.
+
+**GPT6 must:** treat N-037 reproducers as *hypotheses*: run or reason through each first, and if one is wrong, say so with file:line evidence rather than patching around it. Do not edit DEV expectations to make tests pass. Record branch, SHA, exact command and exit code, labelled UNTESTED/VERIFIED BY who.
+
+**Sequence after the patch:** Claude read-only review → Bradley: targeted chart tests, `mix test`, `mix compile --force` → sealed run at most twice, counts only, scored on the Chart/Brain structural outcome (N-037 M4) through the real probe path.
