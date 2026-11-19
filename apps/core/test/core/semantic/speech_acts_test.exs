@@ -251,6 +251,40 @@ defmodule Core.Semantic.SpeechActsTest do
     end
   end
 
+  test "actual syntax and sentence-meaning pipelines can abstain while social check-in binds" do
+    words = ~w(hey whats new with you?)
+    si =
+      %Core.SemanticInput{
+        source: :test,
+        sentence: "hey whats new with you?",
+        intent: :smalltalk,
+        tokens:
+          words
+          |> Enum.with_index()
+          |> Enum.map(fn {phrase, index} ->
+            %{phrase: phrase, index: index, n: 1}
+          end)
+      }
+      |> Core.Syntax.Signatures.attach()
+      |> Core.Syntax.StructuralCompetition.attach()
+      |> Core.Semantic.SentenceMeaning.attach()
+      |> SpeechActs.attach()
+
+    assert si.structural_competition.status == :no_complete_candidate
+    assert si.sentence_meaning.status == :not_yet_interpreted
+    assert si.speech_act_frame.speech_act == :social_update_query
+    assert si.speech_act_frame.components == [:greeting, :social_update_query]
+    refute si.speech_act_frame.sentence_meaning_verified?
+    assert :ok = Core.SemanticInput.validate_contract(si)
+  end
+
+  test "existing standalone greetings and wellbeing questions still bind normally" do
+    assert {:ok, %{speech_act: :greeting, addressee: :unspecified}} =
+             SpeechActs.from_si(%{sentence: "hey"})
+    assert {:ok, %{speech_act: :wellbeing_query, addressee: :unspecified}} =
+             SpeechActs.from_si(%{sentence: "how are you?"})
+  end
+
   test "similar-looking semantic questions cannot be swallowed by the check-in grammar" do
     for sentence <- [
       "How are you feeling today?",
