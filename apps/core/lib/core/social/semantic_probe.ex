@@ -397,54 +397,9 @@ defmodule Core.Social.SemanticProbe do
     end
   end
 
-  # Observe source-aligned coverage, not Brain.LIFG.StructuralCompetition's
-  # private complete_clause?/2 eligibility. Full-span does not imply eligible.
-  defp structural_scope(si, structural) do
-    indices =
-      si
-      |> Map.get(:tokens, [])
-      |> Enum.filter(fn token ->
-        is_map(token) and is_integer(Map.get(token, :index)) and
-          Map.get(token, :n, 1) == 1 and
-          Map.get(token, :kind, :word) not in [:punct, "punct"]
-      end)
-      |> Enum.map(& &1.index)
-      |> Enum.sort()
-
-    last = List.last(indices)
-    signatures = si |> Map.get(:sentence_signatures, []) |> List.wrap()
-
-    full_span =
-      if is_integer(last) do
-        Enum.count(signatures, fn
-          %{span: {0, ^last}} -> true
-          _ -> false
-        end)
-      else
-        0
-      end
-
-    reason =
-      cond do
-        Map.get(structural, :status) != :no_complete_candidate -> :not_applicable
-        indices == [] -> :no_base_tokens
-        last >= 48 -> :structural_token_budget_exceeded
-        indices != Enum.to_list(0..last) -> :noncontiguous_token_indices
-        signatures == [] -> :no_sentence_signatures
-        full_span == 0 -> :no_full_span_signature
-        true -> :complete_signature_eligibility_unknown
-      end
-
-    %{
-      status: Map.get(structural, :status, :unavailable),
-      reason: reason,
-      sentence_signatures: min(length(signatures), 64),
-      full_span_signatures: min(full_span, 64),
-      eligible_candidates: structural |> Map.get(:candidates, []) |> List.wrap() |> length(),
-      scope: :observed_signatures_not_authoritative_eligibility,
-      factual_authority?: false
-    }
-  end
+  # Delegates to the pure, drift-tested classifier. Observational only.
+  defp structural_scope(si, structural),
+    do: Core.Social.StructuralScope.observe(si, structural)
 
   defp compact_choice(choice) do
     %{
