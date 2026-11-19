@@ -361,7 +361,7 @@ defmodule SymbrellaWeb.SocialLiveTest do
       assert has_element?(view, "#social-evaluation-family-0")
       assert has_element?(view, "#social-evaluation-review-0")
       assert has_element?(view, "#social-evaluation-copy[phx-hook='ClipboardCopy']")
-      assert html =~ "No learning"
+      assert html =~ "no learning"
       assert html =~ "untrusted"
       assert html =~ "No eligible excerpts" or html =~ "unique sentence excerpts"
 
