@@ -39,24 +39,29 @@ defmodule Core.Response.SymbolicGeneration do
 
   @spec generate(String.t(), map(), map(), map()) ::
           {:ok, String.t(), map()} | :not_applicable
-  def generate(user_text, %{risk_bucket: :low} = features, %{action: action} = decision, si)
-      when is_binary(user_text) and is_map(si) and
+  def generate(user_text, features, decision, si),
+    do: generate(user_text, features, decision, si, [])
+
+  @spec generate(String.t(), map(), map(), map(), keyword()) ::
+          {:ok, String.t(), map()} | :not_applicable
+  def generate(user_text, %{risk_bucket: :low} = features, %{action: action} = decision, si, opts)
+      when is_binary(user_text) and is_map(si) and is_list(opts) and
              action in [:answer, :offer_options, :act_first, :ask_first] do
     # Exact temporal operations revalidate the saved meaning and the live
     # session ledger, independently of a fallible surface intent label or
     # a cautious :ask_first action. Generic generation remains gated below.
     case maybe_realize_temporal_first(user_text, si) do
       {:ok, _, _} = temporal -> temporal
-      :not_applicable -> generate_ordinary(user_text, features, decision, si)
+      :not_applicable -> generate_ordinary(user_text, features, decision, si, opts)
     end
   end
 
-  def generate(_text, _features, _decision, _si), do: :not_applicable
+  def generate(_text, _features, _decision, _si, _opts), do: :not_applicable
 
-  defp generate_ordinary(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si)
+  defp generate_ordinary(user_text, %{risk_bucket: :low, intent: intent}, %{action: action}, si, opts)
        when intent in @social_intents and
               action in [:answer, :offer_options, :act_first] do
-    case social_realization(user_text, si) do
+    case social_realization(user_text, si, opts) do
       {:ok, _, _} = realized ->
         realized
 
@@ -93,9 +98,9 @@ defmodule Core.Response.SymbolicGeneration do
     end
   end
 
-  defp generate_ordinary(_text, _features, _decision, _si), do: :not_applicable
+  defp generate_ordinary(_text, _features, _decision, _si, _opts), do: :not_applicable
 
-  defp social_realization(user_text, si) do
+  defp social_realization(user_text, si, opts) do
     case Map.get(si, :speech_act_frame) do
       %{
         version: 1,
@@ -111,7 +116,7 @@ defmodule Core.Response.SymbolicGeneration do
              addressee in [:self, :unspecified] and is_map(lexical) ->
         # Check the bound frame against the *current* sentence and current
         # lexical winners. A stale or forged frame cannot produce a reply.
-        with {:ok, ^frame} <- SpeechActs.from_si(si),
+        with {:ok, ^frame} <- SpeechActs.from_si(si, opts),
              true <- supported_lexical_evidence?(act, lexical) do
           {:ok, realize(act, anchor, frame), social_provenance(frame)}
         else
@@ -130,6 +135,14 @@ defmodule Core.Response.SymbolicGeneration do
        }),
        do: true
 
+  defp supported_lexical_evidence?(:greeting, %{
+         level: :dictionary_interjection_greeting,
+         status: :provisional,
+         witness: %{id: id, norm: norm, definition_sha256: digest}
+       })
+       when is_binary(id) and is_binary(norm) and is_binary(digest),
+       do: String.starts_with?(id, norm <> "|interjection|") and byte_size(digest) == 64
+
   defp supported_lexical_evidence?(_act, %{
          level: :surface_only,
          status: :provisional,
@@ -144,6 +157,7 @@ defmodule Core.Response.SymbolicGeneration do
 
     provenance =
       case {frame.speech_act, lexical.level} do
+        {:greeting, :dictionary_interjection_greeting} -> :dictionary_greeting_gloss
         {:greeting, :surface_only} -> :surface_greeting
         {_, :canonical_lifg_selection} -> :canonical_lifg_choice
         _ -> :surface_social_act

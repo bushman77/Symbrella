@@ -25,6 +25,46 @@ defmodule Core.Response.SymbolicGenerationTest do
     :ok
   end
 
+  test "P-013 dictionary-backed howdy is realized only with revalidated evidence" do
+    cell = %{id: "howdy|interjection|1", norm: "howdy", pos: "interjection",
+      definition: "An informal greeting."}
+    lookup = fn "howdy" -> [cell]; _ -> [] end
+    si =
+      %{sentence: "howdy!", text: "howdy!", intent: :greet,
+        semantic_choices: [], lifg_choices: [], confidence: 0.01}
+      |> SpeechActs.attach(greeting_lookup: lookup)
+
+    features = %{risk_bucket: :low, intent: :greet}
+    decision = %{action: :answer}
+    assert {:ok, "Hello.", meta} =
+      SymbolicGeneration.generate("howdy!", features, decision, si,
+        greeting_lookup: lookup)
+    assert meta.provenance == :dictionary_greeting_gloss
+    assert meta.lexical_witness.id == cell.id
+    refute meta.semantic_verified?
+    refute meta.llm_called?
+
+    forged = put_in(si, [:speech_act_frame, :lexical_evidence, :witness, :id],
+      "howdy|interjection|forged")
+    assert :not_applicable =
+      SymbolicGeneration.generate("howdy!", features, decision, forged,
+        greeting_lookup: lookup)
+
+    changed = fn _ -> [%{cell | definition: "A response to a greeting."}] end
+    assert :not_applicable =
+      SymbolicGeneration.generate("howdy!", features, decision, si,
+        greeting_lookup: changed)
+    assert :not_applicable =
+      SymbolicGeneration.generate("howdy!", %{features | risk_bucket: :high},
+        decision, si, greeting_lookup: lookup)
+    assert :not_applicable =
+      SymbolicGeneration.generate("howdy!", features, %{action: :suppress},
+        si, greeting_lookup: lookup)
+    assert :not_applicable =
+      SymbolicGeneration.generate("hello!", features, decision, si,
+        greeting_lookup: lookup)
+  end
+
   test "a canonical lexical greeting and identity vocative generate a supported reply" do
     si =
       %{

@@ -27,17 +27,23 @@ defmodule Core.Semantic.SpeechActs do
         }
 
   @spec attach(map()) :: map()
-  def attach(%{} = si) do
-    case from_si(si) do
+  def attach(si), do: attach(si, [])
+
+  @spec attach(map(), keyword()) :: map()
+  def attach(%{} = si, opts) when is_list(opts) do
+    case from_si(si, opts) do
       {:ok, frame} -> Map.put(si, :speech_act_frame, frame)
       :not_applicable -> Map.put(si, :speech_act_frame, nil)
     end
   end
 
-  def attach(other), do: other
+  def attach(other, _opts), do: other
 
   @spec from_si(map()) :: {:ok, frame()} | :not_applicable
-  def from_si(%{} = si) do
+  def from_si(si), do: from_si(si, [])
+
+  @spec from_si(map(), keyword()) :: {:ok, frame()} | :not_applicable
+  def from_si(%{} = si, opts) when is_list(opts) do
     case Map.get(si, :sentence) do
       text when is_binary(text) and byte_size(text) <= 160 ->
         case Regex.named_captures(greeting_pattern(), text) do
@@ -49,9 +55,13 @@ defmodule Core.Semantic.SpeechActs do
               lexical_evidence(Map.fetch!(captures, "greeting"), si))}
 
           _ ->
-            case social_update_act(text) do
-              {:ok, _} = update -> update
-              :not_applicable -> other_direct_social_act(text)
+            case dictionary_greeting(text, opts) do
+              {:ok, _} = greeting -> greeting
+              :not_applicable ->
+                case social_update_act(text) do
+                  {:ok, _} = update -> update
+                  :not_applicable -> other_direct_social_act(text)
+                end
             end
         end
 
@@ -60,13 +70,81 @@ defmodule Core.Semantic.SpeechActs do
     end
   end
 
-  def from_si(_), do: :not_applicable
+  def from_si(_, _), do: :not_applicable
 
   # Full-sentence grammar: short standalone direct greeting with optional
   # "there" and a single vocative. It rejects requests, reported speech,
   # conjunctions, multi-participant addressees and quoted sentences.
   defp greeting_pattern do
     ~r/\A\s*(?<greeting>hello|hi+|heya?|hiya|yo|sup|good\s+(?:morning|afternoon|eve(?:n+i+|i+)ng))(?:\s+there)?(?:\s*,?\s+(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*[.!?]*\s*\z/iu
+  end
+
+  # Reuse the dictionary for a single direct lexical greeting only. This
+  # cannot reinterpret reported speech, promote a LIFG winner, or learn.
+  defp dictionary_greeting(text, opts) do
+    case Regex.named_captures(
+           ~r/\A\s*(?<word>[\p{L}][\p{L}\p{M}'-]{0,39})\s*[!.]?\s*\z/u,
+           text
+         ) do
+      %{"word" => word} when byte_size(word) <= 40 ->
+        norm = String.downcase(word)
+        lookup = Keyword.get(opts, :greeting_lookup, &Db.brain_cells_for_norm/1)
+
+        if is_function(lookup, 1) do
+          case lookup.(norm) do
+            rows when is_list(rows) and length(rows) <= 32 ->
+              interjections = Enum.filter(rows, fn cell ->
+                is_map(cell) and Map.get(cell, :norm) == norm and
+                  Map.get(cell, :pos) in [:interjection, "interjection"]
+              end)
+
+              if interjections != [] and length(interjections) <= 8 and
+                   Enum.all?(interjections, &greeting_interjection?(&1, norm)) do
+                winner = Enum.min_by(interjections, &Map.fetch!(&1, :id))
+                definition = Map.fetch!(winner, :definition)
+
+                lexical = %{
+                  level: :dictionary_interjection_greeting,
+                  status: :provisional,
+                  witness: %{
+                    id: winner.id,
+                    norm: norm,
+                    definition_sha256:
+                      (:crypto.hash(:sha256, definition)
+                       |> Base.encode16(case: :lower))
+                  }
+                }
+
+                {:ok, social_frame(:greeting, text, :unspecified, nil,
+                  :unspecified, lexical)}
+              else
+                :not_applicable
+              end
+
+            _ -> :not_applicable
+          end
+        else
+          :not_applicable
+        end
+
+      _ -> :not_applicable
+    end
+  rescue
+    _ -> :not_applicable
+  catch
+    _, _ -> :not_applicable
+  end
+
+  defp greeting_interjection?(cell, norm) do
+    id = Map.get(cell, :id)
+    definition = Map.get(cell, :definition)
+
+    is_binary(id) and String.starts_with?(id, norm <> "|interjection|") and
+      is_binary(definition) and
+      Regex.match?(
+        ~r/\A\s*(?:(?:an?|the)\s+)?(?:(?:informal|formal|casual|colloquial|friendly|polite)\s+)?(?:greeting|salutation)\s*[.!]?\s*\z/iu,
+        definition
+      )
   end
 
   # A closed, whole-utterance check-in grammar. We separately record a

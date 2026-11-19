@@ -6,6 +6,56 @@ defmodule Core.Semantic.SpeechActsTest do
   @hello %{id: "hello|interjection|1", token_index: 0,
            pos: :interjection, score: 0.1619, source: :active_cells}
 
+  test "P-013 dictionary attestation licenses a bare greeting, not a new sense" do
+    cells = [
+      %{id: "howdy|noun|1", norm: "howdy", pos: "noun",
+        definition: "A greeting card."},
+      %{id: "howdy|interjection|1", norm: "howdy", pos: "interjection",
+        definition: "An informal greeting."}
+    ]
+    lookup = fn "howdy" -> cells; _ -> [] end
+    si = %{sentence: "howdy!", intent: :unknown,
+      confidence: 0.01, semantic_choices: [], lifg_choices: [],
+      comprehension: %{unresolved: [], uncertain: ["howdy"]}}
+
+    bound = SpeechActs.attach(si, greeting_lookup: lookup)
+    frame = bound.speech_act_frame
+    assert frame.speech_act == :greeting
+    assert frame.addressee == :unspecified
+    assert frame.lexical_evidence.level == :dictionary_interjection_greeting
+    assert frame.lexical_evidence.witness.id == "howdy|interjection|1"
+    refute frame.sentence_meaning_verified?
+    assert Map.delete(bound, :speech_act_frame) == si
+    assert {:ok, ^frame} = SpeechActs.from_si(bound, greeting_lookup: lookup)
+  end
+
+  test "P-013 rejects negative glosses, competing interjections and misleading surfaces" do
+    positive = %{id: "wug|interjection|1", norm: "wug", pos: "interjection",
+      definition: "A salutation."}
+    negatives = [
+      %{positive | definition: "A response to a greeting."},
+      %{positive | definition: "A greeting card."},
+      %{positive | definition: "A person who greets visitors."},
+      %{positive | definition: ""},
+      %{positive | id: "wug|noun|1"},
+      %{positive | norm: "other"}
+    ]
+
+    for cells <- Enum.map(negatives, fn cell -> [cell] end) ++
+        [[positive, %{positive | definition: "An exclamation."}]] do
+      lookup = fn _ -> cells end
+      assert :not_applicable =
+        SpeechActs.from_si(%{sentence: "wug!"}, greeting_lookup: lookup)
+    end
+
+    lookup = fn "wug" -> [positive]; _ -> [] end
+    for text <- ["wug?", "wug and hello", "\"wug!\"", "The word wug is a greeting.",
+                 "wug, Symbrella", "wug wug", "wug! Please help"] do
+      assert :not_applicable =
+        SpeechActs.from_si(%{sentence: text}, greeting_lookup: lookup), text
+    end
+  end
+
   test "direct greeting binds an assistant vocative independently from missing word senses" do
     si = %{
       sentence: "Hello Symbrella.",
