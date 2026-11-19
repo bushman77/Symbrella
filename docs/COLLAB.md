@@ -543,3 +543,9 @@ Expect `Result: 18/18 passed` (or the ExUnit equivalent: 18 tests, 0 failures). 
 - READ-ONLY finding: `get_in(si, [:wm_context, ...])` and `get_in(si, [:response_meta, ...])` cannot traverse a `Core.SemanticInput` struct via Access.
 - UNTESTED corrective patch only replaces those debug lookups with `Map.get(si.wm_context || %{}, ...)` and `Map.get(si.response_meta || %{}, ...)`; expected assertions and production code unchanged.
 - Awaiting a rerun of the exact test to expose the real acknowledgment outcome; no full-suite success claimed.
+
+### [N-018] 2026-11-18 · FROM: GPT6 · TO: Brad, CLAUDE · TYPE: report · RE: P-013.2
+**GPT6:** Brad's Core ExUnit run at `b2f370f8`: 1934/1935 passed; the live acknowledgment still did not realize. Diagnostics: selected_action `:ask_clarifying_question`, intent `:unknown`, WM transition and attention `nil`, response_source `:model_unavailable`.
+- READ-ONLY root-cause confirmation: `config/config.exs` disables `Core.Brain.WM.Comprehension` in test by default; `nil == nil` made the old `wm_admitted?` diagnostic misleading.
+- UNTESTED test-only fix: the acknowledgment integration test sets `comprehension_wm?: true`; asserts a non-nil, matching admitted WM context; cleans its session WM frame; reports the planner action on failure.
+- No production response or safety-gate changes, no expectation weakening, no mix format. Awaiting Brad's targeted/full rerun.

@@ -3,6 +3,7 @@ defmodule Core.Response.MetalinguisticClaimPipelineTest do
 
   alias Core.Discourse.Ledger
   alias Core.Discourse.Ledger.Owner
+  alias Core.Brain.WM.Comprehension, as: WMComprehension
 
   defp session, do: "p0132-#{System.unique_integer([:positive])}"
 
@@ -100,18 +101,26 @@ defmodule Core.Response.MetalinguisticClaimPipelineTest do
     end)
 
     sid = session()
-    on_exit(fn -> Ledger.clear(sid) end)
+    on_exit(fn ->
+      Ledger.clear(sid)
+      Brain.defocus(WMComprehension.frame_id(sid))
+    end)
     _ = run("florgix!", sid)
-    si = run("it's a greeting", sid, response: :auto)
+    si = run("it's a greeting", sid,
+      response: :auto,
+      comprehension_wm?: true)
 
+    assert is_map(si.wm_context)
+    assert si.wm_context == WMComprehension.admitted_context(sid)
     assert si.metalinguistic_claim.kind == :metalinguistic_claim
     assert si.response_text =~ ~s|you're saying that "florgix" is a "greeting"|,
            "selected_action=#{inspect(si.selected_action)} " <>
              "intent=#{inspect(si.intent)} " <>
              "wm_transition=#{inspect(Map.get(si.wm_context || %{}, :focus_transition))} " <>
-             "wm_admitted?=#{inspect(si.wm_context == Core.Brain.WM.Comprehension.admitted_context(sid))} " <>
+             "wm_admitted?=#{inspect(is_map(si.wm_context) and si.wm_context == WMComprehension.admitted_context(sid))} " <>
              "wm_attention=#{inspect(Map.get(si.wm_context || %{}, :attention))} " <>
-             "response_source=#{inspect(Map.get(si.response_meta || %{}, :response_source))}"
+             "response_source=#{inspect(Map.get(si.response_meta || %{}, :response_source))} " <>
+             "planner_action=#{inspect(Map.get(si.response_meta || %{}, :action))}"
     assert si.response_text =~ "haven't independently verified"
     assert si.response_meta.response_reflection.status ==
       :metalinguistic_classification_acknowledged
