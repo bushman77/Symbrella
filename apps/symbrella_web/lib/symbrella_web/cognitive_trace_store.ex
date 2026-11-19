@@ -185,6 +185,12 @@ defmodule SymbrellaWeb.CognitiveTraceStore do
   end
   defp evidence_for(:atl_integration, %{} = raw),
     do: %{slate_present: Map.get(raw, :slate_present) == true}
+  defp evidence_for(:speech_act_binding,
+         %{speech_act: :social_update_query, social_components: components})
+       when components in [[:social_update_query],
+                           [:greeting, :social_update_query]],
+       do: %{speech_act: :social_update_query, social_components: components}
+
   defp evidence_for(:speech_act_binding, %{speech_act: act})
        when act in [:greeting, :gratitude, :farewell, :wellbeing_query, :not_detected],
        do: %{speech_act: act}
