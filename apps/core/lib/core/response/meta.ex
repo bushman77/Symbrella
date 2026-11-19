@@ -107,7 +107,24 @@ defmodule Core.Response.Meta do
        :typed_cross_turn_join_verified?, :referent_verified?,
        :temporal_report_order_verified?, :actual_event_order_verified?,
        :exact_dictionary_sense_verified?]))
+    |> maybe_put_social_components(reflection)
   end
+
+  # Preserve only the two closed, validated P-008 social-act sequences.
+  # Arbitrary component lists from a reflection never cross into Explain.
+  defp maybe_put_social_components(summary,
+         %{interpreted_speech_act: :social_update_query,
+           social_components: [:greeting, :social_update_query]}) do
+    Map.put(summary, :social_components, [:greeting, :social_update_query])
+  end
+
+  defp maybe_put_social_components(summary,
+         %{interpreted_speech_act: :social_update_query,
+           social_components: [:social_update_query]}) do
+    Map.put(summary, :social_components, [:social_update_query])
+  end
+
+  defp maybe_put_social_components(summary, _), do: summary
 
   defp maybe_put_symbolic_realization(summary, _), do: summary
 
