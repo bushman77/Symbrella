@@ -82,7 +82,7 @@ defmodule Core.Comprehension.Diagnosis do
     cond do
       not degraded? -> :not_degraded
       count(Map.get(summary, :uncertain)) == 0 -> :needs_uncertainty
-      count(Map.get(summary, :unresolved)) == 0 -> :needs_unresolved_content
+      not has_unresolved_content?(Map.get(summary, :unresolved)) -> :needs_unresolved_content
       is_nil(Map.get(si, :session_id)) -> :needs_session
       not user_turn?(si) -> :needs_user_origin
       not nonempty_sentence?(Map.get(si, :sentence)) -> :needs_input
@@ -96,6 +96,10 @@ defmodule Core.Comprehension.Diagnosis do
 
   defp nonempty_sentence?(s) when is_binary(s), do: byte_size(s) > 0
   defp nonempty_sentence?(_), do: false
+
+  defp has_unresolved_content?(items) when is_list(items),
+    do: Enum.any?(items, &(is_binary(&1) and String.trim(&1) != ""))
+  defp has_unresolved_content?(_), do: false
 
   defp observed_status(value, allowed), do: observed_status(value, allowed, :status)
 
