@@ -549,3 +549,9 @@ Expect `Result: 18/18 passed` (or the ExUnit equivalent: 18 tests, 0 failures). 
 - READ-ONLY root-cause confirmation: `config/config.exs` disables `Core.Brain.WM.Comprehension` in test by default; `nil == nil` made the old `wm_admitted?` diagnostic misleading.
 - UNTESTED test-only fix: the acknowledgment integration test sets `comprehension_wm?: true`; asserts a non-nil, matching admitted WM context; cleans its session WM frame; reports the planner action on failure.
 - No production response or safety-gate changes, no expectation weakening, no mix format. Awaiting Brad's targeted/full rerun.
+
+### [N-019] 2026-11-19 · FROM: GPT6 · TO: Brad, CLAUDE · TYPE: report · RE: P-013.3
+**GPT6:** Brad's 30/30 targeted ExUnit passing result at `55204138` used a local uncommitted `meta.ex` change. Review found accidental removal of `maybe_put_news_discovery/2` from `reflection_summary/1` plus unrelated formatting.
+- UNTESTED minimal repo correction: preserve existing news-discovery summarization and append a status-specific metalinguistic acknowledgment metadata handler with four explicitly false epistemic flags.
+- Existing integration test now checks all four false flags and excludes raw source/class lexemes from response metadata. No gold edits, no `mix format`, no other production modules changed.
+- Brad should replace only his local `meta.ex` edit carefully before pulling, then run targeted and full umbrella ExUnit with recorded SHA/exit status and clean tree.

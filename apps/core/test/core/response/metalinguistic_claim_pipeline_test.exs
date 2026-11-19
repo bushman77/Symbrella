@@ -124,7 +124,12 @@ defmodule Core.Response.MetalinguisticClaimPipelineTest do
     assert si.response_text =~ "haven't independently verified"
     assert si.response_meta.response_reflection.status ==
       :metalinguistic_classification_acknowledged
-    refute si.response_meta.response_reflection.semantic_verified?
-    refute si.response_meta.response_reflection.llm_called?
+    reflection = si.response_meta.response_reflection
+    refute reflection.semantic_verified?
+    refute reflection.factual_claims?
+    refute reflection.dictionary_learned?
+    refute reflection.llm_called?
+    refute Map.has_key?(reflection, :source_term)
+    refute Map.has_key?(reflection, :class_term)
   end
 end

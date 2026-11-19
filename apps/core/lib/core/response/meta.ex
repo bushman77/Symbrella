@@ -88,7 +88,21 @@ defmodule Core.Response.Meta do
     |> maybe_put_lexical_definition(reflection)
     |> maybe_put_open_question_boundary(reflection)
     |> maybe_put_news_discovery(reflection)
+    |> maybe_put_metalinguistic_acknowledgment(reflection)
   end
+
+  # Carry only bounded non-factual acknowledgment evidence into Explain.
+  # Never copy source_term or class_term, which are user-provided lexemes.
+  defp maybe_put_metalinguistic_acknowledgment(summary,
+         %{status: :metalinguistic_classification_acknowledged,
+           semantic_verified?: false, factual_claims?: false,
+           dictionary_learned?: false, llm_called?: false} = reflection) do
+    Map.merge(summary, Map.take(reflection,
+      [:provenance, :evidence_level, :semantic_verified?,
+       :factual_claims?, :dictionary_learned?, :llm_called?]))
+  end
+
+  defp maybe_put_metalinguistic_acknowledgment(summary, _), do: summary
 
   defp reflection_summary(_), do: nil
 
