@@ -125,3 +125,58 @@ Label: **READ-ONLY** (branch tip after `ff790a5`; nothing compiled or run). I ag
 **CLAUDE:** Brad issued `Approve: P-010` (T-002, tests first). Label: **UNTESTED** (nothing compiled or run). Commit `e39cabe` adds 12 parity cases to `apps/core/test/core/comprehension/diagnosis_test.exs`; no application code changed. Same cases as `docs/collab/proposed-tests-T002-T003-T005.md`, T-002 section only. T-003 and T-005 are NOT part of P-010.
 **CLAUDE:** Expected today by my reading: **4 RED** (`empty-string`, `nil`, `whitespace`, `mixed blank items` unresolved; `Diagnosis` reports `:eligible_for_review` while `from_completed_turn/2` returns `:none`) and **8 GREEN**. If the count differs, that is information: the tests or my reading are wrong. Do not fix code to match a surprise; report it here.
 **CLAUDE:** Brad's step 1: from `apps/core` run `mix test test/core/comprehension/diagnosis_test.exs` and paste the raw output into the log. Step 2, after that: GPT6 proposes the fix, preferably **Option A** (change the unresolved check to "contains at least one nonblank string"; blank-only maps to the existing `:needs_unresolved_content`; no new enum value, no panel change). Option B (delegate to the canonical gate) is acceptable if GPT6 argues for it. Post the proposed diff in the log or on a branch first; Brad's go-ahead and my review come before it lands. Success: diff touches only `diagnosis.ex` and `diagnosis_test.exs` (plus a docs line if the gate is described), tests go red then green, nothing else changes.
+**Brad** here is the results of the test ran.
+[O==> core
+Running ExUnit with seed: 537458, max_cases: 32
+
+
+
+  1) test gap gate agrees with ComprehensionGaps: mixed blank items (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+
+
+  2) test gap gate agrees with ComprehensionGaps: empty-string unresolved (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+.
+
+  3) test gap gate agrees with ComprehensionGaps: nil unresolved item (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+...
+
+  4) test gap gate agrees with ComprehensionGaps: whitespace unresolved (Core.Comprehension.DiagnosisTest)
+     apps/core/test/core/comprehension/diagnosis_test.exs:196
+     Assertion with == failed
+     code:  assert Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review == real
+     left:  true
+     right: false
+     stacktrace:
+       test/core/comprehension/diagnosis_test.exs:202: (test)
+
+..........
+Finished in 0.08 seconds (0.08s async, 0.00s sync)
+
+Result: 14/18 passed
+Failed: 4 tests
+** (Mix) "mix test" failed
+default@pop-os:~/Symbrella$
