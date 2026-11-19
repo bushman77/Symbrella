@@ -223,6 +223,29 @@ existing bounded feedback, memory permissions, repair policy or responses.
 Detailed contracts and regression commands are in
 [Cognitive Trace v1](cognitive-trace-v1.md).
 
+## P-008: Compound social check-in evidence
+
+The Phase 6 `:speech_act_binding` receipt now distinguishes a standalone
+social-update question from a greeting followed by that question. For an exact
+matched user turn such as `hey whats new with you?`, the Turn trace shows
+`speech act: social_update_query` and
+`social components: greeting + social_update_query`.
+
+These are **provisional surface grammar classifications**, not proof that
+`SentenceMeaning` composed a complete proposition or that LIFG selected
+dictionary-verified word senses. The P-007 comprehension diagnosis continues
+to show weak lexical decisions and `no_complete_candidate` where present.
+Both observations remain visible rather than overwriting one another.
+
+The existing symbolic response path can respond to these narrowly recognized,
+low-risk user check-ins through independent same-turn frame validation.
+Unsupported, reported or quoted sentences remain outside this grammar.
+Recorded Turn trace evidence contains only fixed vocabulary atoms and remains
+scoped to the selected turn; it does not contain message text.
+
+See [Cognitive Trace v1](cognitive-trace-v1.md) for the response and
+sanitization contracts.
+
 ## Verification
 
 From the umbrella root:
