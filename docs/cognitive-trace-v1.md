@@ -190,7 +190,7 @@ instruction-bearing, and other-directed examples do not authorize a
 personal response.
 
 This is a **surface-only, provisional speech-act interpretation**. It does
-not change the original LIFG winners, ATP/ATL evidence, sentence signatures,
+not change the original LIFG winners, ATL evidence, sentence signatures,
 structural competition, sentence meaning or degraded-comprehension flags.
 A mixed social turn may therefore still show
 `no_complete_candidate`, `not_yet_interpreted` and weak lexical evidence,
