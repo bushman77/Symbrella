@@ -6,7 +6,7 @@ defmodule SymbrellaWeb.SocialLive do
 
   use SymbrellaWeb, :live_view
 
-  alias SymbrellaWeb.{SocialData, SocialCognitiveReport, SocialBrainActivity}
+  alias SymbrellaWeb.{SocialData, SocialCognitiveReport, SocialBrainActivity, SocialEvaluation}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,14 +23,27 @@ defmodule SymbrellaWeb.SocialLive do
        loading?: true,
        error: nil,
        analysis_open?: false,
-       cognitive_report: nil
+       cognitive_report: nil,
+       evaluation_open?: false,
+       evaluation: nil,
+       evaluation_labels: %{},
+       evaluation_summary: SocialEvaluation.summary(nil, %{}),
+       evaluation_export: ""
      )}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
     page = parse_page(Map.get(params, "page"))
-    socket = assign(socket, page: page, error: nil, loading?: true, analysis_open?: false, cognitive_report: nil)
+    socket =
+      assign(socket,
+        page: page, error: nil, loading?: true,
+        analysis_open?: false, cognitive_report: nil,
+        evaluation_open?: false, evaluation: nil,
+        evaluation_labels: %{},
+        evaluation_summary: SocialEvaluation.summary(nil, %{}),
+        evaluation_export: ""
+      )
 
     socket =
       case socket.assigns.live_action do
@@ -48,6 +61,13 @@ defmodule SymbrellaWeb.SocialLive do
 
   @impl true
   def handle_event("refresh", _params, socket) do
+    # Refresh invalidates any labels linked to the previous external snapshot.
+    socket =
+      assign(socket, evaluation_open?: false, evaluation: nil,
+        evaluation_labels: %{},
+        evaluation_summary: SocialEvaluation.summary(nil, %{}),
+        evaluation_export: "")
+
     socket =
       if socket.assigns.live_action == :show,
         do: fetch_thread(socket),
@@ -78,6 +98,74 @@ defmodule SymbrellaWeb.SocialLive do
 
   def handle_event("analyze_cognition", _params, socket), do: {:noreply, socket}
 
+  # Evaluation is a separate, explicitly invoked read-only operation.
+  # Unlike Analyze cognition, it never records a Brain activity receipt or
+  # opts into even transient neural stimulation.
+  @impl true
+  def handle_event("evaluate_thread", _params, socket) do
+    if socket.assigns.live_action == :show and is_map(socket.assigns.topic) do
+      evaluator =
+        Application.get_env(:symbrella_web, :social_evaluator, SocialEvaluation)
+
+      outcome =
+        if Code.ensure_loaded?(evaluator) and function_exported?(evaluator, :analyze, 2) do
+          evaluator.analyze(
+            %{topic: socket.assigns.topic, comments: socket.assigns.comments}, []
+          )
+        else
+          {:error, :evaluation_unavailable}
+        end
+
+      case outcome do
+        {:ok, %{source: :colony_external, mode: :read_only_evaluation,
+                items: items} = evaluation} when is_list(items) ->
+          labels = %{}
+
+          {:noreply,
+           assign(socket,
+             evaluation_open?: true, evaluation: evaluation,
+             evaluation_labels: labels,
+             evaluation_summary: SocialEvaluation.summary(evaluation, labels),
+             evaluation_export: SocialEvaluation.export_jsonl(evaluation, labels),
+             analysis_open?: false, error: nil)}
+
+        _ ->
+          {:noreply, assign(socket, evaluation_open?: false, evaluation: nil,
+            error: "Read-only social evaluation is unavailable.")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("label_evaluation", %{"index" => raw_index} = params, socket) do
+    with %{items: items} = evaluation <- socket.assigns.evaluation,
+         {index, ""} <- Integer.parse(raw_index),
+         true <- index >= 0,
+         {:ok, item} <- Enum.fetch(items, index) do
+      labels = SocialEvaluation.put_label(socket.assigns.evaluation_labels, item, params)
+
+      {:noreply,
+       assign(socket,
+         evaluation_labels: labels,
+         evaluation_summary: SocialEvaluation.summary(evaluation, labels),
+         evaluation_export: SocialEvaluation.export_jsonl(evaluation, labels))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("label_evaluation", _, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("close_evaluation", _params, socket) do
+    {:noreply, assign(socket, evaluation_open?: false, evaluation: nil,
+      evaluation_labels: %{},
+      evaluation_summary: SocialEvaluation.summary(nil, %{}),
+      evaluation_export: "")}
+  end
+
   defp analyze_piece(socket, target) do
     if socket.assigns.live_action == :show and socket.assigns.topic do
       input = %{topic: socket.assigns.topic, comments: socket.assigns.comments}
@@ -96,7 +184,8 @@ defmodule SymbrellaWeb.SocialLive do
         {:ok, report} ->
           # Only the selected source is represented in the new /brain receipt.
           _ = SocialBrainActivity.record(report)
-          {:noreply, assign(socket, analysis_open?: true, cognitive_report: report, error: nil)}
+          {:noreply, assign(socket, analysis_open?: true, cognitive_report: report,
+            evaluation_open?: false, error: nil)}
 
         _ ->
           {:noreply, assign(socket, analysis_open?: true, cognitive_report: nil,
