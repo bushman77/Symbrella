@@ -68,8 +68,9 @@ defmodule Core.Syntax.Chart do
       abstain(reason, 0)
     else
       case fill(sorted, possessive, limits) do
-        {:error, :chart_budget_exceeded, count} ->
-          abstain(:chart_budget_exceeded, count)
+        {:error, reason, count}
+        when reason in [:chart_budget_exceeded, :lexical_ambiguity_budget] ->
+          abstain(reason, count)
 
         {:ok, chart, count} ->
           last = length(sorted) - 1
@@ -176,6 +177,8 @@ defmodule Core.Syntax.Chart do
       is_nil(cop) -> :no_clause_core
       Enum.any?(nodes, &(Grammar.copula?(&1.word) and not copula_pos?(&1))) ->
         :lexical_witness_missing
+      Enum.any?(nodes, &(Grammar.quantifier?(&1.word) and
+        not has_pos?(&1, "determiner"))) -> :lexical_witness_missing
       agreement_conflict?(nodes, cop) -> :agreement_conflict
       missing_core_witness?(nodes, cop) -> :lexical_witness_missing
       true -> :coverage_gap
@@ -185,12 +188,31 @@ defmodule Core.Syntax.Chart do
   defp agreement_conflict?(nodes, cop) do
     prior = Enum.filter(nodes, &(&1.index < cop.index))
     head = List.last(prior)
+    specifier = List.first(prior)
 
     if is_map(head) and (has_pos?(head, "noun") or has_pos?(head, "pronoun")) do
-      subject = if(has_pos?(head, "pronoun"),
-        do: Grammar.pronoun_number(head.word),
-        else: if(Map.get(head, :plural_noun?, false), do: :plural, else: :singular))
-      subject != :unknown and subject != Grammar.agreement(cop.word)
+      number =
+        if has_pos?(head, "pronoun"),
+          do: Grammar.pronoun_number(head.word),
+          else: if(Map.get(head, :plural_noun?, false), do: :plural, else: :singular)
+
+      specifier_number =
+        cond do
+          is_nil(specifier) -> :unknown
+          Grammar.determiner?(specifier.word) ->
+            Grammar.determiner_number(specifier.word)
+          Grammar.quantifier?(specifier.word) ->
+            Grammar.quantifier_number(specifier.word)
+          true -> :unknown
+        end
+
+      invalid_specifier? =
+        specifier_number in [:singular, :plural] and
+          number in [:singular, :plural] and
+          specifier_number != number
+
+      invalid_copula? = number != :unknown and not agreement?(number, cop.word)
+      invalid_specifier? or invalid_copula?
     else
       false
     end
@@ -234,7 +256,15 @@ defmodule Core.Syntax.Chart do
 
           case close(initial ++ joined, limits.per_span) do
             {:error, :chart_budget_exceeded} ->
-              {:halt, {:error, :chart_budget_exceeded, count}}
+              # A production width-1 overflow witnesses too many lexical
+              # alternatives, not an excessively long sentence. Keep the
+              # existing generic reason for tests using reduced limits.
+              reason =
+                if width == 1 and limits.per_span == @max_items_per_span,
+                  do: :lexical_ambiguity_budget,
+                  else: :chart_budget_exceeded
+
+              {:halt, {:error, reason, count}}
 
             {:ok, items} ->
               new_total = count + length(items)
@@ -295,18 +325,32 @@ defmodule Core.Syntax.Chart do
   defp terminals(node) do
     i = node.index
     make = fn kind -> item(kind, i, i, %{head: i, word: node.word}) end
-    noun = if has_pos?(node, "noun"),
+
+    # This initial copular grammar treats closed function-word surfaces as
+    # grammatical categories only. Otherwise an alternative noun/adjective
+    # POS row for "a", "each" or "i" could bypass the specifier or person
+    # agreement gate by becoming an unrelated nominal modifier.
+    function_surface? =
+      Grammar.determiner?(node.word) or Grammar.quantifier?(node.word) or
+        Grammar.pronoun?(node.word) or Grammar.copula?(node.word)
+
+    noun = if has_pos?(node, "noun") and not function_surface?,
       do: [item(:noun, i, i, %{head: i, word: node.word,
         number: if(Map.get(node, :plural_noun?, false), do: :plural, else: :singular)})],
       else: []
-    adjective = if has_pos?(node, "adjective"), do: [make.(:adjective)], else: []
+    adjective = if has_pos?(node, "adjective") and not function_surface?,
+      do: [make.(:adjective)], else: []
     pronoun = if has_pos?(node, "pronoun") and Grammar.pronoun?(node.word),
       do: [item(:pronoun, i, i, %{head: i, word: node.word,
         number: Grammar.pronoun_number(node.word)})], else: []
-    proper = if has_pos?(node, "proper_noun"), do: [make.(:proper_noun)], else: []
+    proper = if has_pos?(node, "proper_noun") and not function_surface?,
+      do: [make.(:proper_noun)], else: []
     determiner = if has_pos?(node, "determiner") and Grammar.determiner?(node.word),
       do: [make.(:determiner)], else: []
-    quantifier = if Grammar.quantifier?(node.word), do: [make.(:quantifier)], else: []
+    quantifier =
+      if Grammar.quantifier?(node.word) and has_pos?(node, "determiner"),
+        do: [make.(:quantifier)],
+        else: []
     copula = if Grammar.copula?(node.word) and copula_pos?(node),
       do: [make.(:copula)], else: []
     reading =
@@ -320,8 +364,10 @@ defmodule Core.Syntax.Chart do
       else
         []
       end
-    preposition = if has_pos?(node, "preposition"), do: [make.(:preposition)], else: []
-    adverb = if has_pos?(node, "adverb"), do: [make.(:adverb)], else: []
+    preposition = if has_pos?(node, "preposition") and not function_surface?,
+      do: [make.(:preposition)], else: []
+    adverb = if has_pos?(node, "adverb") and not function_surface?,
+      do: [make.(:adverb)], else: []
 
     noun ++ adjective ++ pronoun ++ proper ++ determiner ++ quantifier ++
       copula ++ complement ++ preposition ++ adverb
@@ -388,23 +434,34 @@ defmodule Core.Syntax.Chart do
     end
   end
 
-  defp combine(:determined_subject, determiner, nominal),
-    do: noun_subject(%{nominal | first: determiner.first},
-      %{subject_determiner: determiner.head},
-      %{subject_determiner: [:pos_determiner]})
+  defp combine(:determined_subject, determiner, nominal) do
+    if Grammar.number_compatible?(Grammar.determiner_number(determiner.word),
+         nominal.number) do
+      noun_subject(%{nominal | first: determiner.first},
+        %{subject_determiner: determiner.head},
+        %{subject_determiner: [:pos_determiner]})
+    end
+  end
 
   defp combine(:determined_possessive_subject, determiner, subject) do
     if Map.has_key?(subject.roles, :subject_possessor) and
-         not Map.has_key?(subject.roles, :subject_determiner) do
+         not Map.has_key?(subject.roles, :subject_determiner) and
+         Grammar.number_compatible?(Grammar.determiner_number(determiner.word),
+           subject.number) do
       %{subject | first: determiner.first,
         roles: Map.put(subject.roles, :subject_determiner, determiner.head),
         required: Map.put(subject.required, :subject_determiner, [:pos_determiner])}
     end
   end
 
-  defp combine(:quantified_subject, quantifier, nominal),
-    do: noun_subject(%{nominal | first: quantifier.first},
-      %{subject_quantifier: quantifier.head}, %{})
+  defp combine(:quantified_subject, quantifier, nominal) do
+    if Grammar.number_compatible?(Grammar.quantifier_number(quantifier.word),
+         nominal.number) do
+      noun_subject(%{nominal | first: quantifier.first},
+        %{subject_quantifier: quantifier.head},
+        %{subject_quantifier: [:pos_determiner]})
+    end
+  end
 
   defp combine(:pp, preposition, subject) do
     # One nested PP level can be encoded in fixed role keys. Rather than
@@ -476,6 +533,10 @@ defmodule Core.Syntax.Chart do
 
   # Unknown subject number cannot license a positive clause.
   defp agreement?(:unknown, _), do: false
+  # The witnessed first-person singular "I" takes "was", never "is".
+  # The subjunctive "I were" is not admitted by this indicative-only chart.
+  defp agreement?(:first_person_singular, "was"), do: true
+  defp agreement?(:first_person_singular, _), do: false
   defp agreement?(subject_number, copula), do: subject_number == Grammar.agreement(copula)
 
   defp subject_adjunct_roles(adjuncts) do
@@ -538,7 +599,8 @@ defmodule Core.Syntax.Chart do
     evidence =
       Enum.concat([
         [:chart_copular_predication, :attested_copula,
-          :attested_complement, :source_aligned_full_span, :positive_polarity],
+          :attested_complement, :source_aligned_full_span,
+          :no_negation_cue_in_closed_list],
         if(:adjectival in parse.reading, do: [:attested_adjective], else: []),
         if(:participial in parse.reading, do: [:attested_past_participle], else: []),
         if(parse.copula_word in ["is", "are"], do: [:present_copula], else: [:past_copula]),

@@ -9,13 +9,36 @@ defmodule Core.Syntax.Grammar do
 
   @copulas ~w(is are was were)
   @quantifiers ~w(most every each all both several some many few)
-  @negative_words ~w(not never no n't isn't aren't wasn't weren't don't doesn't didn't can't couldn't won't wouldn't shouldn't)
+  # Closed rejection cues: lexical negators (including negative pronouns),
+  # downward/near-negative adverbs, and "without" as a negative PP marker.
+  # These deliberately abstain rather than assert positive polarity.
+  @negative_words ~w(
+    not never no n't isn't aren't wasn't weren't don't doesn't didn't
+    can't couldn't won't wouldn't shouldn't none nothing nobody nowhere
+    neither nor hardly barely scarcely rarely seldom without
+  )
   @modals ~w(can could may might must shall should will would)
   @subordinators ~w(if when unless because although while)
   @pronouns ~w(i you he she it we they)
   @plural_pronouns ~w(we they you)
-  @singular_pronouns ~w(he she it i)
+  @singular_pronouns ~w(he she it)
+  @first_person_singular_pronouns ~w(i)
   @determiners ~w(the a an this that these those)
+
+  # Number restrictions are grammatical *constraints*, not lexical witnesses.
+  # Each specifier must separately have an attested determiner POS.
+  # :either preserves only neutral quantification; no scope is applied.
+  @determiner_numbers %{
+    "a" => :singular, "an" => :singular, "this" => :singular,
+    "that" => :singular, "these" => :plural, "those" => :plural,
+    "the" => :either
+  }
+  @quantifier_numbers %{
+    "each" => :singular, "every" => :singular,
+    "several" => :plural, "many" => :plural, "few" => :plural,
+    "both" => :plural, "most" => :either, "some" => :either,
+    "all" => :either
+  }
   @agreement %{"is" => :singular, "was" => :singular,
     "are" => :plural, "were" => :plural}
 
@@ -64,10 +87,22 @@ defmodule Core.Syntax.Grammar do
   def agreement(word), do: Map.get(@agreement, word, :unknown)
 
   @doc false
+  def determiner_number(word), do: Map.get(@determiner_numbers, word, :unknown)
+
+  @doc false
+  def quantifier_number(word), do: Map.get(@quantifier_numbers, word, :unknown)
+
+  @doc false
+  def number_compatible?(:either, number), do: number in [:singular, :plural]
+  def number_compatible?(required, number),
+    do: required in [:singular, :plural] and required == number
+
+  @doc false
   def pronoun_number(word) do
     cond do
       word in @plural_pronouns -> :plural
       word in @singular_pronouns -> :singular
+      word in @first_person_singular_pronouns -> :first_person_singular
       true -> :unknown
     end
   end

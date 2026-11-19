@@ -29,6 +29,7 @@ defmodule Core.Syntax.ChartDevCorpusTest do
   # lexical-witness abstention; grammar must never synthesize a dictionary row.
   @lexical [
     {"the", "determiner", []}, {"this", "determiner", []},
+    {"most", "determiner", []}, {"every", "determiner", []},
     {"a", "determiner", []}, {"site", "noun", []},
     {"page", "noun", []}, {"pages", "noun", ["tag:form-of", "tag:plural"]},
     {"market", "noun", []}, {"files", "noun", ["tag:form-of", "tag:plural"]},

@@ -99,21 +99,25 @@ defmodule Core.Syntax.ChartTest do
     refute Map.has_key?(signature.roles, :agent)
   end
 
-  test "non-colony paths preserve existing signatures and ordering" do
-    for text <- [
-      "The bird is flarping on the fence.",
-      "The checker verified those claims.",
-      "Links were lines that refute the claim.",
-      "I have got to leave.",
-      "The bird is sleeping under the table."
-    ] do
-      si = input(text, fixture_cells(), :user)
-      before_equivalent = Signatures.detect(%{si | source: :test})
-      production = Signatures.detect(si)
+  test "non-Colony detection preserves exact legacy signatures on chart-positive sentences" do
+    for text <- ["The site is open.", "The files are written for readers."] do
+      si = input(text, fixture_cells(), :colony_external)
+      colony = Signatures.detect(si)
 
-      assert production == before_equivalent
-      refute Enum.any?(production, &(&1.id == :copular_predication))
-      assert production == Signatures.detect(si)
+      chart = Enum.filter(colony, &(&1.id == :copular_predication))
+      assert chart != [], "control does not exercise the chart: #{text}"
+      assert hd(colony).id == :copular_predication
+
+      # The only Colony-specific outputs must be the newly prepended chart
+      # signatures. Non-Colony ordering and all original maps stay identical.
+      original = Enum.reject(colony, &(&1.id == :copular_predication))
+
+      for source <- [:user, :prod, :test, :chat, nil] do
+        isolated = Signatures.detect(%{si | source: source})
+        assert isolated == original, "source #{inspect(source)} changed #{text}"
+        assert isolated == Signatures.detect(%{si | source: source})
+        refute Enum.any?(isolated, &(&1.id == :copular_predication))
+      end
     end
   end
 

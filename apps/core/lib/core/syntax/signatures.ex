@@ -110,7 +110,7 @@ defmodule Core.Syntax.Signatures do
     # Chat and all other input sources retain their exact original signature
     # order and content. Chart hypotheses are Colony-only and L1-only.
     if Map.get(si, :source) == :colony_external do
-      existing ++ Core.Syntax.Chart.clause_signatures(si, nodes, possessive_phrases)
+      Core.Syntax.Chart.clause_signatures(si, nodes, possessive_phrases) ++ existing
     else
       existing
     end
