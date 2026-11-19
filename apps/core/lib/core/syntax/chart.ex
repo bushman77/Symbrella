@@ -48,11 +48,20 @@ defmodule Core.Syntax.Chart do
     indices = Enum.map(sorted, &Map.get(&1, :index))
     sentence = Map.get(si, :sentence, "")
 
+    # Classify forbidden sentence shapes before the source-gap checker:
+    # canonical tokenization correctly reports punctuation gaps, but those
+    # gaps must not obscure structured records or embedded commands.
+    # Either path abstains; only fully validated inputs reach chart fill.
     reason =
       cond do
-        Map.get(si, :source) != :colony_external -> :unsupported_source
-        not valid_original_tokens?(si, sorted) -> :coverage_gap
-        true -> rejection_reason(sentence, sorted, indices, limits.tokens)
+        Map.get(si, :source) != :colony_external ->
+          :unsupported_source
+
+        true ->
+          case rejection_reason(sentence, sorted, indices, limits.tokens) do
+            nil -> if valid_original_tokens?(si, sorted), do: nil, else: :coverage_gap
+            rejection -> rejection
+          end
       end
 
     if reason do
@@ -112,22 +121,26 @@ defmodule Core.Syntax.Chart do
     words = Enum.map(nodes, & &1.word)
     cond do
       not is_binary(sentence) -> :invalid_input
-      indices == [] -> :no_clause_core
+      # The token cap remains unconditional, including for rejected input.
       length(indices) > max_tokens -> :chart_budget_exceeded
-      indices != Enum.to_list(0..(length(indices) - 1)) -> :coverage_gap
-      Enum.any?(nodes, &(not is_binary(Map.get(&1, :surface)))) -> :coverage_gap
-      not Boundaries.valid_window?(Enum.map(nodes,
-        &%{phrase: &1.surface, index: &1.index})) -> :coverage_gap
+      # The following closed, unsafe/structured shapes always abstain.
+      # Classify them before generic index/gap checks: canonical tokenization
+      # can omit punctuation and URL components while retaining source text.
       Regex.match?(~r/\A\s*[\p{L}\p{M}][\p{L}\p{M} ]{0,32}:\s*\S/u, sentence) and
         not Enum.any?(words, &Grammar.copula?/1) -> :structured_record
+      Enum.any?(words, &Grammar.subordinator?/1) -> :instruction_shaped
       Regex.match?(~r/[,;:]|\s[-—–]\s|\n/u, sentence) -> :multiple_clauses
+      indices == [] -> :no_clause_core
+      indices != Enum.to_list(0..(length(indices) - 1)) -> :coverage_gap
+      Enum.any?(nodes, &(not is_binary(Map.get(&1, :surface)))) -> :coverage_gap
       String.ends_with?(String.trim(sentence), "?") or
         Grammar.copula?(hd(words)) -> :interrogative
       Enum.any?(words, &Grammar.negative?/1) -> :negation
       Enum.any?(words, &Grammar.modal?/1) -> :modal
-      Enum.any?(words, &Grammar.subordinator?/1) -> :instruction_shaped
       not Enum.any?(words, &Grammar.copula?/1) ->
         if verb_initial?(hd(nodes)), do: :instruction_shaped, else: :no_clause_core
+      not Boundaries.valid_window?(Enum.map(nodes,
+        &%{phrase: &1.surface, index: &1.index})) -> :coverage_gap
       true -> nil
     end
   end
