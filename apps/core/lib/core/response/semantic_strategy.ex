@@ -399,7 +399,8 @@ defmodule Core.Response.SemanticStrategy do
   defp social_strategy(si) do
     case {Map.get(si, :speech_act_frame), SpeechActs.from_si(si)} do
       {%{speech_act: act, addressee: addressee} = frame, {:ok, recomputed}}
-      when act in [:greeting, :gratitude, :farewell, :wellbeing_query] and
+      when act in [:greeting, :gratitude, :farewell, :wellbeing_query,
+                   :social_update_query] and
              addressee in [:self, :unspecified] ->
         if frame == recomputed do
           plan(
