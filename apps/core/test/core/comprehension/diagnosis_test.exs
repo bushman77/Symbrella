@@ -94,6 +94,27 @@ defmodule Core.Comprehension.DiagnosisTest do
     assert without_unresolved.curiosity_gap_gate == :needs_unresolved_content
   end
 
+  test "missing lexical choices merit review without fabricating a feedback revision" do
+    si = %{
+      comprehension: %{
+        degraded?: true, reasons: [:no_lifg_choices],
+        understood: [], uncertain: [], unresolved: [],
+        lexical_meanings: [],
+        stats: %{total: 0, weak_rate: 0.0, fallback_rate: 0.0,
+                 unresolved_content: 0}
+      },
+      lifg_feedback: %{mode: :observe_only}
+    }
+
+    diagnosis = Diagnosis.assess(si)
+    assert diagnosis.choice_count == 0
+    assert diagnosis.reasons == [:no_lifg_choices]
+    assert diagnosis.repair_hint == :review_missing_choices
+    assert diagnosis.feedback_mode == :observe_only
+    assert diagnosis.feedback_applied == :not_observed
+    assert diagnosis.curiosity_gap_gate == :needs_uncertainty
+  end
+
   test "unknown metadata fails closed to bounded enum fields" do
     si = %{
       comprehension: %{
