@@ -2,6 +2,7 @@ defmodule Core.Comprehension.DiagnosisTest do
   use ExUnit.Case, async: true
 
   alias Core.Comprehension.{Diagnosis, Summary}
+  alias Core.Curiosity.ComprehensionGaps
 
   test "names the actual weak/fallback causes without promoting LIFG scores to understanding" do
     si = %{
@@ -149,5 +150,56 @@ defmodule Core.Comprehension.DiagnosisTest do
   test "no summary yields no new diagnosis instead of inventing a reason" do
     assert Diagnosis.assess(%{}) == %{}
     assert Diagnosis.assess(nil) == %{}
+  end
+
+  # P-010 (T-002): the diagnosis gate must agree with the gate it mirrors,
+  # Core.Curiosity.ComprehensionGaps.from_completed_turn/2.
+  defp gate_si(overrides) do
+    base = %{
+      source: :user,
+      session_id: "gate-parity",
+      sentence: "I have a glimmerflux.",
+      comprehension: %{
+        degraded?: true,
+        reasons: [:unresolved_content_tokens],
+        uncertain: ["glimmerflux"],
+        unresolved: ["glimmerflux"],
+        understood: [],
+        lexical_meanings: [],
+        stats: %{total: 1, weak_rate: 1.0, fallback_rate: 0.0, unresolved_content: 1}
+      }
+    }
+
+    Enum.reduce(overrides, base, fn
+      {:comprehension, c}, acc -> %{acc | comprehension: Map.merge(acc.comprehension, c)}
+      {k, v}, acc -> Map.put(acc, k, v)
+    end)
+  end
+
+  # {name, overrides, eligible_by_the_real_gate?}
+  @gate_cases [
+    {"valid", %{}, true},
+    {"one nonblank among junk", %{comprehension: %{unresolved: [nil, "x"]}}, true},
+    {"empty-string unresolved", %{comprehension: %{unresolved: [""]}}, false},
+    {"nil unresolved item", %{comprehension: %{unresolved: [nil]}}, false},
+    {"whitespace unresolved", %{comprehension: %{unresolved: ["  "]}}, false},
+    {"mixed blank items", %{comprehension: %{unresolved: [nil, ""]}}, false},
+    {"no unresolved", %{comprehension: %{unresolved: []}}, false},
+    {"no uncertain", %{comprehension: %{uncertain: []}}, false},
+    {"not degraded", %{comprehension: %{degraded?: false}}, false},
+    {"no session", %{session_id: nil}, false},
+    {"assistant source", %{source: :assistant}, false},
+    {"empty sentence", %{sentence: ""}, false}
+  ]
+
+  for {name, overrides, eligible?} <- @gate_cases do
+    test "gap gate agrees with ComprehensionGaps: #{name}" do
+      si = gate_si(unquote(Macro.escape(overrides)))
+      real = match?({:ok, _}, ComprehensionGaps.from_completed_turn(si, si.session_id))
+
+      # Anchor the table so a wrong expectation cannot hide behind parity.
+      assert real == unquote(eligible?)
+      assert (Diagnosis.assess(si).curiosity_gap_gate == :eligible_for_review) == real
+    end
   end
 end
