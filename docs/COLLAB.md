@@ -388,3 +388,42 @@ git status --short
 ~~~
 
 **Please send any exact failure output before sealed evaluation.** Claude should **review this patch READ-ONLY first**: especially rule-table generality, ELIXIR compile/test constructs, full-span/role ambiguity, budgets and legacy-source byte equality. Bradley then runs local targeted/full tests and separately controls sealed testing (at most twice, counts only). No sealed data was read, requested, or inferred by GPT-6.
+
+
+## 21. P-021a DEV failure receipt and bounded correction · 2026-11-19 · FROM: GPT-6 · TO: Claude, Bradley
+
+**Bradley local-shell evidence (VERIFIED BY Bradley):** 2026-11-19 13:58:48 MST, `symbolic_generation` SHA `7d9269b0`, `mix test apps/core/test/core/syntax/chart_test.exs apps/core/test/core/syntax/chart_dev_corpus_test.exs`, exit **1**. ExUnit reported **47/52 passed**, five failures: **D31, D32, D33, D34, D35** (same source-file line 91). Git status --short was **clean before and after**. Bradley identified `/home/default/Symbrella/log/mix-test.log` as the full log, which GPT-6 **did not read**; exact assertion diffs and actual recorded reasons were **not provided**. Do not claim the five diagnoses as runtime-confirmed.
+
+**[V] Source diagnosis:** `Core.Syntax.Chart.diagnose/4` called `valid_original_tokens?/2` and returned generic `:coverage_gap` **before** consulting `rejection_reason/4`. The latter was supposed to distinguish untrusted **structured label-value** records (`:structured_record`), multi-clause separators (`:multiple_clauses`) and initial subordinating instruction/conditional structures (`:instruction_shaped`). Canonical `Core.MWE.Boundaries.valid_window?/2` deliberately rejects punctuation/gaps. **[H]** These precedence interactions explain the five row failures; exact assertion output from Bradley's log is needed to confirm. All five rows correctly abstained in prior testing's aggregate, but their expected **reason labels** failed; no unsupported full-span promotion is claimed from the provided names alone.
+
+**Correction committed, still UNTESTED by GPT-6:** `ee57cd3a705e089b55179aa4a69e8f518cf9d4cb` on `symbolic_generation`. Modified **only** the already-authorized `apps/core/lib/core/syntax/chart.ex` and appended one new regression test in the already-authorized `apps/core/test/core/syntax/chart_test.exs`. Source-shape refusals now take precedence over generic punctuation, index and canonical gap diagnostics, but **before any chart fill**. Order is: 48-token cap → bounded label-value check → subordinating instruction check → multi-clause separator check → base-index/lexical constraints → normal negation/modal/agreement and strict source gaps. The proposed signatures, grammar rules, Brain gate, semantic proof path, source gate, default budgets, existing DEV assertions and all existing baselines are unchanged. New test checks the **five reported DEV sentence shapes** for the correct closed abstention label, zero signatures and no `:copular_predication` output. General rule order changed; no fixed sentence-specific recognition was added.
+
+**Targeted outcome table (expected vs actual):**
+
+| DEV | Expected no-signature reason | Actual at `7d9269b0` | After `ee57cd3a` |
+| --- | --- | --- | --- |
+| D31 | `:instruction_shaped` | **FAILED** (actual reason unreported) | **UNTESTED** |
+| D32 | `:multiple_clauses` | **FAILED** (actual reason unreported) | **UNTESTED** |
+| D33 | `:multiple_clauses` | **FAILED** (actual reason unreported) | **UNTESTED** |
+| D34 | `:structured_record` | **FAILED** (actual reason unreported) | **UNTESTED** |
+| D35 | `:structured_record` | **FAILED** (actual reason unreported) | **UNTESTED** |
+
+**Bradley verification commands (from umbrella root; do not run sealed):**
+
+~~~bash
+cd ~/Symbrella
+git pull --ff-only origin symbolic_generation
+git branch --show-current
+git rev-parse --short HEAD
+git status --short
+
+mix test apps/core/test/core/syntax/chart_test.exs apps/core/test/core/syntax/chart_dev_corpus_test.exs
+echo "p021a_target_exit=$?"
+
+mix test
+echo "umbrella_exit=$?"
+
+git status --short
+~~~
+
+**Claude:** independently review the two-file correction **READ-ONLY**, particularly priority of `:instruction_shaped` vs `:multiple_clauses`, rejection on irregular source spans, and zero unsupported promotions. **Bradley:** only after source review and passing local regression should the frozen SEALED protocol be considered. No sealed file was accessed, requested, or inferred.
