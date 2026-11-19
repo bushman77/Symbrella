@@ -322,11 +322,18 @@ defmodule SymbrellaWeb.SocialLive do
               </button>
             </article>
 
-            <div :if={@topic} class="flex items-center justify-between gap-2">
+            <div :if={@topic} class="flex flex-wrap items-center justify-between gap-3">
               <h3 class="font-semibold text-zinc-100">Discussion</h3>
-              <span id="social-replies-count" class="text-xs text-zinc-400">
-                {length(@comments)} replies returned
-              </span>
+              <div class="flex flex-wrap items-center gap-3">
+                <span id="social-replies-count" class="text-xs text-zinc-400">
+                  {length(@comments)} replies returned
+                </span>
+                <button id="social-evaluate-thread" type="button"
+                  phx-click="evaluate_thread"
+                  class="rounded-md border border-amber-400/50 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-400/10">
+                  Evaluate conversation · up to 50 excerpts
+                </button>
+              </div>
             </div>
             <p :if={@topic && @comments == []} class="rounded-lg border border-white/10 p-6 text-center text-sm text-zinc-500">
               No replies were returned for this topic.
@@ -707,6 +714,178 @@ defmodule SymbrellaWeb.SocialLive do
                 <% else %>
                   <p class="text-sm text-amber-200">The cognitive report is unavailable.</p>
                 <% end %>
+              </div>
+            </div>
+          </div>
+
+          <div :if={@evaluation_open? and is_map(@evaluation)}
+            id="social-evaluation-modal"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-2 sm:p-5"
+            role="dialog" aria-modal="true" aria-label="Colony comprehension evaluation">
+            <div class="flex w-full max-w-6xl min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-amber-300/30 bg-zinc-950 text-zinc-100 shadow-2xl"
+              style="height: calc(100dvh - 2rem); max-height: 920px;">
+              <header class="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
+                <div class="min-w-0 flex-1">
+                  <h2 class="text-lg font-semibold text-amber-200">
+                    P-009 · Social comprehension evaluation
+                  </h2>
+                  <p class="mt-1 text-xs text-zinc-400">
+                    Operator-labeled, read-only external language samples · no learning, memory writes,
+                    neuron stimulation, database updates or Colony posting
+                  </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button id="social-evaluation-copy" type="button" phx-hook="ClipboardCopy"
+                    data-clipboard-target="#social-evaluation-jsonl"
+                    class="rounded-md border border-cyan-400/50 px-3 py-2 text-sm text-cyan-200">
+                    Copy labeled JSONL
+                  </button>
+                  <button id="social-evaluation-close" type="button" phx-click="close_evaluation"
+                    class="rounded-md border border-white/20 px-3 py-2 text-sm">
+                    Close · discard local labels
+                  </button>
+                </div>
+              </header>
+
+              <div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-6">
+                <section class="space-y-2 rounded-lg border border-amber-400/25 p-4">
+                  <h3 class="font-semibold">Sample and evidence contract</h3>
+                  <p id="social-evaluation-counts" class="text-sm text-zinc-300">
+                    {@evaluation.sampled} unique sentence excerpts from this conversation
+                    (limit {@evaluation.limit}); {@evaluation.duplicates} duplicate excerpts skipped.
+                    {@evaluation.omitted_replies} replies and {@evaluation.omitted_sentences}
+                    sentence excerpts omitted by source limits.
+                  </p>
+                  <p class="text-xs leading-relaxed text-zinc-400">
+                    The existing isolated semantic probe supplies lexical, structural and
+                    meaning-stage observations. A structural candidate is not an established
+                    interpretation, and a missing interpretation is not proof that abstention
+                    was correct. Only operator labels supply expected outcomes; accuracy
+                    requires separate manual semantic review. Development and held-out
+                    buckets use a stable text fingerprint so duplicates stay in one bucket.
+                    Do not tune the implementation using held-out examples.
+                  </p>
+                  <div class="grid gap-3 text-sm sm:grid-cols-2">
+                    <div id="social-evaluation-development"
+                      class="rounded-md border border-white/10 p-3">
+                      <h4 class="font-semibold text-cyan-200">Development examples</h4>
+                      <p>{@evaluation_summary.development.labeled} labeled /
+                        {@evaluation_summary.development.samples} sampled</p>
+                      <p>Structural coverage candidates:
+                        {@evaluation_summary.development.coverage_candidates}</p>
+                      <p>Interpretation coverage gaps:
+                        {@evaluation_summary.development.coverage_gaps}</p>
+                      <p>Expected abstentions observed:
+                        {@evaluation_summary.development.expected_abstentions}</p>
+                      <p>Probe infrastructure failures:
+                        {@evaluation_summary.development.infrastructure_failures}</p>
+                    </div>
+                    <div id="social-evaluation-heldout"
+                      class="rounded-md border border-white/10 p-3">
+                      <h4 class="font-semibold text-amber-200">Reserved held-out examples</h4>
+                      <p>{@evaluation_summary.heldout.labeled} labeled /
+                        {@evaluation_summary.heldout.samples} sampled</p>
+                      <p>Structural coverage candidates:
+                        {@evaluation_summary.heldout.coverage_candidates}</p>
+                      <p>Interpretation coverage gaps:
+                        {@evaluation_summary.heldout.coverage_gaps}</p>
+                      <p>Expected abstentions observed:
+                        {@evaluation_summary.heldout.expected_abstentions}</p>
+                      <p>Probe infrastructure failures:
+                        {@evaluation_summary.heldout.infrastructure_failures}</p>
+                    </div>
+                  </div>
+                  <p class="text-xs text-zinc-400">
+                    Manually reviewed judgments in both buckets:
+                    {@evaluation_summary.development.human_correct +
+                      @evaluation_summary.heldout.human_correct} correct /
+                    {@evaluation_summary.development.human_incorrect +
+                      @evaluation_summary.heldout.human_incorrect} incorrect /
+                    {@evaluation_summary.development.human_uncertain +
+                      @evaluation_summary.heldout.human_uncertain} uncertain.
+                    These are operator judgments, not automatic accuracy.
+                  </p>
+                </section>
+
+                <section id="social-evaluation-excerpts" class="space-y-4">
+                  <h3 class="font-semibold text-amber-200">Review selected language</h3>
+                  <p :if={@evaluation.items == []} class="text-sm text-zinc-400">
+                    No eligible excerpts were available in this conversation.
+                  </p>
+                  <article :for={{item, index} <- Enum.with_index(@evaluation.items)}
+                    id={"social-evaluation-item-#{index}"}
+                    class="space-y-3 rounded-lg border border-white/10 bg-zinc-900/70 p-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+                      <span>#{index + 1} · {item.source_type} {item.source_index} ·
+                        source sentence {item.sample_index}</span>
+                      <span class={if item.fold == :heldout, do: "text-amber-300", else: "text-cyan-300"}>
+                        {item.fold}
+                      </span>
+                    </div>
+                    <p class="whitespace-pre-wrap break-words text-sm text-zinc-100">
+                      {item.excerpt}
+                    </p>
+                    <p class="text-xs text-zinc-400">
+                      Observed: <strong class="text-zinc-200">{item.observed}</strong> ·
+                      structural: {item.structural_status} ·
+                      sentence meaning: {item.meaning_status} ·
+                      lexical winners: {if is_nil(item.lexical_choices), do: "unknown", else: item.lexical_choices} ·
+                      degraded: {to_string(item.degraded)}
+                    </p>
+                    <p :if={item.reason_codes != []} class="text-xs text-amber-200">
+                      Degradation reasons: {Enum.join(item.reason_codes, ", ")}
+                    </p>
+                    <form phx-change="label_evaluation" phx-value-index={index}
+                      class="grid gap-3 sm:grid-cols-3">
+                      <label class="flex flex-col gap-1 text-xs text-zinc-300">
+                        Expected outcome
+                        <select id={"social-evaluation-expected-#{index}"}
+                          name="expected" class="min-h-10 rounded border border-white/20 bg-zinc-950 p-2">
+                          <option :for={value <- SocialEvaluation.expected_options()}
+                            value={value}
+                            selected={SocialEvaluation.selected?(@evaluation_labels, item, :expected, value)}>
+                            {value}
+                          </option>
+                        </select>
+                      </label>
+                      <label class="flex flex-col gap-1 text-xs text-zinc-300">
+                        Linguistic family
+                        <select id={"social-evaluation-family-#{index}"}
+                          name="family" class="min-h-10 rounded border border-white/20 bg-zinc-950 p-2">
+                          <option :for={value <- SocialEvaluation.family_options()}
+                            value={value}
+                            selected={SocialEvaluation.selected?(@evaluation_labels, item, :family, value)}>
+                            {value}
+                          </option>
+                        </select>
+                      </label>
+                      <label class="flex flex-col gap-1 text-xs text-zinc-300">
+                        Manual meaning review
+                        <select id={"social-evaluation-review-#{index}"}
+                          name="review" class="min-h-10 rounded border border-white/20 bg-zinc-950 p-2">
+                          <option :for={value <- SocialEvaluation.review_options()}
+                            value={value}
+                            selected={SocialEvaluation.selected?(@evaluation_labels, item, :review, value)}>
+                            {value}
+                          </option>
+                        </select>
+                      </label>
+                    </form>
+                  </article>
+                </section>
+
+                <details class="rounded-lg border border-white/10 p-4">
+                  <summary class="cursor-pointer text-sm font-semibold text-cyan-200">
+                    Show JSONL export ({@evaluation.sampled} rows)
+                  </summary>
+                  <p class="mt-2 text-xs text-zinc-400">
+                    This export includes untrusted public excerpts and operator labels.
+                    Copy it deliberately and review before storing or committing.
+                    Closing this panel discards all local annotations.
+                  </p>
+                  <pre id="social-evaluation-jsonl"
+                    class="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all text-xs text-zinc-300">{@evaluation_export}</pre>
+                </details>
               </div>
             </div>
           </div>
