@@ -63,6 +63,56 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
 
   def evidence_label(_), do: ""
 
+  @diagnostic_fields [
+    :reasons, :weak_rate, :fallback_rate, :structural_status,
+    :sentence_meaning_status, :integration_status, :feedback_mode,
+    :feedback_applied, :repair_hint, :curiosity_gap_gate
+  ]
+
+  @doc "Only a complete, successful diagnosis from the selected trace is displayed."
+  def diagnosis(%{events: events}) when is_list(events) do
+    events
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{stage: :comprehension_summary, status: :ok, evidence: %{} = evidence} ->
+        if is_list(Map.get(evidence, :reasons)) and
+             Enum.all?(@diagnostic_fields, &Map.has_key?(evidence, &1)),
+          do: evidence, else: nil
+
+      _ -> nil
+    end)
+  end
+
+  def diagnosis(_), do: nil
+
+  defp reason_label(:no_lifg_choices), do: "No LIFG selections"
+  defp reason_label(:weak_decision_rate_high), do: "High weak-selection rate"
+  defp reason_label(:fallback_rate_high), do: "High fallback-selection rate"
+  defp reason_label(:unresolved_content_tokens), do: "Unresolved content tokens"
+  defp reason_label(_), do: "Other (unrecognized) reason"
+
+  defp review_label(:review_missing_choices), do: "Review missing lexical candidates"
+  defp review_label(:review_unresolved_content), do: "Review unresolved content evidence"
+  defp review_label(:review_lexical_evidence), do: "Review weak or fallback lexical evidence"
+  defp review_label(:not_indicated), do: "No degradation-driven review indicated"
+  defp review_label(_), do: "Review cause not established"
+
+  defp gap_label(:eligible_for_review), do: "Current-turn review prerequisites present"
+  defp gap_label(:needs_unresolved_content), do: "Requires unresolved content"
+  defp gap_label(:needs_uncertainty), do: "Requires uncertain content"
+  defp gap_label(:needs_session), do: "Requires matching session"
+  defp gap_label(:needs_user_origin), do: "Requires user-origin evidence"
+  defp gap_label(:needs_input), do: "Requires nonempty input"
+  defp gap_label(:not_degraded), do: "No degraded-comprehension trigger"
+  defp gap_label(_), do: "Prerequisites not observed"
+
+  defp rate_label(n) when is_number(n) and n >= 0 and n <= 1,
+    do: "#{Float.round(n * 100.0, 1)}%"
+  defp rate_label(_), do: "not observed"
+
+  defp count_label(n) when is_integer(n), do: Integer.to_string(n)
+  defp count_label(_), do: "not observed"
+
   attr :trace, :any, default: nil
   attr :traces, :list, default: []
 
@@ -75,7 +125,10 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
         _ -> []
       end
 
-    assigns = assign(assigns, :steps, steps)
+    assigns =
+      assigns
+      |> assign(:steps, steps)
+      |> assign(:diagnosis, diagnosis(assigns.trace))
 
     ~H"""
     <section id="atlas-cognitive-trace" class="mt-5 rounded-xl border border-emerald-800/60 bg-zinc-900/75 p-4 sm:p-5"
@@ -136,6 +189,93 @@ defmodule SymbrellaWeb.Components.Brain.CognitiveTracePanel do
           </li>
         </ol>
       </div>
+
+      <section :if={is_map(@diagnosis)} id="atlas-comprehension-diagnosis"
+        class="mt-5 rounded-xl border border-cyan-800/70 bg-zinc-950/80 p-4"
+        aria-label="Comprehension diagnosis for selected turn">
+        <h4 class="text-base font-semibold text-cyan-200">
+          Comprehension diagnosis · selected turn
+        </h4>
+        <p class="mt-2 text-xs leading-relaxed text-zinc-300">
+          This report separates weak lexical evidence from structural interpretation
+          and independently verified lexical constructions. No diagnosis alone
+          certifies full sentence understanding or authorizes another interpretation.
+        </p>
+        <div class="mt-3">
+          <strong class="text-xs text-zinc-300">Recorded degradation reasons</strong>
+          <ul id="atlas-comprehension-reasons" class="mt-1 flex flex-wrap gap-2 text-xs">
+            <li :for={reason <- @diagnosis.reasons} data-degradation-reason={reason}
+              class="rounded-lg border border-amber-800/70 px-2 py-1 text-amber-200">
+              {reason_label(reason)}
+            </li>
+            <li :if={@diagnosis.reasons == []} class="text-zinc-400">
+              No recorded degradation reason
+            </li>
+          </ul>
+        </div>
+        <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt class="text-xs text-zinc-400">LIFG selections</dt>
+            <dd data-diagnosis-field="choice-count">
+              {count_label(Map.get(@diagnosis, :choice_count))}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Independently verified lexical constructions</dt>
+            <dd data-diagnosis-field="verified-lexical-count">
+              {count_label(Map.get(@diagnosis, :verified_lexical_count))}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Weak selection rate</dt>
+            <dd data-diagnosis-field="weak-rate">{rate_label(@diagnosis.weak_rate)}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Fallback selection rate</dt>
+            <dd data-diagnosis-field="fallback-rate">{rate_label(@diagnosis.fallback_rate)}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Unresolved content token count</dt>
+            <dd>{count_label(Map.get(@diagnosis, :unresolved_content_count))}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Structural competition</dt>
+            <dd data-diagnosis-field="structural-status">{@diagnosis.structural_status}</dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Sentence meaning</dt>
+            <dd data-diagnosis-field="sentence-meaning-status">
+              {@diagnosis.sentence_meaning_status}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-xs text-zinc-400">Cross-stage integration audit</dt>
+            <dd data-diagnosis-field="integration-status">{@diagnosis.integration_status}</dd>
+          </div>
+        </dl>
+        <div class="mt-4 space-y-2 border-t border-zinc-800 pt-3 text-xs">
+          <p data-diagnosis-field="feedback">
+            ATL-to-LIFG feedback: {@diagnosis.feedback_mode} ·
+            revision applied: {@diagnosis.feedback_applied}
+          </p>
+          <p data-diagnosis-field="repair-hint" class="text-cyan-200">
+            Diagnostic review: {review_label(@diagnosis.repair_hint)}
+          </p>
+          <p data-diagnosis-field="curiosity-gap-gate" class="text-amber-200">
+            Current-turn curiosity-gap gate: {gap_label(@diagnosis.curiosity_gap_gate)}
+          </p>
+          <p class="text-zinc-400">
+            Review eligibility is not a repair command. Existing bounded feedback
+            may already have run earlier in the pipeline; this panel does not retry
+            LIFG, change lexical winners, ask the user a question, or write memory.
+          </p>
+        </div>
+      </section>
+      <p :if={@trace != nil and is_nil(@diagnosis)} id="atlas-comprehension-diagnosis-empty"
+        class="mt-4 text-xs text-zinc-400">
+        No detailed comprehension diagnosis observed for the selected turn.
+        Earlier traces may contain counts without cause codes.
+      </p>
 
       <p class="mt-4 text-xs text-zinc-400">
         Recent trace metadata expires after ten minutes and is never stored in the database.
