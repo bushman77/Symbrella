@@ -43,8 +43,8 @@ defmodule SymbrellaWeb.SocialEvaluation do
     :no_lifg_choices, :weak_decision_rate_high, :fallback_rate_high,
     :unresolved_content_tokens
   ]
-  @meaning_statuses [:structurally_interpreted, :provisional,
-                     :not_yet_interpreted]
+  @meaning_statuses [:structurally_interpreted, :interpreted, :understood,
+                     :resolved, :provisional, :not_yet_interpreted]
   @structure_statuses [:preferred, :unresolved, :no_complete_candidate,
                        :ambiguous]
 
@@ -268,7 +268,8 @@ defmodule SymbrellaWeb.SocialEvaluation do
          }
        }) do
     case status do
-      :structurally_interpreted -> :structural_candidate
+      status when status in [:structurally_interpreted, :interpreted,
+                             :understood, :resolved] -> :structural_candidate
       :provisional -> :provisional_candidate
       :not_yet_interpreted -> :not_interpreted
       _ -> :unclassified
