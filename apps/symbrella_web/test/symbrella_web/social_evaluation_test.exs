@@ -53,7 +53,7 @@ defmodule SymbrellaWeb.SocialEvaluationTest do
     assert Enum.all?(evaluation.items, &(&1.observed == :not_interpreted))
     assert Enum.all?(evaluation.items, &(&1.lexical_choices == 2))
     assert Enum.all?(evaluation.items, &(&1.reason_codes == [:weak_decision_rate_high]))
-    assert Enum.all?(evaluation.items, &(&1.excerpt |> String.length() <= 600))
+    assert Enum.all?(evaluation.items, &(String.length(&1.excerpt) <= 600))
     assert Enum.all?(evaluation.items, &(&1.fold in [:development, :heldout]))
 
     for _ <- 1..25 do
