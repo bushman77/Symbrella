@@ -488,3 +488,63 @@ READ-ONLY source review of `55d4823d..4fca72ed`; I ran no Elixir. Only executed 
 **GPT6 must:** treat N-037 reproducers as *hypotheses*: run or reason through each first, and if one is wrong, say so with file:line evidence rather than patching around it. Do not edit DEV expectations to make tests pass. Record branch, SHA, exact command and exit code, labelled UNTESTED/VERIFIED BY who.
 
 **Sequence after the patch:** Claude read-only review → Bradley: targeted chart tests, `mix test`, `mix compile --force` → sealed run at most twice, counts only, scored on the Chart/Brain structural outcome (N-037 M4) through the real probe path.
+
+
+## 25. P-021a.1 approved fix implementation · 2026-11-19 · FROM: GPT-6 · TO: Claude, Bradley
+
+**Authorization [V]:** Bradley's `Approve: P-021a.1` in §24, plus his explicit FileScope amendment permitting **only two POS-witness rows** (`most`/`every` as `determiner`) in `chart_dev_corpus_test.exs`. Assignment remains GPT-6 implementer / Claude independent read-only reviewer. **Production/test code commit:** `5555a38369766321588362d1018d7b11b80aa8d4` on `symbolic_generation`. The six changed files are **exactly** `grammar.ex`, `chart.ex`, `signatures.ex`, `chart_test.exs`, `chart_adversarial_test.exs` (new), and the **fixture-only** addition in `chart_dev_corpus_test.exs`. This §25 handoff is a separately requested **documentation-only** commit. No Brain, Composition, SentenceMeaning, Colony, chat pipeline, DEV expected output, existing baseline, or other file changed. No `mix format` was run.
+
+### Finding-by-finding resolution — source inspected [V]; effects need runtime verification [H]
+
+| N-037 | Code change [V] | Anticipated effect / evidence |
+| --- | --- | --- |
+| **B1 — lexical negation** | `grammar.ex:15-20` expands the **closed cue list** by `none nothing nobody nowhere neither nor hardly barely scarcely rarely seldom without`; existing negatives retained. `chart.ex:603` changes the emitted atom from `:positive_polarity` to `:no_negation_cue_in_closed_list`. | [H] Synthetic noun-witness examples “Nothing is ready”, “Nobody is ready”, and near-negative adverbs now abstain as `:negation`. **This is absence-of-known-cue evidence, not a claim of positive meaning.** Actual LTM POS coverage remains [U]. |
+| **B2a — first-person agreement** | `grammar.ex:25,105` gives `i` the distinct `:first_person_singular` feature; `chart.ex:538-539` accepts only the attested indicative `I was` among supported copulas, refusing `I is/are/were`. | [H] “I is ready” abstains as `:agreement_conflict`; “I was ready” remains a positive control. “I were” subjunctive is not supported by this initial indicative chart. |
+| **B2b — determiner/quantifier number** | `grammar.ex:31-41,90-98` defines closed singular/plural/either number restrictions. `chart.ex:437-466` enforces them in `combine/3` for determined, possessive-determined and quantified subjects. `chart.ex:188-219` extends failure diagnostics to `:agreement_conflict`. | [H] “A pages”, “These site”, “Each pages”, “Several site” cannot become full-span clauses; positive singular/plural controls still compose. |
+| **B2c — independent quantifier witness** | `chart.ex:350-353` emits a quantifier terminal **only if dictionary POS includes `determiner`**. `combine(:quantified_subject, ...)` adds `subject_quantifier: [:pos_determiner]` as a Brain-comparable feature. The `failure_reason` path labels an ungrounded listed quantifier `:lexical_witness_missing`. | [H] Mere membership in the closed word list cannot create a valid quantifier role. A separate safe function-word terminal restriction at `chart.ex:326-370` prevents polysemous **noun/adjective alternatives for `a`, `each`, `these`, `I`** from bypassing those grammatical gates. This conservative guard may abstain from unusual metalinguistic homograph readings; that is an intentional limitation, not world-vocabulary inference. |
+| **M1 — Brain first-64 cap** | `signatures.ex:113` changes **Colony-only** output to `Chart.clause_signatures(...) ++ existing`, preserving all non-Colony output byte-for-byte. No Brain modification. | [H] A full-span chart signature now survives 64 later noun-phrase fillers and reaches unchanged `Brain.LIFG.StructuralCompetition.resolve/1`. |
+| **M3 — vacuous chat isolation** | `chart_test.exs:102-122` replaces rather than duplicates the old test; uses chart-positive “The site is open” and “The files are written for readers”; checks `:user, :prod, :test, :chat, nil` against the Colony result **after filtering chart IDs**, in identical order and full map equality. | [H] Source gating is genuinely exercised instead of comparing two non-Colony examples with no matching lexical witnesses. |
+| **M2 — optional label only** | `chart.ex:71-73,259-267` reports `:lexical_ambiguity_budget` when a **production-default six-item** width-1 span overflows; reduced test-only limits retain `:chart_budget_exceeded`. | [H] Seven terminal/unary items from a polysemous token are distinguishable diagnostically, yet still **fully abstain**. **48 / 6 / 400 / 12 numeric limits are unchanged.** |
+
+**Optional changes deliberately NOT made:** m1 (merge same-role feature alternatives) and m3 (proper-noun PP object features), because they alter admissible feature identities and require a separate precision discussion. Neither is required for B1/B2/M1/M3. M4 remains a future **P-021b** consumer/proof invariant: Brain `:preferred` alone is not complete lexical witnessing. No grammar proof, passive agent, action-capable field, memory write, or external factual authority was added.
+
+**N-037 divergence [V/H]:** Claude suggested `pronoun_number("i") -> :unknown` as the simplest fix. We instead encode `:first_person_singular` and the narrow standard-indicative “I was” agreement exception. This preserves a legitimately grammatical construction without licensing “I is”. It is testable and does not relax general subject–verb agreement. Closed function-word lexical category exclusivity was also added beyond N-037's minimum to prevent **POS-alternative bypasses** under a polysemous dictionary, with its own negative tests.
+
+### Tests added or strengthened (all UNTESTED by GPT-6)
+
+**New:** `apps/core/test/core/syntax/chart_adversarial_test.exs` contains 8 independently named ExUnit tests: (1) negative noun/adverb/PP cue abstention, (2) incompatible pronoun/determiner/quantifier agreement, (3) standard singular/plural positive controls including `I was`, (4) independent quantifier POS plus `required_features`, (5) polysemous function-word bypass controls and missing quantifier witness, (6) **64 filler :noun_phrase** Brain-level first-64 visibility, with reversed-order counterfactual, (7) **7-item** width-one polysemy reason/cap, and (8) honest lexical-polarity evidence. The new lexical witnesses for `nothing/nobody/none` are **synthetic**; do not infer they exist in the real LTM.
+
+**Replaced:** `chart_test.exs` existing non-Colony isolation case (source-equal, chart-positive control with exact legacy ordering), maintaining one test in place of the vacuous case.
+
+**Amended fixture only:** `chart_dev_corpus_test.exs` adds `{"most", "determiner", []}` and `{"every", "determiner", []}`; **no DEV sentences, outcomes, assertions, corpus files, or baselines were edited.** This supports the previously specified D12/D13 positive controls under newly strict quantifier POS attestation.
+
+### Evidence, unknowns and next execution
+
+- **[V — source/diff inspection, not ExUnit]** Diff from `c62b119e` to `5555a383` comprises exactly the six authorized paths. No numeric cap changes, dynamic `String.to_atom`, Brain edits, sealed-set inspection, or new publishing path. The code was committed and the branch SHA verified through the GitHub connector.
+- **[U — UNTESTED by GPT-6]** Elixir/Mix is unavailable in GPT-6's execution environment, so **no `mix test` or `mix compile` command was run**; consequently there is **no execution exit code**. All outcome predictions above are hypotheses until Bradley's local receipt. The previous 53/53 green targeted run was **on older SHA `4fca72ed`**, not evidence for P-021a.1. Full umbrella tests, compile warnings, true LTM POS frequency, and sealed outcome remain unknown.
+- **[V]** No access to the sealed evaluation partition was attempted. Claude remains independent and should review this code **READ-ONLY first** before Bradley's ordinary tests and eventual sealed scoring (at most twice, counts only).
+
+**Commands for Bradley from the umbrella root** (preserve existing untracked `core`; do not run sealed or `mix format`):
+
+~~~bash
+cd ~/Symbrella
+git fetch origin
+git pull --ff-only origin symbolic_generation
+git branch --show-current
+git rev-parse --short HEAD
+git status --short
+
+mix test apps/core/test/core/syntax/chart_test.exs apps/core/test/core/syntax/chart_dev_corpus_test.exs apps/core/test/core/syntax/chart_adversarial_test.exs
+echo "p021a1_target_exit=$?"
+
+mix test
+echo "p021a1_umbrella_exit=$?"
+
+set -o pipefail
+mix compile --force 2>&1 | tee log/compile-force.log
+echo "p021a1_compile_exit=$?"
+
+git status --short
+~~~
+
+**CLAUDE — independent READ-ONLY review request:** challenge the closed cue list, POS-alternative bypass prevention, number agreement and first-person exception, 64-signature demonstration, and M2 reason-only classification. **Bradley — verification:** report exact command, local tested SHA, ExUnit result, exit code and compile receipt. Stop before sealed evaluation until independent review and local regression are accepted.
