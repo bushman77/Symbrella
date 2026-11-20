@@ -897,3 +897,36 @@ Bradley runs the command in Claude's chat reply. For "The report is a draft.", "
 - the corpus v2 rows.
 
 **Next from GPT-6:** independent review of §10.3 points 1 and 3, the claims that most change the risk picture.
+
+### 10.9 D-1 receipt and amended P-024 scope · 2026-11-19 18:38 MST · recorded by CLAUDE
+
+**RUN BY BRADLEY** (local shell; read-only `mix run -e` with the census resolver options; branch `symbolic_generation`, at or after `67e039e`). Output pasted to Claude.
+
+| Sentence | SVO signature(s) | Structural | LIFG at predicate | Role competition at predicate | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| The report is a draft. | `finite_present_svo_candidate` `{0,4}` and `{0,3}` | **`:preferred`** (finite_present_svo) | `is\|auxiliary\|0` | `:supported` verb, basis `:finite_present_svo_predicate` | **`:provisional` structural_hypothesis** |
+| The report was the problem. | `finite_past_svo_candidate` `{0,4}` | **`:preferred`** (finite_past_svo) | `was\|auxiliary\|0` | none | **`:provisional`** |
+| It was the problem. | `finite_past_svo_candidate` `{0,3}` | **`:preferred`** | `was\|auxiliary\|0` | `:supported` verb, basis `:finite_past_svo_predicate` | **`:provisional`** |
+| The reports were the problem. | `finite_past_svo_candidate` `{0,4}` | **`:preferred`** | `were\|auxiliary\|0` | `:supported` verb, basis **`:plural_present_predicate`** | **`:provisional`** |
+| The artist draws a picture. (control) | `finite_present_svo_candidate` ×2 | `:preferred` | `draws\|verb\|1` | `:supported` verb | `:structurally_interpreted` participant_assertion |
+| He bought some bread. (control) | `finite_past_svo_candidate` `{0,3}` | `:preferred` | `bought\|verb\|1` | `:supported` verb | `:provisional` |
+
+**[V-receipt] Findings:**
+1. **§10.3 point 1 is confirmed.** All four BE sentences reach a **`:preferred` false SVO** and a `:provisional` structural hypothesis, **while LIFG correctly selected the auxiliary**. The past family's unchecked predicate role, and the 2-vs-1 rule in the present 5-token family, both let the false reading through.
+2. **LIFG resisted the pre-LIFG boost in all four cases.** Role competition marked BE as a `:supported` verb predicate, yet the auxiliary won. **[U]** The remaining margin is not shown.
+3. **A fifth source: [V-code]** `Core.Syntax.PredicateEvidence.plural_present/3` (`predicate_evidence.ex:190-212`) proposes a verb predicate from cells **directly, without any signature**. It fires on "were" because LTM has a verb row for it with no form-of/past/participle tags (`present_base_verb?/3`, `:400-410`). P-024 must cover it, otherwise "The reports are/were the problem." keeps pre-LIFG verb support.
+4. **§10.3 point 3 is confirmed for the census:** every false reading above would be counted as `:provisional`, not as a failure.
+5. The controls behave as valid transitive SVO.
+6. **[U]** User-visible replies: the provisional past-pronoun reply needs a *verb* LIFG winner (`sentence_meaning.ex:244-245`), which did not occur here. Whether any other response consumer uses these `:structural_hypothesis` meanings is unverified; the optional live-chat check was not run.
+
+**Amended P-024 (supersedes §10.5's FileScope; needs `Approve: P-024`):**
+- `apps/core/lib/core/syntax/signatures.ex`: add `@be_forms ~w(am is are was were be been being)` and reject `predicate.word in @be_forms` in `finite_present_svo/1`, `finite_past_svo/1`, `finite_past_pronoun_svo/1` and `counted_present_svo/1`.
+- `apps/core/lib/core/syntax/predicate_evidence.ex`: the same closed set, rejecting a BE word at index 2 in `plural_present/3` only.
+- NEW `apps/core/test/core/syntax/svo_be_predicate_exclusion_test.exs`: the §10.5 tests, plus "The reports are the problem." and "The reports were the problem." through `PredicateEvidence.detect/1`, and a valid plural-present control ("The artists draw pictures.").
+
+**Out of scope, still:**
+- modal and imperative predicate producers ("You should be ready", "Be quiet"). Here "be" is the clause's main (copular) verb, not a transitive predicate. They are listed for the audit, not changed;
+- linking verbs;
+- Brain files, response code, chart.
+
+**Acceptance:** as in §10.5, plus a **D-1 rerun**. All four BE sentences must show no SVO-family signature, no `:preferred` SVO structural result, no verb-predicate role at the BE index, and no SVO-sourced provisional meaning. Both controls must be identical to this receipt.
