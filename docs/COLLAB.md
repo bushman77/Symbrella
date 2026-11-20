@@ -1934,3 +1934,20 @@ Requires `Approve: P-028`.
 - **[V-code] Cause:** `Core.MWE.LIFGBridge.prepare/2` presents phrase senses to LIFG as a *virtual* token at index `length(tokens) + k` (here 7) with the real character span, then `split_choices/2` moves its choice to `:mwe_choices`. The §26 bias matched `roles.predicate == tok_index` (5), so it never fired live; Claude's Brain test had used index 5 for the MWE token, which does not reflect production.
 - **Fix (within §26 FileScope):** `activity_frame_gloss_bias/4` now receives the token map and matches the frame's predicate base token by **character-span start** (`PosBias.token_start/1`). The Brain test now mirrors production (base tokens 5/6 plus virtual MWE token 7 with the real span). **UNTESTED.**
 - **[V-receipt, Bradley, laptop, 10:35]** HEAD `9ae3068`: Brain **735 passed, 3 skipped**; Core **2047 passed**; **exit=0**. Live `Core.resolve_input("hey symbrella what are you up to?")`: meaning `:activity_question`/`:provisional`; **`up to` winner `up to|preposition|7`** ("Doing, involved in."); **`uncertain: []`**. (Bradley's local `config/dev.exs` may still carry the uncommitted `lifg_softmax_temperature 0.5` experiment line; P-034 not yet proposed.) P-033 staged step accepted.
+
+## 27. P-035 proposal — "what are you up to?" as a social-update query (NOT authorized) · 2026-11-20 10:50 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Evidence:**
+- **[V-receipt, Bradley, live chat 10:38]** After P-033 (+ local temperature 0.5), "hey symbrella what are you up to?" → *"Symbolic response unavailable for this turn (LLM intentionally disabled)."* (`Core.Response` L561): no lexical gap, no strategy for `:activity_question`.
+- **[V-code]** `SemanticStrategy.social_strategy/1` already routes `:social_update_query` addressed to `:self`/`:unspecified` to `SymbolicGeneration`, which realizes the honest, non-fabricating *"Hey! I'm here and ready to talk. What's new with you?"* (or without "Hey!"). `SpeechActs.social_update_pattern/0` only accepts `[greeting] what's/whats/what is new with you [, vocative]?`; it has no "up to/doing" form and no vocative *before* the question ("hey symbrella …").
+
+**Proposal [H]:** extend only `SpeechActs.social_update_pattern/0` (and the capture handling) to also accept, whole-utterance with final `?`:
+- question forms `what(?:'s| is) new with you` (existing) **or** `what\s+(?:are|'re)\s+you\s+(?:up\s+to|doing)` / `what're you (up to|doing)`;
+- an optional pre-question vocative after the optional greeting: `(?:symbrella)\s*,?\s+` (named `vocative_pre`), resolved with the existing `resolve_addressee/1` (only `symbrella` ⇒ `:self`; any other name is not accepted in the pre position, to avoid swallowing content words).
+No change to `SymbolicGeneration` wording, `SemanticStrategy`, or P-033's frame (which stays as structural evidence). Reply for the live sentence would become *"Hey! I'm here and ready to talk. What's new with you?"*.
+
+**Tests:** new speech-act cases — "hey symbrella what are you up to?", "what are you up to?", "symbrella, what are you doing?", "hey, what're you up to?" ⇒ `:social_update_query`, addressee `:self`/`:unspecified`, components incl. `:greeting` when present; non-matches — "what are you up to the task for?", "what are you up to" (no `?`), "hey bob what are you up to?" (non-assistant pre-vocative), "she asked what are you up to?". Existing `speech_acts_test`/`symbolic_generation_test` expectations unchanged. **Gate:** Brain + Core suites; live chat reply.
+
+**Draft FileScope:** `apps/core/lib/core/semantic/speech_acts.ex`, `apps/core/test/core/semantic/speech_acts_test.exs` (new cases appended only), this log. Requires `Approve: P-035`.
+
+**Note:** the reply is deliberately generic and true; reporting actual current activity from WM/self-model would be a later, separate proposal.
