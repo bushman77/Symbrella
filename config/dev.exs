@@ -96,3 +96,11 @@ config :brain, Brain.MoodPolicy,
 
 # Optional extra LIFG outer weights in dev (kept from your original)
 config :brain, :lifg_weights, prime: 0.05
+
+# LIFG Stage1 confidence calibration (experimental; off in test/prod).
+# Without these, same-POS Wiktionary senses tie exactly when context is
+# silent and top_p is ~1/slate_size. See Brain.LIFG.Stage1.sense_rank_factor/2
+# and apply_softmax_temperature/1. Set decay to 0.0 / temperature to 1.0 to
+# restore the old behaviour.
+config :brain, :lifg_sense_rank_decay, 0.5
+config :brain, :lifg_softmax_temperature, 0.05

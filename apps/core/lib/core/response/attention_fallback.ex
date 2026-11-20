@@ -336,7 +336,7 @@ defmodule Core.Response.AttentionFallback do
              surface_present?(text, term) and
                not recognized_topic_part?(context, term)
            end)
-           |> Enum.take(3),
+           |> Enum.take(@max_repair_terms),
          true <- words != [] do
       # Revalidate the exact lexical-construction witness before the
       # stronger "understand" language. WM's :understood projection alone
@@ -394,7 +394,10 @@ defmodule Core.Response.AttentionFallback do
 
   defp quoted_terms([one]), do: ~s|"#{one}"|
   defp quoted_terms([a, b]), do: ~s|"#{a}" and "#{b}"|
-  defp quoted_terms([a, b, c]), do: ~s|"#{a}", "#{b}", and "#{c}"|
+  defp quoted_terms(terms) when is_list(terms) and length(terms) > 2 do
+    {init, [last]} = Enum.split(terms, -1)
+    Enum.map_join(init, ", ", &~s|"#{&1}"|) <> ~s|, and "#{last}"|
+  end
 
   # Unknowns are selected from the *current turn's* weak/unresolved
   # comprehension, matched against the admitted same-session WM frame. An

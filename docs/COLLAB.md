@@ -1703,3 +1703,31 @@ Candidate evidence, all **[H]**, unproposed:
 **No ticket approved by this review.** P-026 is the *single next recommended request for Bradley's decision*; P-025 retains its previously proposed FileScope and separate authorization status. D-4 is a prerequisite diagnostic, not a newly authorized implementation. Do not rewrite frozen P-022/P-024/corpus v2 results, infer unsupplied Stage1 logits, change source authority, or promote offline labels into live cognitive facts. The 38-failure chat screen stays true *for its originally declared denominator*; the six preferred-with-conflicts show that that denominator did not measure post-interpretation POS repair opportunity.
 
 **Independent result:** [V-code] A systematic score/evidence mismatch is plausible and testable; [V-audit] Bradley supplied seven gold-positive grammar-over-LIFG POS conflicts; [U] the actual Stage1 score contributions and a truly independent construction arbiter remain unverified. **Final verdict: CONDITIONAL GO on the narrow diagnostic and offline scoring research; NO GO on automatic cross-POS repair or widened authority.**
+
+## 16. P-027 — LIFG Stage1 confidence calibration (dev-gated) and lexical-gap reply cap · 2026-11-19 21:40 MST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, in chat 2026-11-19 21:37 MST: "just make the change to the repo and ill just pull". Recorded here as `Approve: P-027` for the FileScope below; no other scope is implied.
+
+**FileScope:** `apps/brain/lib/brain/lifg/stage1.ex`, `apps/core/lib/core/response/attention_fallback.ex`, `apps/core/test/core/response/attention_fallback_test.exs`, `config/dev.exs`, NEW `scripts/probe_lifg_confidence.exs`, this entry.
+
+### 16.1 Problem
+- **[V-code]** `AttentionFallback.lexical_gap_report/5` capped reported uncertain terms at `Enum.take(3)` because `quoted_terms/1` only had 1/2/3-arity clauses; upstream (`Summary @summary_limit 6`, WM `@max_terms 6`, local `@max_repair_terms 6`) all allow 6.
+- **[V-code]** Stage1 `top_p` is a temperature-1 softmax over logits that are weighted sums of clamped [0,1] features (weights sum ≈1.0), so the maximum logit gap is ≈1.0; for slate size N the best possible `top_p` is e/(e+N−1) (N=3: 0.58, N=10: 0.23). `@weak_score 0.5` and `acc_p_min 0.65` are unreachable for ordinary polysemous words.
+- **[V-code]** `guess_rel_prior/3` parses the sense number from `word|pos|n` but uses POS only, so every same-POS Wiktionary sense gets an identical feature row when `context_fit` is 0.
+- **[V-receipt, Bradley, dev, "hey symbrella what are you up to?"]** All 11 `hey` candidates' shown interjection rows had `final_logit 0.5310765679307379`; top_p hey 0.107, what 0.116, you 0.073, up 0.015, to 0.037; Summary `weak: 5/6`.
+
+### 16.2 Change
+- `sense_rank_factor/2`: multiplies `rel_prior` by 1/(1 + decay·(n−1)) for Wiktionary sense n ≥ 1 (Populate numbers senses per word+POS in Wiktionary order). Closed-class/entity candidates untouched. Config `:brain, :lifg_sense_rank_decay`, code default 0.0 (off).
+- `apply_softmax_temperature/1`: divides logits by `:brain, :lifg_softmax_temperature`, code default 1.0 (off).
+- `config/dev.exs` only: decay 0.5, temperature 0.05. **test and prod behaviour are unchanged** (byte-identical scoring when both are at defaults).
+- `quoted_terms/1` generalised to N terms; cap now `@max_repair_terms`. The test at `attention_fallback_test.exs:401` explicitly asserted truncation of four supplied terms to three; that expectation encoded the cap Bradley asked to remove, so it was updated to four terms (intentional behaviour change, not a red-to-green edit).
+
+### 16.3 Evidence
+- **[V-receipt, Bradley, dev, same sentence, switches on]** top_p hey 0.559, what 0.667, you 0.564, are 1.0, to 0.445, up 0.284; Summary `weak: 1/6`, `uncertain: ["up to"]`.
+- **[V-receipt, Bradley]** `mix test apps/brain/test/ apps/core/test/` (switches off in test env): Brain 719 passed, 3 skipped; Core 2035/2036 with the single failure being the pinned-cap test above (pre-update).
+- **[U]** Suite with switches enabled in test config not yet run. Claude did not execute Elixir (workspace lacks Elixir 1.18/hex access).
+
+### 16.4 Open items
+- **[H]** "up to" needs MWE/construction handling ("what are you up to" → current activity); no sense prior will rescue a 74-sense "up".
+- **[H]** Closed-class `hey|interjection|0` / `what|pronoun|0` are skipped when Wiktionary senses exist (`closed_class.ex:209`), and `closed_class_default_candidate` hard-codes activation 0.20 ignoring spec `activation`.
+- **[H]** Relationship to P-026: this change is config-gated and leaves production winners identical, so it does not pre-empt P-026's offline differential; enabling it in prod should be measured under P-026-style before/after traces first.

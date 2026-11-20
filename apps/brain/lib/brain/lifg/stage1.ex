@@ -734,7 +734,11 @@ defmodule Brain.LIFG.Stage1 do
                 %{}
 
             lex = feat_override |> get_num(:lex_fit, lex_ctx) |> clamp01()
-            rel = feat_override |> get_num(:rel_prior, rel_ctx) |> clamp01()
+            rel =
+              feat_override
+              |> get_num(:rel_prior, rel_ctx)
+              |> Kernel.*(sense_rank_factor(id, c))
+              |> clamp01()
             act = feat_override |> get_num(:activation, act0) |> clamp01()
             intent_feat = feat_override |> get_num(:intent_bias, intent0) |> clamp01()
 
@@ -930,7 +934,7 @@ defmodule Brain.LIFG.Stage1 do
             enabled?: ctx.spatial_pp_senses?)
 
         logits = Enum.map(ids, &Map.get(cal_scores, &1, 0.0))
-        probs = Numeric.softmax(logits)
+        probs = logits |> apply_softmax_temperature() |> Numeric.softmax()
 
         # Keep full softmax precision for downstream probability sums and
         # decisions. Rounding each candidate to six decimals can make a valid
@@ -2052,6 +2056,41 @@ defmodule Brain.LIFG.Stage1 do
 
     adj = if phrase_like?, do: 0.02, else: -0.02
     clamp01(base_pos + adj)
+  end
+
+  # Wiktionary-imported sense ids are "word|pos|n", numbered from 1 in
+  # Wiktionary's own order within each POS (Db.Jsonl.Populate), which lists
+  # the most common sense first. When the sentence gives no context evidence,
+  # every same-POS sense otherwise gets an identical feature row and the
+  # softmax is exactly uniform. This decays rel_prior by sense rank.
+  #
+  # Off unless `config :brain, :lifg_sense_rank_decay, <float > 0>` is set.
+  # Closed-class/entity/self-name candidates (tag 0, synthetic) are untouched.
+  defp sense_rank_factor(id, c) do
+    decay = Application.get_env(:brain, :lifg_sense_rank_decay, 0.0)
+    source = Safe.get(c, :source) || Safe.get(c, "source")
+
+    with true <- is_number(decay) and decay > 0,
+         false <- source in [:closed_class, "closed_class", :entity_default, "entity_default"],
+         {_lemma, _pos, tag} <- parse_sense_id(to_string(id || "")),
+         {n, ""} when n >= 1 <- Integer.parse(tag) do
+      1.0 / (1.0 + decay * (n - 1))
+    else
+      _ -> 1.0
+    end
+  end
+
+  # Stage1 logits are weighted sums of [0,1] features with weights summing to
+  # ~1.0, so the largest possible logit gap is ~1.0. At temperature 1 that
+  # makes top_p nearly uniform for any slate with more than two senses, and
+  # the downstream 0.5 / 0.65 confidence thresholds become unreachable.
+  #
+  # Off (1.0) unless `config :brain, :lifg_softmax_temperature, <0 < t < 1>`.
+  defp apply_softmax_temperature(logits) do
+    case Application.get_env(:brain, :lifg_softmax_temperature, 1.0) do
+      t when is_number(t) and t > 0 and t != 1.0 -> Enum.map(logits, &(&1 / t))
+      _ -> logits
+    end
   end
 
   defp parse_sense_id(id_str) when is_binary(id_str) do
