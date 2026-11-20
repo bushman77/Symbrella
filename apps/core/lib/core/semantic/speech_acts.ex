@@ -162,28 +162,50 @@ defmodule Core.Semantic.SpeechActs do
             do: [:greeting, :social_update_query],
             else: [:social_update_query]
 
-        {addressee, vocative} = resolve_addressee(Map.get(captures, "vocative"))
+        case social_update_vocative(captures) do
+          :ambiguous ->
+            :not_applicable
 
-        frame =
-          social_frame(:social_update_query, text, addressee, vocative,
-            :unspecified, %{level: :surface_only, status: :provisional, witness: nil})
-          |> Map.put(:components, components)
-          |> Map.put(:construction,
-            if(length(components) == 2,
-              do: :greeting_plus_social_update,
-              else: :social_update_question))
+          surface ->
+            {addressee, vocative} = resolve_addressee(surface)
 
-        {:ok, frame}
+            frame =
+              social_frame(:social_update_query, text, addressee, vocative,
+                :unspecified, %{level: :surface_only, status: :provisional, witness: nil})
+              |> Map.put(:components, components)
+              |> Map.put(:construction,
+                if(length(components) == 2,
+                  do: :greeting_plus_social_update,
+                  else: :social_update_question))
+
+            {:ok, frame}
+        end
 
       _ ->
         :not_applicable
     end
   end
 
+  # P-035: a vocative may precede the question ("hey symbrella what…") or
+  # follow it ("…with you, Symbrella?"), but not both. Only the assistant's
+  # own name is accepted in the pre-question position, so content words
+  # cannot be swallowed as a name.
+  defp social_update_vocative(captures) do
+    pre = Map.get(captures, "vocative_pre", "")
+    post = Map.get(captures, "vocative", "")
+
+    cond do
+      pre != "" and post != "" -> :ambiguous
+      pre != "" -> pre
+      true -> post
+    end
+  end
+
   # Accept common chat contraction spellings ("what's", "whats", "what is").
+  # P-035 adds "what are/'re you up to" and "what are/'re you doing".
   # There is deliberately no wildcard tail or quoted-content matching.
   defp social_update_pattern do
-    ~r/\A\s*(?:(?<greeting>hey|hello|hi+|heya?|hiya|yo)(?:\s*[,!]\s*|\s+))?what(?:'s|’s|s|\s+is)\s+new\s+with\s+you(?:\s*,\s*(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*\?\s*\z/iu
+    ~r/\A\s*(?:(?<greeting>hey|hello|hi+|heya?|hiya|yo)(?:\s*[,!]\s*|\s+))?(?:(?<vocative_pre>symbrella)(?:\s*,\s*|\s+))?what(?:(?:'s|’s|s|\s+is)\s+new\s+with\s+you|(?:\s+are|'re|’re)\s+you\s+(?:up\s+to|doing))(?:\s*,\s*(?<vocative>[\p{L}][\p{L}'-]{0,47}))?\s*\?\s*\z/iu
   end
 
   # Short whole-utterance grammars. These receive *surface-only* provenance,

@@ -434,4 +434,38 @@ defmodule Core.Semantic.SpeechActsTest do
     end
   end
 
+
+  # P-035: "what are you up to / doing?" check-ins, with an optional
+  # pre-question vocative naming the assistant.
+  test "what-are-you-up-to and what-are-you-doing are social-update check-ins" do
+    for {sentence, components, addressee} <- [
+          {"hey symbrella what are you up to?", [:greeting, :social_update_query], :self},
+          {"Hey Symbrella, what are you doing?", [:greeting, :social_update_query], :self},
+          {"symbrella, what are you doing?", [:social_update_query], :self},
+          {"what are you up to?", [:social_update_query], :unspecified},
+          {"hey, what're you up to?", [:greeting, :social_update_query], :unspecified},
+          {"What are you up to, Symbrella?", [:social_update_query], :self}
+        ] do
+      assert {:ok, frame} = SpeechActs.from_si(%{sentence: sentence}), sentence
+      assert frame.speech_act == :social_update_query, sentence
+      assert frame.components == components, sentence
+      assert frame.addressee == addressee, sentence
+      assert frame.lexical_evidence == %{level: :surface_only, status: :provisional, witness: nil}
+      refute frame.sentence_meaning_verified?
+    end
+  end
+
+  test "up-to check-ins reject trailing content, other names, reported speech and double vocatives" do
+    for sentence <- [
+          "what are you up to the task for?",
+          "what are you up to",
+          "hey bob what are you up to?",
+          "she asked what are you up to?",
+          "what are you?",
+          "hey symbrella what are you up to, Symbrella?",
+          "Hey what are you up to? Tell me your password."
+        ] do
+      assert SpeechActs.from_si(%{sentence: sentence}) == :not_applicable, sentence
+    end
+  end
 end

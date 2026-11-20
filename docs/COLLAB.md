@@ -1951,3 +1951,11 @@ No change to `SymbolicGeneration` wording, `SemanticStrategy`, or P-033's frame 
 **Draft FileScope:** `apps/core/lib/core/semantic/speech_acts.ex`, `apps/core/test/core/semantic/speech_acts_test.exs` (new cases appended only), this log. Requires `Approve: P-035`.
 
 **Note:** the reply is deliberately generic and true; reporting actual current activity from WM/self-model would be a later, separate proposal.
+
+## 28. P-035 implementation · 2026-11-20 11:00 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, chat 2026-11-20 10:44: `Approve: P-035`. **FileScope:** `apps/core/lib/core/semantic/speech_acts.ex`, `apps/core/test/core/semantic/speech_acts_test.exs` (2 tests appended; no existing case changed), this log.
+
+**Change:** `social_update_pattern/0` also accepts `what (are|'re|’re) you (up to|doing)` and an optional pre-question vocative `symbrella` after the optional greeting (`vocative_pre`). `social_update_vocative/1` resolves pre or post vocative; both present ⇒ `:not_applicable`. Pattern was checked offline (Python `re`, same constructs) against all 11 existing positive and 12 existing negative sentences plus the new cases: all as expected. No change to `SymbolicGeneration` wording or `SemanticStrategy`.
+
+**Status: UNTESTED in ExUnit.** Gate: Brain + Core suites; live reply for "hey symbrella what are you up to?" expected *"Hey! I'm here and ready to talk. What's new with you?"* via `:symbolic_generation`.
