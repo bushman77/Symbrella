@@ -1752,3 +1752,17 @@ Candidate evidence, all **[H]**, unproposed:
 **Not addressed:** "up to" (needs MWE/construction handling, separate ticket); closed-class default candidates skipped when Wiktionary senses exist (`closed_class.ex:209`).
 
 Requires `Approve: P-028`.
+
+## 18. P-028 implementation — function-word understanding by POS mass · 2026-11-19 22:05 MST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, chat 2026-11-19 21:57 MST: `Approve: P-028`.
+
+**FileScope (narrowed from §17):** `apps/core/lib/core/comprehension/summary.ex`, NEW `apps/core/test/core/comprehension/function_pos_mass_test.exs`, this entry. **No Brain/Stage1 change.**
+
+**Scope correction [V-code]:** §17 proposed a Stage1 `pos_mass` field. `Core.LIFG.Attach` rebuilds every choice (`attach.ex:132-157`) and can change the final `id`/`pos` from Stage1's winner, but it already carries the full Stage1 posterior as `:candidate_probs` (≤64 candidates; also maintained by `Core.LIFG.RelationalFeedback`). POS mass is therefore computed in Summary from the *final* choice's POS over `:candidate_probs` (falling back to `:scores`). This is more accurate and keeps Brain byte-identical.
+
+**Change:** `Summary.split_choice_terms/1` uses `sense_weak?/2`: when the chosen POS family is in `interjection pronoun determiner auxiliary preposition conjunction particle` **and** a posterior is present, weak iff same-POS mass < `@function_pos_mass_floor 0.6`; otherwise the unchanged `score < 0.5` rule. Fallback, relational- and synaptic-uncertain flags still force weak. `:understood` is unaffected (POS mass is a selection signal, not dictionary verification). `function_pos_mass/1` is public `@doc false` for testing.
+
+**Tests added:** tied-sense hey/what slate not weak; mass = same-POS sum (0.856); non-dominant function POS stays weak; content word "bank" keeps sense rule; no posterior → old rule; relational uncertainty overrides mass.
+
+**Status: UNTESTED.** Claude could not compile or run Elixir (no Elixir 1.18/hex access in its workspace). **[U]** Existing tests should be unaffected because none surveyed supplies `:candidate_probs` on a function-word choice to Summary, but this is not verified. Requested receipts (Bradley): `mix test apps/core/test/core/comprehension/function_pos_mass_test.exs`, then `mix test apps/core/test`, then the live probe on "hey symbrella what are you up to?" (expect `weak` ≤ 1 and `uncertain` without "hey"/"what"; >64-sense words such as "up" have no `:candidate_probs` and keep the old rule).

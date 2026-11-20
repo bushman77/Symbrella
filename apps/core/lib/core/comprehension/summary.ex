@@ -12,6 +12,15 @@ defmodule Core.Comprehension.Summary do
 
   @summary_limit 6
   @weak_score 0.5
+  # P-028: a function word's comprehension depends on its grammatical POS,
+  # not on which of many near-identical same-POS dictionary senses won.
+  @function_pos_mass_floor 0.6
+  @function_pos ~w(interjection pronoun determiner auxiliary preposition conjunction particle)
+  @pos_family %{
+    "pron" => "pronoun", "det" => "determiner", "article" => "determiner",
+    "aux" => "auxiliary", "modal" => "auxiliary", "prep" => "preposition",
+    "conj" => "conjunction", "interj" => "interjection", "greeting" => "interjection"
+  }
   @weak_rate_threshold 0.45
   @fallback_rate_threshold 0.35
 
@@ -259,7 +268,8 @@ defmodule Core.Comprehension.Summary do
       synaptic_weak? = is_map(choice) and
       Map.get(choice, :synaptic_feedback_uncertain?, false) == true
 
-    weak? = score < @weak_score or fallback? or relational_weak? or synaptic_weak?
+    weak? =
+      sense_weak?(choice, score) or fallback? or relational_weak? or synaptic_weak?
 
       stats =
         stats
@@ -361,6 +371,61 @@ defmodule Core.Comprehension.Summary do
   end
 
   defp choice_score(_), do: 0.0
+
+  # Content words keep the strict sense-level rule. A closed-class/function
+  # choice is weak only when its chosen POS does not dominate the full
+  # Stage1 posterior (`:candidate_probs`, summed over same-POS candidates).
+  # Without a usable posterior the sense-level rule applies unchanged.
+  defp sense_weak?(choice, score) do
+    case function_pos_mass(choice) do
+      mass when is_number(mass) -> mass < @function_pos_mass_floor
+      _ -> score < @weak_score
+    end
+  end
+
+  @doc false
+  def function_pos_mass(choice) when is_map(choice) do
+    id = map_get(choice, :id) || map_get(choice, :chosen_id)
+    pos = pos_family(map_get(choice, :pos) || id_pos(id))
+    probs = map_get(choice, :candidate_probs) || map_get(choice, :scores)
+
+    with true <- pos in @function_pos,
+         %{} <- probs,
+         true <- map_size(probs) > 0 do
+      probs
+      |> Enum.reduce(0.0, fn
+        {cid, p}, acc when is_number(p) ->
+          if pos_family(id_pos(cid)) == pos, do: acc + p, else: acc
+
+        _, acc ->
+          acc
+      end)
+      |> clamp01()
+    else
+      _ -> nil
+    end
+  end
+
+  def function_pos_mass(_), do: nil
+
+  defp id_pos(id) when is_binary(id) do
+    case String.split(id, "|") do
+      [_lemma, pos | _] -> pos
+      _ -> nil
+    end
+  end
+
+  defp id_pos(_), do: nil
+
+  defp pos_family(pos) when is_binary(pos) do
+    down = String.downcase(pos)
+    Map.get(@pos_family, down, down)
+  end
+
+  defp pos_family(pos) when is_atom(pos) and not is_nil(pos),
+    do: pos |> Atom.to_string() |> pos_family()
+
+  defp pos_family(_), do: nil
 
   defp fallback_choice?(choice) when is_map(choice) do
     id = map_get(choice, :id) || map_get(choice, :chosen_id)
