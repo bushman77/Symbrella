@@ -102,5 +102,8 @@ config :brain, :lifg_weights, prime: 0.05
 # silent and top_p is ~1/slate_size. See Brain.LIFG.Stage1.sense_rank_factor/2
 # and apply_softmax_temperature/1. Set decay to 0.0 / temperature to 1.0 to
 # restore the old behaviour.
-config :brain, :lifg_sense_rank_decay, 0.5
-config :brain, :lifg_softmax_temperature, 0.05
+# Disabled 2026-11-19 (COLLAB §16.5): with these on, 8 Brain LIFG tests fail
+# (context loses to sense rank, reanalysis alt_ids vanish, fabricated
+# confidence on genuinely ambiguous senses). Kept as opt-in knobs only.
+config :brain, :lifg_sense_rank_decay, 0.0
+config :brain, :lifg_softmax_temperature, 1.0

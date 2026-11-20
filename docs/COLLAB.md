@@ -1731,3 +1731,24 @@ Candidate evidence, all **[H]**, unproposed:
 - **[H]** "up to" needs MWE/construction handling ("what are you up to" → current activity); no sense prior will rescue a 74-sense "up".
 - **[H]** Closed-class `hey|interjection|0` / `what|pronoun|0` are skipped when Wiktionary senses exist (`closed_class.ex:209`), and `closed_class_default_candidate` hard-codes activation 0.20 ignoring spec `activation`.
 - **[H]** Relationship to P-026: this change is config-gated and leaves production winners identical, so it does not pre-empt P-026's offline differential; enabling it in prod should be measured under P-026-style before/after traces first.
+
+### 16.5 Receipt: P-027 switches enabled in test env, and dev revert · 2026-11-19 21:48–21:52 MST · recorded by CLAUDE
+- **[V-receipt, Bradley]** `config/test.exs` temporarily given `lifg_sense_rank_decay 0.5` / `lifg_softmax_temperature 0.05`; `mix test apps/brain/test/ apps/core/test/` at `7c7cecd`: **Brain 711/719 passed, 3 skipped, 8 failed**; Core did not run (raise on Brain failure). Temporary lines reverted with `git checkout config/test.exs`.
+- Failures: `SemanticControlTest` :73 and :132 (`low_confidence?` false); `Stage1DistinctSensesTest` :6 (`margin_weak?` false); `ReanalysisTest` :30 (`alt_ids == []`); `PostFinalizationTest` :40 (`flips 0 != 1`); `PosBiasModalPredicateTest` :71 (write verb|1 0.578 vs verb|2 0.422, expected tie); `Stage1ReliabilityTest` :28 (`low_confidence_decisions 0 != 6`); `DefinitionRoleCompatibilityTest` :164 (`bank|noun|1` chosen over context-supported `bank|noun|10`).
+- **CLAUDE assessment [H]:** these are genuine regressions, not stale pins: (a) the rank prior overrides real context evidence; (b) temperature 0.05 inflates margins past `margin_thr`, eliminating `alt_ids` and therefore reanalysis; (c) the protected invariant "distinct meanings without disambiguating context stay uncertain" is violated. Claude's earlier claim in §16.2 discussion that context would still dominate is **refuted** by test :164. **[U]** `PosBiasModalPredicateTest` sets `rel_prior` weight 0 yet the verb senses diverged; whether rank leaks via another path or the keyword weights are not applied is unverified.
+- **Action (within P-027 FileScope):** `config/dev.exs` reset to decay 0.0 / temperature 1.0. Code knobs remain, default off; dev/test/prod scoring now byte-identical to pre-P-027. The `AttentionFallback` N-term reply change stays.
+
+## 17. P-028 proposal — function-word understanding by POS mass (NOT authorized) · 2026-11-19 · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Problem [V-receipt §16.1]:** "hey"/"what"/"you" are flagged uncertain because Summary requires a single *sense* top_p ≥ `@weak_score 0.5`, while these words carry 9–17 near-identical same-POS Wiktionary senses. For function/closed-class words, comprehension depends on the selected POS/grammatical function, not on which of the sibling senses won. Raising sense-level confidence (P-027 knobs) fabricates certainty — see §16.5.
+
+**Proposal [H]:**
+1. `Brain.LIFG.Stage1`: add an observation-only field `pos_mass` to each choice = sum of post-softmax probabilities of all candidates sharing the chosen candidate's POS. No change to logits, probs, winners, margins, `alt_ids`, `weak?`, `low_confidence?`.
+2. `Core.Comprehension.Summary.split_choice_terms/1`: a choice whose chosen POS is in a closed function set (`interjection pronoun determiner auxiliary preposition conjunction particle`) is weak iff `pos_mass < @function_pos_mass_floor` (proposed 0.6) or it is a fallback / relational- / synaptic-uncertain choice. All other POS keep the existing `score < 0.5` rule unchanged.
+3. Tests (new file): (a) "hey"/"what" slates with tied same-POS senses and a dominant POS → not weak; (b) mixed-POS slate where the function POS does *not* dominate → weak; (c) content-word "bank" river/finance tie → still weak; (d) Stage1 winners/scores byte-identical with and without the field.
+
+**Draft FileScope:** `apps/brain/lib/brain/lifg/stage1.ex` (add field only), `apps/core/lib/core/comprehension/summary.ex`, NEW `apps/core/test/core/comprehension/function_pos_mass_test.exs`, this log. **[U]** Must first verify `pos_mass` survives from Stage1 to `si.lifg_choices`/`semantic_choices` (the probe in §16.1 showed `:scores` absent there, so some layer compacts choices); if a Core attach/compaction module drops it, its path is added to the FileScope before implementation.
+
+**Not addressed:** "up to" (needs MWE/construction handling, separate ticket); closed-class default candidates skipped when Wiktionary senses exist (`closed_class.ex:209`).
+
+Requires `Approve: P-028`.
