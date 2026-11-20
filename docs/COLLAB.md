@@ -1766,3 +1766,13 @@ Requires `Approve: P-028`.
 **Tests added:** tied-sense hey/what slate not weak; mass = same-POS sum (0.856); non-dominant function POS stays weak; content word "bank" keeps sense rule; no posterior → old rule; relational uncertainty overrides mass.
 
 **Status: UNTESTED.** Claude could not compile or run Elixir (no Elixir 1.18/hex access in its workspace). **[U]** Existing tests should be unaffected because none surveyed supplies `:candidate_probs` on a function-word choice to Summary, but this is not verified. Requested receipts (Bradley): `mix test apps/core/test/core/comprehension/function_pos_mass_test.exs`, then `mix test apps/core/test`, then the live probe on "hey symbrella what are you up to?" (expect `weak` ≤ 1 and `uncertain` without "hey"/"what"; >64-sense words such as "up" have no `:candidate_probs` and keep the old rule).
+
+## 19. P-030 — lexical-confidence census script · 2026-11-20 00:05 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, chat 2026-11-20 00:01: `Approve: P-030`. **FileScope:** NEW `scripts/lexical_confidence_census.exs`, this entry.
+
+**Why [V-code]:** `Core.Comprehension.CoverageLadder` (P-022 census) never reads Summary `stats.weak`, `degraded?` or `uncertain`, so it cannot measure P-027/P-028 effects. This script reports those fields per row and in aggregate over the same corpus format.
+
+**Design:** same persistence-disabled `Core.resolve_input/2` options as the coverage census, for **both** arms (Colony rows are *not* routed through `SemanticProbe` here, so Colony numbers compare only across runs of this script). Aggregates: weak_rate (pooled and per-row mean), degraded_rate, `lexical_gap_proxy_rate` (`degraded? and uncertain != []`, labelled a proxy: the real AttentionFallback reply also depends on risk/action/topic routing), uncertain/understood term counts, reason frequencies. Output has no sentences or terms.
+
+**Status: UNTESTED** (Claude cannot run Elixir). Requested receipts: run on `log/r001_census_v2_chat.md` and `docs/collab/r001/census_corpus_v2_colony.md` at `b09345aa` (pre-P-027) and at HEAD, using a copy of the script outside the tree for the old revision.
