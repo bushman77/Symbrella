@@ -1883,3 +1883,10 @@ Requires `Approve: P-028`.
   - T=0.5: **730/732**, 3 skipped. Failures: the P-029 tolerance test above; `Stage1ReliabilityTest` "closed-class words prefer their grammatical function…".
   - T=0.3: **730/732**, identical failure set.
 - **CLAUDE assessment [H]:** temperature alone (without the P-027 rank prior) breaks **one** pre-existing Brain test vs eight for P-027 (§16.5), confirming that most P-027 damage came from the rank prior. The broken test's six winner assertions are expected to hold; its `low_confidence_decisions == 6` assertion encodes the T=1 ceiling (correct closed-class selections could not be confident). Whether such selections should now be confident is a policy decision for Bradley/GPT-6; Claude has **not** edited it. Core suite and census with temperature not yet run.
+
+### 24.3 Receipts: P-029 gate closed; temperature 0.5 on Core, census and probe · 2026-11-20 09:08 PST · run by Bradley (laptop), recorded by CLAUDE
+- **[V-receipt] P-029 gate (normal config), HEAD `82d0bf9`:** Brain **732 passed, 3 skipped**; Core **2042 passed**; **exit=0**. P-029 accepted.
+- **[V-receipt] Core suite, `lifg_sense_rank_decay 0.0` + `lifg_softmax_temperature 0.5` in `config/test.exs`:** **2042 passed** (0 failures). Combined with §24.2, temperature 0.5 alone breaks exactly one pre-existing test across Brain+Core (`Stage1ReliabilityTest` closed-class `low_confidence_decisions == 6`).
+- **[V-receipt] P-030 census v1, temperature 0.5 in dev:** weak **76**/118 (0.644; was 77), degraded 22/24, proxy 22/24, uncertain 56 (was 57), understood 1.
+- **[V-receipt] Live probe, temperature 0.5 + P-029, "hey symbrella what are you up to?":** `weak 2/6` (rate 0.333, below `@weak_rate_threshold 0.45`), **`uncertain: ["up to"]`** — `what` no longer uncertain (start of 2026-11-19: weak 5/6, uncertain hey/what/up to).
+- **[H]** On the seed corpus temperature moves little, because most seed words still lack discriminating evidence (context fit silent, §20); its effect concentrates where real evidence exists (e.g. P-029 pattern). Enabling it outside dev needs a proposal including Bradley/GPT-6's policy decision on the reliability-test assertion.
