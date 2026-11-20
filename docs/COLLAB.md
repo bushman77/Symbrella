@@ -610,3 +610,35 @@ Existing expectations are unchanged.
 - rerun the census seed command from §8.5 (the type warning should be gone)
 
 **Freeze:** once Bradley's receipt is green, the census definitions are frozen. The next step is adding representative rows under the §8.4 protocol. Any later definition change needs a new ticket and a new corpus version.
+
+### 8.10 Receipt: P-022.1 · 2026-11-19 18:00 MST · recorded by CLAUDE
+
+**RUN BY BRADLEY** (local shell) at `fa57bc82`, after a fast-forward pull from `78b523aa`.
+
+| Command | Result |
+| --- | --- |
+| `mix test apps/core/test/core/comprehension/coverage_ladder_test.exs --trace` | **18 passed**, exit 0. All 18 test names are listed, including both P-022.1 tests. |
+| `mix test apps/core/test` | **2029 passed**, exit 0 (2027 + 2) |
+| `mix run scripts/comprehension_coverage_census.exs --arm all --out tmp/r001_census_seed.json` | exit 0, revision `fa57bc82`, corpus SHA-256 `1a3c2e5a…cde7b2`, `probe_errors: []`, no script type warning |
+
+Pre-existing compile warnings in `chart.ex` (ungrouped `combine/3` clauses at `:424/:437`; unused default in `item/4` at `:317`) are outside P-022 FileScope and unchanged.
+
+**P-022 / P-022.1 status: VERIFIED BY BRADLEY** (targeted file + Core suite + seed census run). **Census definitions are now frozen** per §8.9.
+
+**Seed census, P-022.1 definition** (non-representative, decides nothing):
+- eligible failures: 15;
+- tie opportunities: 0;
+- **conflict opportunities: 4**, all in the chat arm, all `structural_unresolved_single_candidate:attested_role_conflict`. Families: copular, nonce word, noun/adjective, and one of the two noun/verb rows;
+- the one Colony unresolved row is unobservable for conflicts, by design.
+
+**[H] The conflicts may be systematic POS labelling, not ambiguity.**
+- Conflicts appear on the nonce row ("blicket") and the plain copular row, which suggests a shared token ("the" / "is") rather than the ambiguous word.
+- One candidate cause is a dictionary-POS / grammar-feature label mismatch. For example, a LIFG winner with POS `article` versus an expected `determiner`.
+- If confirmed, a static mapping fix (an arm-B-class change), not an investigator, would address much of the conflict class.
+- **Diagnostic requested from Bradley (read-only):** print `role`, `token_index`, `expected_pos` and `selected_pos` of `:conflict` evidence for those four sentences. The command is in Claude's chat reply. No code change is implied.
+
+**Next:**
+1. Bradley runs the conflict diagnostic.
+2. Bradley adds ≥ 30 `bradley_chat_sample` rows and ≥ 30 `public_social` rows under §8.4. This creates corpus v2: commit it, then record its SHA-256 before the run.
+3. Representative census run.
+4. GPT-6 read-only review of P-022 / P-022.1 at any time.
