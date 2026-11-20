@@ -61,27 +61,23 @@ defmodule Brain.LIFG.Stage1.PosBiasWhPronounTest do
     }
   end
 
-  defp pronoun_mass(next_word) do
+  defp base_logit(next_word, id) do
     {:ok, %{choices: choices}} =
       Stage1.run(what_si(next_word), scores: :all, preserve_sense_candidates: true,
         cerebellum_learn?: false)
 
     choice = Enum.find(choices, &(&1.token_index == 0))
-
-    mass =
-      choice.scores
-      |> Enum.filter(fn {id, _} -> String.contains?(id, "|pronoun|") end)
-      |> Enum.map(&elem(&1, 1))
-      |> Enum.sum()
-
-    {choice, mass}
+    row = Enum.find(List.wrap(choice.definition_context_evidence), &(&1.id == id))
+    {choice, row.base_logit}
   end
 
-  test "in Stage1, 'what are' shifts posterior mass toward the pronoun reading" do
-    {with_aux, aux_mass} = pronoun_mass("are")
-    {_control, control_mass} = pronoun_mass("time")
+  # Posterior *mass* is bounded by Stage1's clamp01 + temperature-1 softmax
+  # (COLLAB §24.1), so assert the rule's own effect on the base logit.
+  test "in Stage1, 'what are' raises the pronoun base logit by the wh-pronoun bias" do
+    {with_aux, aux_logit} = base_logit("are", "what|pronoun|1")
+    {_control, control_logit} = base_logit("time", "what|pronoun|1")
 
     assert with_aux.chosen_id =~ "|pronoun|"
-    assert aux_mass > control_mass + 0.1
+    assert_in_delta aux_logit - control_logit, 0.34, 1.0e-6
   end
 end
