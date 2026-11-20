@@ -1910,3 +1910,20 @@ Requires `Approve: P-028`.
 **Gate:** full Brain + Core suites (normal config, and with temperature 0.5); P-030 census; live Explain panel.
 
 **Draft FileScope:** `apps/core/lib/core/syntax/signatures.ex`, `apps/core/lib/core/semantic/sentence_meaning.ex`, `apps/core/lib/core/semantic/proposition.ex` (if the kind must be registered), the role-gloss preference site (to be confirmed: `apps/brain/lib/brain/lifg/role_gloss_compatibility.ex` or Core ATL handoff), NEW tests under `apps/core/test/core/syntax/` and `apps/core/test/core/semantic/`, this log. Requires `Approve: P-033`; the exact FileScope will be confirmed in the first implementation entry before code is written.
+
+## 26. P-033 implementation (staged: structure first) · 2026-11-20 09:45 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, chat 2026-11-20 09:19: `Approve: P-033`. **Scope decision (Bradley, 09:2x via question):** *staged — structure first*. Full ATL/role-competition verification, Proposition and AttentionFallback gating are deferred; reply behaviour is unchanged by this step.
+
+**Confirmed FileScope:** `apps/core/lib/core/syntax/signatures.ex`, `apps/core/lib/core/semantic/sentence_meaning.ex`, `apps/brain/lib/brain/lifg/stage1.ex` (frame-gated gloss bias; §25 allowed a Brain site), NEW `apps/core/test/core/syntax/wh_be_activity_question_test.exs`, NEW `apps/brain/test/brain/lifg/activity_frame_gloss_test.exs`, this log.
+
+**Pipeline finding [V-code]:** existing question frames are verified across Core signatures → Brain ATL constituents (`atl/constituents.ex` allowlist) → Brain role competition → Core SentenceMeaning strict composition → Proposition; and `AttentionFallback.@completed_meanings` contains only temporal kinds, so even `:wh_object_question` still yields the lexical-gap reply whenever a term is uncertain.
+
+**Change:**
+1. `Signatures.wh_be_activity_questions/2` → `:wh_be_activity_question`: `what` + `am|is|are` + `@question_subjects` word + predicate (`-ing` word with dictionary verb POS, or base tokens `up` `to`), sentence ends `?`, consecutive indices, `valid_surface?`, no trailing material. Optional vocative prefix (`hey|hi|hello|yo`* then optional `symbrella`) **for this frame only**; recorded as role `:vocative` and evidence `:vocative_prefix`. Existing frames untouched.
+2. `SentenceMeaning.activity_question/3` (after `object_question` in the chain): exactly one such frame whose `predicate_end` is the last base token ⇒ `kind: :activity_question`, `status: :provisional`, `speech_act: :request_information`, roles incl. `activity: %{status: :unbound}`, `grounding.grammatical_roles: :core_signature_only`, `exact_lexical_meanings: :not_verified`, `factual_authority?: false`.
+3. `Stage1.activity_frame_gloss_bias/4`: for token phrase `up to` at the frame's `predicate` index, candidates whose gloss (after leading parenthetical labels) begins with `doing|involved|engaged|occupied|busy` get +0.34 (same magnitude as PosBias rules). Inert otherwise.
+
+**Tests added:** Core 5 (frame with/without vocative and `-ing`; five non-matches; noun-only `doing` rejected; provisional meaning for the live sentence; no frame ⇒ no meaning). Brain 3 (frame selects `up to|preposition|7` and raises it; rivals never gain; frame at another index inert).
+
+**Status: UNTESTED.** Gate: Brain + Core suites (normal config); live Explain panel for "hey symbrella what are you up to?" — expect canonical `up to|preposition|7` and Sentence meaning `:activity_question` / `:provisional`. Reply text expected **unchanged** (still lexical-gap or another fallback) until the deferred stages.

@@ -92,6 +92,7 @@ defmodule Core.Syntax.Signatures do
        wh_aux_questions(si, nodes) ++
        wh_aux_object_questions(si, nodes) ++
        wh_modal_conditional_questions(si, nodes) ++
+       wh_be_activity_questions(si, nodes) ++
        progressive_locatives(nodes) ++
        finite_past_locatives(nodes) ++
        finite_past_named_directionals(nodes) ++
@@ -759,6 +760,99 @@ defmodule Core.Syntax.Signatures do
         else: {nil, after_negation}
 
     {leading_adverb || trailing_adverb, negation, remaining}
+  end
+
+  # P-033 (staged): "what am/is/are <subject> <V-ing | up to>?" asks what the
+  # subject is currently doing. A leading greeting and/or the assistant's
+  # name ("hey symbrella …", "symbrella, …") is accepted as a vocative prefix
+  # for THIS frame only; existing frames are unchanged. Exact span: no
+  # material may follow the predicate. Structural hypothesis only; it does
+  # not choose senses or verify meaning.
+  @vocative_greetings MapSet.new(~w(hey hi hello yo))
+  @assistant_names MapSet.new(~w(symbrella))
+  @activity_be_forms MapSet.new(~w(am is are))
+
+  defp vocative_split(nodes) do
+    {greetings, rest} = Enum.split_while(nodes, &MapSet.member?(@vocative_greetings, &1.word))
+
+    {names, rest} =
+      case rest do
+        [%{word: w} = n | tail] -> if MapSet.member?(@assistant_names, w), do: {[n], tail}, else: {[], rest}
+        _ -> {[], rest}
+      end
+
+    {greetings ++ names, rest}
+  end
+
+  defp wh_be_activity_questions(si, nodes) do
+    sentence = Map.get(si, :sentence) || ""
+
+    with true <- is_binary(sentence) and String.ends_with?(String.trim(sentence), "?"),
+         true <- length(nodes) <= @max_question_tokens,
+         {prefix, [wh, be, subject | predicate]} <- vocative_split(nodes),
+         true <- wh.word == "what",
+         true <- MapSet.member?(@activity_be_forms, be.word),
+         true <- MapSet.member?(@question_subjects, subject.word),
+         {:ok, kind} <- activity_predicate(predicate),
+         segment = [wh, be, subject | predicate],
+         true <- consecutive?(segment),
+         true <- valid_surface?(segment) do
+      first_pred = hd(predicate)
+      last_pred = List.last(predicate)
+
+      roles =
+        %{
+          wh: wh.index,
+          auxiliary: be.index,
+          subject: subject.index,
+          predicate: first_pred.index,
+          predicate_end: last_pred.index
+        }
+        |> then(fn r -> if prefix == [], do: r, else: Map.put(r, :vocative, hd(prefix).index) end)
+
+      predicate_features =
+        case kind do
+          :progressive -> [:pos_verb]
+          :up_to -> []
+        end
+
+      evidence =
+        [:wh_fronted, :be_auxiliary, :question_subject, :activity_predicate,
+         activity_evidence(kind), :question_punctuation, :contiguous_surface] ++
+          if(prefix == [], do: [], else: [:vocative_prefix])
+
+      [
+        signature(
+          :wh_be_activity_question,
+          {wh.index, last_pred.index},
+          roles,
+          %{wh: [:pos_pronoun], subject: [:pos_pronoun], predicate: predicate_features},
+          evidence
+        )
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  defp activity_predicate([%{word: "up"}, %{word: "to"}]), do: {:ok, :up_to}
+
+  defp activity_predicate([%{word: word} = node]) do
+    if String.length(word) > 4 and String.ends_with?(word, "ing") and pos?(node, "verb"),
+      do: {:ok, :progressive},
+      else: :error
+  end
+
+  defp activity_predicate(_), do: :error
+
+  defp activity_evidence(:progressive), do: :progressive_verb_form
+  defp activity_evidence(:up_to), do: :be_up_to_idiom
+
+  defp consecutive?(nodes) do
+    nodes
+    |> Enum.map(& &1.index)
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.all?(fn [a, b] -> b == a + 1 end)
   end
 
   defp question_auxiliary?(%{word: word}) do

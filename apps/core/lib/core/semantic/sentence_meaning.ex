@@ -95,6 +95,7 @@ defmodule Core.Semantic.SentenceMeaning do
         TemporalEventComposition.question(si) ||
         TemporalSentence.build(si) ||
         question || object_question(si, sentence, frames, constituents, tokens) ||
+        activity_question(sentence, frames, tokens) ||
         participant_meaning(si, sentence) ||
         DiscourseComposition.build(si) ||
         provisional_structure(si, sentence) ||
@@ -568,6 +569,59 @@ defmodule Core.Semantic.SentenceMeaning do
   end
 
   defp object_question(_, _, _, _, _), do: nil
+
+  # P-033 (staged): "what are you doing / up to?" → the speaker asks what the
+  # subject is currently doing. PROVISIONAL: grounded only in the Core
+  # signature (no ATL constituent or role-competition verification yet), so
+  # it never claims verified lexical meaning or an answer.
+  defp activity_question(sentence, frames, indexed)
+       when is_binary(sentence) and is_list(frames) and is_map(indexed) and indexed != %{} do
+    candidates =
+      Enum.filter(frames, fn
+        %{id: :wh_be_activity_question, source: :core_syntax, roles: %{} = roles} ->
+          Map.get(roles, :predicate_end) == indexed |> Map.keys() |> Enum.max()
+
+        _ ->
+          false
+      end)
+
+    with [%{roles: roles, evidence: evidence, span: span}] <- candidates,
+         {:ok, subject} <- surface_at(indexed, roles.subject),
+         {:ok, auxiliary} <- surface_at(indexed, roles.auxiliary),
+         {:ok, predicate} <- surface_range(indexed, roles.predicate, roles.predicate_end) do
+      %{
+        version: 1,
+        sentence: sentence,
+        definition:
+          "The speaker asks what '#{subject}' is currently doing (predicate '#{predicate}').",
+        kind: :activity_question,
+        status: :provisional,
+        speech_act: :request_information,
+        source_frame: :wh_be_activity_question,
+        span: span,
+        roles: %{
+          question_word: %{token_index: roles.wh},
+          auxiliary: %{surface: auxiliary, token_index: roles.auxiliary},
+          subject: %{surface: subject, token_index: roles.subject},
+          predicate: %{surface: predicate, span: {roles.predicate, roles.predicate_end}},
+          activity: %{role: :activity, status: :unbound}
+        },
+        addressee_vocative?: :vocative_prefix in List.wrap(evidence),
+        unresolved: [:activity, :role_verification, :exact_dictionary_senses],
+        grounding: %{
+          grammatical_roles: :core_signature_only,
+          exact_lexical_meanings: :not_verified,
+          external_facts: :not_checked,
+          factual_authority?: false
+        },
+        source: :sentence_signature
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp activity_question(_, _, _), do: nil
 
   defp normalize_object_question(sentence) do
     sentence

@@ -763,7 +763,8 @@ defmodule Brain.LIFG.Stage1 do
             pos_bias =
               ClosedClass.closed_class_pos_bias(token_phrase, pos) +
                 PosBias.local_context(acc, tok, pos) +
-                PosBias.window(ctx, tok, pos)
+                PosBias.window(ctx, tok, pos) +
+                activity_frame_gloss_bias(ctx.si, tok_index, token_phrase, c)
 
             perception_bias =
               perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
@@ -2072,6 +2073,43 @@ defmodule Brain.LIFG.Stage1 do
     adj = if phrase_like?, do: 0.02, else: -0.02
     clamp01(base_pos + adj)
   end
+
+  # P-033 (staged): inside a Core `:wh_be_activity_question` frame whose
+  # predicate is the MWE "up to" ("what are you up to?"), prefer the sense
+  # whose gloss *begins* with an activity cue ("Doing, involved in."). Gloss-
+  # driven, not an id lookup; inert without that exact frame and token.
+  @activity_gloss_cues ~w(doing involved engaged occupied busy)
+  @activity_frame_gloss_bias 0.34
+
+  defp activity_frame_gloss_bias(si, tok_index, "up to", cand) do
+    frame? =
+      si
+      |> Safe.get(:sentence_signatures, [])
+      |> List.wrap()
+      |> Enum.any?(fn
+        %{id: :wh_be_activity_question, roles: %{predicate: ^tok_index}} -> true
+        _ -> false
+      end)
+
+    if frame? and activity_gloss?(Safe.get(cand, :definition)),
+      do: @activity_frame_gloss_bias,
+      else: 0.0
+  end
+
+  defp activity_frame_gloss_bias(_si, _tok_index, _phrase, _cand), do: 0.0
+
+  defp activity_gloss?(definition) when is_binary(definition) do
+    first_word =
+      definition
+      |> String.downcase()
+      |> String.replace(~r/^\s*(\([^)]*\)\s*)+/u, "")
+      |> String.split(~r/[^\p{L}]+/u, trim: true)
+      |> List.first()
+
+    first_word in @activity_gloss_cues
+  end
+
+  defp activity_gloss?(_), do: false
 
   # P-031: neighbour-gloss context (extended-Lesk style).
   #
