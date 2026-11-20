@@ -1104,3 +1104,205 @@ Bradley will run these on a desktop. **P-024 status: targeted tests and D-1 VERI
 **Final recommendation:** The causal evidence supports coverage-first; P-024 is a successful *bounded grammar hardening*, not a completed semantic architecture. Collect the representative corpus next; independently test the residual counted-negative BE proposal and the unchecked past-feature issue; finish P-021b evidence and consumer gates; only then propose a narrowly scoped chat copular design. Bradley retains sole approval authority. **No new implementation ticket or sealed evaluation is authorized by this document.**
 
 **Verification attribution:** Claude's §10 records Bradley at `56ad7e3c`: P-024 targeted 7/7, related brain 237 + core 1209, Core 2036, full umbrella db 90 / llm 58 / brain 719 (3 skipped) / core 2036 / symbrella 1 / web 213 and a successful P-024 seed census, all exit 0. I reviewed these receipts but **did not execute** them. This append has no new test/compile exit codes.
+
+## 12. CLAUDE independent review of GPT-6 §11 and P-021b readiness · 2026-11-19 · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**READ-ONLY. Documentation append only.** Source read at `8a93b910`. Claude ran no Elixir, changed no implementation or test file and did not touch the sealed set.
+
+Labels:
+- **[V]** read in the cited source;
+- **[V-receipt]** Bradley's execution recorded in this log;
+- **[H]** hypothesis;
+- **[U]** unknown.
+
+Agreement with GPT-6 is not treated as evidence.
+
+### 12.1 Executive verdict
+
+- **No P-024.1 now.** The counted-negative residual (§12.2) is real in code, but on inspection it produces correct POS support with a mislabelled basis, and no downstream promotion. It is a documentation and label defect, not a correctness defect. A diagnostic (D-2) is offered; any guard can wait for a later grammar ticket.
+- **CONDITIONAL GO on a small P-025 before P-021b:** an observability-only report of unchecked roles in Brain, plus a single strict admission predicate in Core. There is no ranking change, and no existing consumer is switched (§12.3).
+- **GO on corpus v2 collection**, under the protocol in §12.4, once Bradley authorizes the sources. It runs on the current post-P-024 head.
+- **P-021b: NO GO for implementation today; CONDITIONAL GO on the scoped proposal in §12.6**, after P-025 and the v2 baseline.
+- Chat copular, P-023 and sealed runs: **NO GO**, unchanged.
+
+### 12.2 Task 1: the counted-negative BE route
+
+**Q1. Can the current code produce the proposal?**
+- **[V-code] Yes, in code.** `PredicateEvidence.counted_negative_transitives/3` (`predicate_evidence.ex:133-165`) requires all of:
+  - exactly 7 base tokens (last = 6);
+  - a count word or 1..999;
+  - the surfaces `did` at 2 and `not` at 3;
+  - a closed determiner at 5;
+  - dictionary witnesses: noun at 1, verb at 2, adverb at 3, **verb at 4**, determiner at 5, noun at 6.
+
+  Nothing excludes BE at index 4.
+- **[H, likely]** "Three reports did not be the problem." would emit `:counted_negative_transitive_predicate` at index 4 if LTM attests `did|verb`, `not|adverb` and `be|verb` rows. Not run; **D-2** below settles it.
+
+**Q2. Can it influence LIFG?**
+- **[V-code] Yes, as POS support.** `Brain.LIFG.RoleCompetition` accepts the basis (`role_competition.ex:506`). `GrammarEvidence` then adds the role boost when the evidence list matches (`grammar_evidence.ex:129,240-247`), and `SenseFocus` focuses the verb POS (`sense_focus.ex:175,204`).
+- **But** "be" after do-support is lexically a verb. Ungrammatical as the sentence is, `verb` is the right part of speech for it. The error is that the basis *name* claims "transitive". The POS it supports is not wrong.
+
+**Q3. Can anything downstream promote the incorrect reading?** **[V-code] No path found.**
+- No `Signatures` detector emits a counted-negative clause (grep: no `did`/negative-transitive signature; the only `did`-related code is the WH/aux question family `signatures.ex:492-567`). So `StructuralCompetition` has no candidate to prefer.
+- `DeclarativeProposition`'s negated shapes (`declarative_proposition.ex:190-221`) accept only `verify|support|refute|contradict` (`:302-309`).
+- Without an SVO signature, `SVOEvent` and the participant assertion cannot fire, because they need an SVO frame. That last step is **[H]**: inferred from §10's trace of `svo_event.ex:17-55`, not re-run.
+
+**Q4. P-024.1?** **No, not as its own ticket.**
+- The input is ungrammatical, the supported POS is correct, and nothing promotes it.
+- If wanted, a one-line `@be_forms` guard plus test can ride along with the next approved grammar ticket.
+- **Disagreement with §11.4 point 4:** GPT-6 ranks it "more immediate". I rank it lowest of the residuals.
+
+**Q5. Positive controls, if a guard is ever added:**
+- "Three links did not support the claims." (`predicate_evidence_test.exs`, COLONY counted-negative case);
+- the `declarative_proposition_test.exs`, `colony_cognition_test.exs`, `colony_draft_policy_test.exs` and `observation_bridge_test.exs` negated-transitive cases (grep: 11 references);
+- a non-BE twin "Three reports did not support the problem." that must keep the proposal.
+
+**D-2 (optional, read-only):** for "Three reports did not be the problem.", print `role_competition.roles[4]`, the LIFG choice at 4, `sentence_signatures` ids and `sentence_meaning` kind/status. Expected: a `:supported` verb role, no clause signature, `:not_yet_interpreted`. If `sentence_meaning` is ever not `:not_yet_interpreted`, the conclusion above is wrong.
+
+### 12.3 Task 2: structural proof admission (ranking versus boundary)
+
+**[V] Weaknesses are as GPT-6 states:**
+- `expected_pos/1` has no clause for `:simple_past`, `:pos_adverb` or quantifier features (`structural_competition.ex:240-260`). Those roles are **silently skipped**: they are not counted in `checked`, so they are neither matched nor unresolved.
+- `adjudicate/1` prefers a candidate with `matched >= 2 and matched >= conflicting` (`:229-233`).
+
+**[V] But the existing L2 boundary already re-witnesses every role, and that is the evidence for putting the fix at the boundary:**
+- `Composition.event_derivation/2` requires `:preferred` with an equal construction, span and roles (`composition.ex:159-170`). Then *every* role is re-resolved through `RoleWitness.resolve/4` with an exact POS (`:174-187`; nominal proofs `:309-330`). `RoleWitness` requires exactly one LIFG choice at the index and an attested selected id (`role_witness.ex:19-46`).
+- The participant assertion requires `EpisodicProjection.validated_participant/1`, i.e. LIFG noun/verb/noun winners (`sentence_meaning.ex:725-760`).
+- **The only consumer of bare `:preferred` is `SentenceMeaning.provisional_structure/2`** (L1, `:provisional`, `factual_authority?: false`, `sentence_meaning.ex:159-213`). Its readers are `passage.ex:141`, `passage_antecedents.ex:68`, `integration/audit.ex:96,137`, `integration/coverage.ex:83`, `semantic_strategy.ex:315`, `symbolic_generation.ex:734` and the census. The one reply path additionally demands a selected verb witness (`sentence_meaning.ex:244-245`).
+
+**Recommendation (P-025, not authorized):**
+1. **Do not change ranking.** Do not touch `adjudicate/1`, and do not add `:simple_past`/adverb to `expected_pos/1`. Adding them would change which past and adverbial candidates are preferred. That is a behaviour change to be measured on v2 first, under its own ticket.
+2. **Brain, observability only:** add `unchecked_roles: [role]` to each candidate summary, listing the roles whose required features map to no POS. Status and preferred selection must be byte-identical; a test asserts this on the existing fixtures.
+3. **Core, one strict predicate:** `Core.Syntax.StructuralCompetition.admitted/1` returns `{:ok, preferred}` only when `verified/1` holds **and** `conflicting_roles == 0`, `unresolved_roles == 0` and `unchecked_roles == []`. A declared alternative witness may cover an unchecked role, e.g. `:simple_past` covered by signature morphology evidence plus a `RoleWitness` verb at that index. Otherwise it returns `:not_admitted` with a closed reason.
+4. **No consumer switched in P-025.** `admitted/1` is the mandatory entry gate for P-021b's new verifier. Whether `provisional_structure/2` should require it is a separate, measured decision: the census already records `structural.preferred_conflicting_roles` per row, so v2 can count preferred-with-conflicts directly.
+
+**Must P-025 precede P-021b?** Yes, as a dependency of P-021b's verifier. It touches a Brain file, and P-021b is meant to be Core/Colony only, so keeping it separate keeps both FileScopes clean. **Partial disagreement with §11.4 point 1:** GPT-6 frames it as a precondition for *chat copular meaning*. It is needed earlier, for *any* new L2/L3 proof.
+
+**P-025 FileScope (proposal):**
+- `apps/brain/lib/brain/lifg/structural_competition.ex` (the additive field)
+- `apps/core/lib/core/syntax/structural_competition.ex` (`admitted/1`)
+- NEW `apps/brain/test/brain/lifg/structural_unchecked_roles_test.exs`
+- NEW `apps/core/test/core/syntax/structural_admission_test.exs`
+
+**Acceptance:**
+- byte-identical `status`/`preferred` on every existing Brain and Core test;
+- `admitted/1` rejects a 2-matched/1-conflict candidate, a candidate with an unresolved role, and a candidate with an unchecked adverb or simple-past role without an alternative witness;
+- it admits "The artist draws a picture." with complete witnesses;
+- full Core and umbrella green.
+
+### 12.4 Task 3: corpus v2 collection and audit protocol
+
+**Do not invent rows.** Use deterministic extraction from real sources. Claude authors no v2 rows.
+
+| Arm | Source **[V]** | Selection rule (frozen before extraction) |
+| --- | --- | --- |
+| chat (≥ 30, target 40) | `episodes` table: `Db.Episode` has `role`, `source`, `sentence`, timestamps (`db/episode.ex:39-58`) | User-role rows with `inserted_at` < cutoff *T* (Bradley picks *T*, recorded), most recent first. Drop exact duplicates, rows equal to any v1 seed, P-021 DEV/sealed text or test fixture, and rows Bradley excludes for privacy. **Exclusions are counted, never replaced.** |
+| colony (≥ 30, target 40) | `Llm.Colony.Client.posts/1` or `feed/1` (read-only GET; `client.ex:33-54`) | A single fetch at time *T₂*, consecutive items in returned order, title text only. Record the endpoint. **Note [V]:** `feed/1` is `/feed/for-you`, a personalized ranking, so `posts/1` is preferred if it is chronological **[U]**. |
+
+**Fixed rules:**
+- One row per input (a chat turn or a post title), never split or edited.
+- Personal names and private details in chat rows are replaced by a fixed placeholder token (`Sam`/`Riverton`), with the replacement count recorded. Otherwise the row is excluded, never paraphrased.
+- Families are labelled by Bradley **after** extraction and **before** any census run. Labels are for reporting only.
+
+**Privacy and storage:**
+- Chat rows stay in a **local, untracked** file (e.g. `log/r001_census_v2_chat.md`). Only its SHA-256, the row count and the exclusion counts are committed.
+- Colony rows (public) may live in a new `docs/collab/r001/census_corpus_v2_colony.md`.
+- v1 (`census_corpus.md`, SHA `1a3c2e5a…`) is not edited.
+
+**Freeze:** commit or record both SHA-256s **before** the first v2 run. The run uses the current head, post-P-024.
+
+**Predeclared audit (Bradley, plus a second reviewer if available; whoever implements a future fix may not author labels):**
+- **All** tie/conflict opportunities.
+- **All** rows with `structural.status == :preferred` and `preferred_conflicting_roles > 0`.
+- A sample of `max(10, 20%)` of rows classed `:provisional` or `:interpreted_correctness_unassessed`. Rows are ordered by `sha256(case_id)` and the first *k* taken, so the selection is fixed by the IDs, not by inspection.
+- Label set: `correct`, `wrong`, `ambiguous_should_abstain`, `correct_abstention`, `wrong_abstention`. Disagreements are reported, not forced.
+
+**Report, kept as separate tables:**
+1. lexical coverage;
+2. structural coverage (full span, preferred, preferred-with-conflicts);
+3. typed composition;
+4. abstention (policy versus budget versus failure);
+5. **audited correctness**, with denominators.
+
+The raw P-022 screen is reported unchanged next to the adjudicated counts.
+
+**Needed from Bradley:**
+- (a) authorization to run read-only extraction queries against `episodes` and one Colony read;
+- (b) the cutoffs *T* and *T₂*;
+- (c) the privacy rule: are local-only chat rows acceptable?
+- (d) who audits.
+
+Extraction is a read-only `mix run -e` and needs no repo code. Claude will supply it on request.
+
+### 12.5 Task 4: P-021b readiness matrix
+
+| Obligation | Status | Evidence |
+| --- | --- | --- |
+| L1 chart, Colony-gated (P-021a) | **Implemented and verified (suites)** | chart tests green in every Core run since `b4ac29cf` **[V-receipt]**. Sealed: **not run** |
+| P-021a.1 fixes (B1 honest cue, B2 agreement, M1 prepend, M3 differential) | **Implemented; suite-verified** | code `5555a38` (archive §25); `:no_negation_cue_in_closed_list` at `chart.ex:603` **[V]**. No per-test P-021a.1 receipt recorded **[U]** |
+| `grammar_version` on signatures (replay stability) | **Not implemented; decision open** | `chart.ex:598-621` has no version field **[V]** |
+| M2 lexical-ambiguity width measured | **Not measured** | N-037 §4 **[U]** |
+| Complete-role admission (no conflict / unresolved / unchecked) | **Designed, not implemented** | N-037 §5.1. Proposed P-025 (§12.3) |
+| Adverb / simple-past / quantifier roles witnessed | **Known gap** | `brain structural_competition.ex:240-260` **[V]** |
+| Witnessed lexical constants `{:lexical, kind, witness_id}` | **Designed, not implemented** | N-035 §4.1. No match in `composition/*.ex` **[V grep]** |
+| `kind_predication` operator, proof and §4.3 verifier invariants | **Designed, not implemented** | N-035 §4.2-4.4 |
+| `AttributedPredication.verified/1` + distinct `:attributed_predication` status | **Designed, not implemented** | N-036 §3 items 1-2. No module **[V grep]** |
+| `Composition.derive/verified` and `SentenceMeaning` unchanged | **Holds today; needs a P-021b regression test** | N-036 §3 item 2 |
+| Legacy counted-title flow byte-identical | **Designed; test not written** | N-036 Class D |
+| Class A closed-matcher table test | **Designed; not written** | N-036 §3 item 5 |
+| Witnessed-lemma-only fields; no atoms or raw spans | **Designed** | N-035 §4.1, N-036 §3 item 3 |
+| No prompt / publish / BG / WM / durable memory for the new kind | **Holds today by the `claim_for_title` gate** | N-036 Class D **[V per N-036]**; test needed |
+| Colony `:copular_predication` surfacing as `:provisional` via `provisional_structure` | **Existing behaviour; decision open** | N-037 M4. Scoring must use the structural outcome |
+| Real-probe LTM coverage | **Partially available** | the P-022 Colony arm runs the real probe with real LTM **[V]**; representative v2 not run |
+| Sealed P-021b run | **Not run** | at most twice, counts only (N-035:206-211) |
+
+### 12.6 Smallest defensible P-021b proposal (not authorized; after P-025 and the v2 baseline)
+
+**FileScope** (N-035 §4.7 as amended by N-036 §3):
+- `composition/expression.ex`: `{:lexical, kind, witness_id}` term and `{:kind_predication, tense, S, C}`, with the binary-constant regex.
+- `composition/lexical.ex`: witness-bound constants.
+- NEW `composition/predication.ex`: `compose/1` and `verify/1`, pure and deterministic.
+- NEW `apps/core/lib/core/social/attributed_predication.ex`: `interpret/1` and `verified/1`. Status `:attributed_predication`; it requires `source: :colony_external`, `StructuralCompetition.admitted/1` (P-025) and `Predication.verify/1`.
+- `social/reported_proposition.ex`: one fallback clause after `DeclarativeProposition`.
+- NEW tests: `predication_test.exs`, `attributed_predication_test.exs`, `p021b_consumer_isolation_test.exs`.
+- **Not touched:** `composition.ex` dispatch, `Composition.verified/1`, `SentenceMeaning`, `ColonyCognition`, `ColonyDraftPolicy`, response, Ledger, WM, web.
+
+**Acceptance:**
+1. The §4.3 invariants as tests, each with a negative.
+2. `AttributedPredication.verified/1` rejects:
+   - every P-021a.1 adversarial row;
+   - a 2-of-3 conflicted candidate;
+   - an unchecked adverb role;
+   - a dual adjective/participle complement read as a passive event;
+   - any negation, modal, question or subordinator token.
+3. A byte-identical legacy counted-title Colony flow.
+4. The Class A table test: no plan, focus, ledger record or realization.
+5. `Composition.verified/1` returns `:not_applicable` for the new kind, and chat is byte-identical on the chart differential.
+6. No atom is created from input; witnessed binaries only.
+7. Full umbrella green.
+8. The sealed run **at most once at this gate**, counts only, scored on the structural and verifier outcome.
+
+### 12.7 Task 5: development sequence
+
+1. **C: corpus v2 extraction and baseline census** on the current head. It needs no code, only authorization. It tells us whether copular coverage is actually the dominant failure in real traffic before more work is built on that assumption.
+2. **B: P-025** (observability plus the admission predicate). It is small, with zero behaviour change, and it is the gate any trustworthy L2/L3 proof needs.
+3. **D: P-021b**, as in §12.6. This is Colony-only and observational.
+4. Only then, a separately approved chat copular design. Its evidence is the v2 rows that P-024 now abstains on.
+5. **A (P-024.1):** fold into any later grammar ticket. Not a standalone step.
+
+**Ordering constraints:**
+- 1 must precede 4.
+- 2 must precede 3.
+- 1 and 2 are independent and may run in parallel.
+
+**Why this order:** it measures before building, adds verification infrastructure before new proof kinds, and adds no new special-case patterns. The only grammar change in this sequence is P-021b's typed predication, which is general over witnessed vocabulary.
+
+### 12.8 Decisions requiring Bradley
+
+1. Authorize the v2 extraction: the `episodes` read, one Colony read, cutoffs *T* and *T₂*, the privacy rule, and the auditor.
+2. Approve P-025 (§12.3 FileScope) or reject it.
+3. Whether D-2 is worth running (optional).
+4. Whether `provisional_structure/2` should eventually require `admitted/1`. Defer until v2 counts preferred-with-conflicts.
+5. Whether a `grammar_version` field is required before P-021b (my view: yes, as a P-021b acceptance item, since §4.3 invariant 1 replays the proof).
+
+**STOP.** Documentation handoff only. GPT-6 reviews next; Bradley decides.
