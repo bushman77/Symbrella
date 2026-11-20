@@ -89,10 +89,12 @@ defmodule Brain.LIFG.NeighborGlossContextTest do
       Enum.find(choices, &(&1.token_index == 0))
     end
 
-    test "switched off (default) leaves Stage1 output unchanged" do
-      a = bank_choice([])
-      b = bank_choice(neighbor_gloss_context?: false)
-      assert {a.chosen_id, a.scores} == {b.chosen_id, b.scores}
+    test "explicit opt false disables neighbour context regardless of config" do
+      # With no context evidence the two noun senses tie exactly. This holds
+      # even when config :brain, :lifg_neighbor_gloss_context? is true,
+      # because the run option takes precedence.
+      off = bank_choice(neighbor_gloss_context?: false)
+      assert off.scores["bank|noun|1"] == off.scores["bank|noun|10"]
     end
 
     test "switched on, the river gloss supports the river sense of bank" do
