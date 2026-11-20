@@ -28,6 +28,17 @@ defmodule Core.Syntax.Chart do
   @subject_nested_preposition_keys [:subject_adjunct_1_nested_preposition, :subject_adjunct_2_nested_preposition]
   @subject_nested_object_keys [:subject_adjunct_1_nested_object, :subject_adjunct_2_nested_object]
 
+  # P-039: closed subject_* -> object_* role-key map, built at compile time
+  # from the fixed key inventory above (never from input text).
+  @object_rekey (([:subject_head, :subject_determiner, :subject_quantifier,
+                   :subject_possessor] ++ @subject_modifier_keys ++
+                    @subject_preposition_keys ++ @subject_object_keys ++
+                    @subject_nested_preposition_keys ++ @subject_nested_object_keys)
+                 |> Map.new(fn key ->
+                   {key, String.to_atom("object_" <>
+                     String.replace_prefix(Atom.to_string(key), "subject_", ""))}
+                 end))
+
   @doc "Generate full-span grammatical hypotheses or an empty list. No side effects."
   @spec clause_signatures(map(), list(), list()) :: [map()]
   def clause_signatures(si, nodes, possessive_signatures \\ []) do
@@ -44,6 +55,8 @@ defmodule Core.Syntax.Chart do
   def diagnose(%{} = si, nodes, possessive, opts)
       when is_list(nodes) and is_list(possessive) and is_list(opts) do
     limits = limits(opts)
+    rule_set = rule_set(opts)
+    harness? = rule_set == :clause_v1
     sorted = Enum.sort_by(nodes, &Map.get(&1, :index, -1))
     indices = Enum.map(sorted, &Map.get(&1, :index))
     sentence = Map.get(si, :sentence, "")
@@ -54,11 +67,11 @@ defmodule Core.Syntax.Chart do
     # Either path abstains; only fully validated inputs reach chart fill.
     reason =
       cond do
-        Map.get(si, :source) != :colony_external ->
+        Map.get(si, :source) != :colony_external and not harness? ->
           :unsupported_source
 
         true ->
-          case rejection_reason(sentence, sorted, indices, limits.tokens) do
+          case rejection_reason(sentence, sorted, indices, limits.tokens, harness?) do
             nil -> if valid_original_tokens?(si, sorted), do: nil, else: :coverage_gap
             rejection -> rejection
           end
@@ -67,7 +80,7 @@ defmodule Core.Syntax.Chart do
     if reason do
       abstain(reason, 0)
     else
-      case fill(sorted, possessive, limits) do
+      case fill(sorted, possessive, limits, rule_set) do
         {:error, reason, count}
         when reason in [:chart_budget_exceeded, :lexical_ambiguity_budget] ->
           abstain(reason, count)
@@ -114,11 +127,20 @@ defmodule Core.Syntax.Chart do
     end
   end
 
+  # P-039: the clause rule set is honoured ONLY together with an explicit
+  # harness override. Any other combination is the unchanged default chart.
+  defp rule_set(opts) do
+    if Keyword.get(opts, :rule_set) == :clause_v1 and
+         Keyword.get(opts, :harness_override) == true,
+       do: :clause_v1,
+       else: :default
+  end
+
   defp abstain(reason, count),
     do: %{status: :abstained, reason: reason, signatures: [],
       chart_items: count, factual_authority?: false}
 
-  defp rejection_reason(sentence, nodes, indices, max_tokens) do
+  defp rejection_reason(sentence, nodes, indices, max_tokens, harness?) do
     words = Enum.map(nodes, & &1.word)
     cond do
       not is_binary(sentence) -> :invalid_input
@@ -136,14 +158,30 @@ defmodule Core.Syntax.Chart do
       Enum.any?(nodes, &(not is_binary(Map.get(&1, :surface)))) -> :coverage_gap
       String.ends_with?(String.trim(sentence), "?") or
         Grammar.copula?(hd(words)) -> :interrogative
-      Enum.any?(words, &Grammar.negative?/1) -> :negation
+      # P-039 harness only: negation and non-copular clauses reach the chart;
+      # the clause grammar itself admits only "do + not + base verb".
+      Enum.any?(words, &Grammar.negative?/1) and
+          not (harness? and do_not_only?(words)) -> :negation
       Enum.any?(words, &Grammar.modal?/1) -> :modal
-      not Enum.any?(words, &Grammar.copula?/1) ->
+      not harness? and not Enum.any?(words, &Grammar.copula?/1) ->
         if verb_initial?(hd(nodes)), do: :instruction_shaped, else: :no_clause_core
       not Boundaries.valid_window?(Enum.map(nodes,
         &%{phrase: &1.surface, index: &1.index})) -> :coverage_gap
       true -> nil
     end
+  end
+
+  # Harness-only: every negative cue must be a bare "not" directly after a
+  # do-auxiliary. "nobody", "no", "never", "n't" contractions etc. still
+  # abstain, so a negated clause can never be read with positive polarity.
+  defp do_not_only?(words) do
+    words
+    |> Enum.with_index()
+    |> Enum.all?(fn {word, i} ->
+      not Grammar.negative?(word) or
+        (Grammar.clause_negator?(word) and i > 0 and
+           Grammar.do_auxiliary?(Enum.at(words, i - 1)))
+    end)
   end
 
   # Match the real Brain base-index validity conditions; do not accept an
@@ -227,10 +265,10 @@ defmodule Core.Syntax.Chart do
         (has_pos?(&1, "verb") and MapSet.member?(Map.get(&1, :morphology, MapSet.new()), :past_participle))))
   end
 
-  defp fill(nodes, possessive, limits) do
+  defp fill(nodes, possessive, limits, rule_set) do
     n = length(nodes)
     seeds =
-      (Enum.flat_map(nodes, &terminals/1) ++
+      (Enum.flat_map(nodes, &terminals(&1, rule_set)) ++
         Enum.flat_map(possessive, &possessive_seed(&1, nodes)))
       |> Enum.group_by(&{&1.first, &1.last})
 
@@ -247,14 +285,14 @@ defmodule Core.Syntax.Chart do
               for split <- first..(last - 1),
                   left <- Map.get(acc, {first, split}, []),
                   right <- Map.get(acc, {split + 1, last}, []),
-                  rule <- Grammar.binary_rules(),
+                  rule <- Grammar.binary_rules(rule_set),
                   rule.rhs == [left.kind, right.kind],
                   item <- List.wrap(combine(rule.op, left, right)) do
                 item
               end
             end
 
-          case close(initial ++ joined, limits.per_span) do
+          case close(initial ++ joined, limits.per_span, rule_set) do
             {:error, :chart_budget_exceeded} ->
               # A production width-1 overflow witnesses too many lexical
               # alternatives, not an excessively long sentence. Keep the
@@ -283,12 +321,12 @@ defmodule Core.Syntax.Chart do
     end)
   end
 
-  defp close(items, limit) do
+  defp close(items, limit, rule_set) do
     Enum.reduce_while(1..6, {:ok, sorted_items(items)}, fn _, {:ok, current} ->
       if length(current) > limit do
         {:halt, {:error, :chart_budget_exceeded}}
       else
-        expanded = for item <- current, rule <- Grammar.unary_rules(),
+        expanded = for item <- current, rule <- Grammar.unary_rules(rule_set),
           rule.rhs == [item.kind], derived <- List.wrap(unary(rule.op, item)),
           do: derived
         next = sorted_items(current ++ expanded)
@@ -311,15 +349,77 @@ defmodule Core.Syntax.Chart do
   defp item_key(i) do
     {i.kind, i.first, i.last, i.head, Enum.sort(Map.to_list(i.roles)),
       Enum.sort(Map.to_list(i.required)), i.modifiers, i.adjuncts,
-      i.reading, i.number, i.copula, i.predicate}
+      i.reading, i.number, i.copula, i.predicate, i.clause}
   end
 
-  defp item(kind, first, last, overrides \\ %{}) do
+  defp item(kind, first, last, overrides) do
     Map.merge(%{
       kind: kind, first: first, last: last, head: nil, roles: %{},
       required: %{}, modifiers: [], adjuncts: [], reading: [],
-      number: :unknown, copula: nil, predicate: nil
+      number: :unknown, copula: nil, predicate: nil, clause: nil
     }, overrides)
+  end
+
+  defp terminals(node, :default), do: terminals(node)
+  defp terminals(node, :clause_v1), do: terminals(node) ++ clause_terminals(node)
+
+  # P-039 verb-group terminals. Each requires dictionary-attested verb POS
+  # (any sense) plus the stated morphology; closed function words and the
+  # whole BE paradigm never become lexical verbs (BE takes no direct object).
+  defp clause_terminals(node) do
+    i = node.index
+    word = node.word
+    morphology = Map.get(node, :morphology, MapSet.new())
+
+    function_surface? =
+      Grammar.determiner?(word) or Grammar.quantifier?(word) or
+        Grammar.pronoun?(word) or Grammar.copula?(word) or Grammar.be_form?(word)
+
+    verb? = has_pos?(node, "verb") and not function_surface?
+    make = fn kind, extra -> item(kind, i, i, Map.merge(%{head: i, word: word}, extra)) end
+
+    vgroup = fn tense, agreement ->
+      make.(:vgroup, %{
+        clause: %{
+          tense: tense, aspect: :simple, polarity: :positive, voice: :active,
+          agreement: agreement, predicate: i, auxiliaries: [], negation: nil
+        }
+      })
+    end
+
+    aux_do =
+      if Grammar.do_auxiliary?(word) and
+           (has_pos?(node, "verb") or has_pos?(node, "auxiliary")),
+         do: [make.(:aux_do, %{})], else: []
+
+    negator =
+      if Grammar.clause_negator?(word) and
+           (has_pos?(node, "adverb") or has_pos?(node, "particle")),
+         do: [make.(:negator, %{})], else: []
+
+    past =
+      if verb? and MapSet.member?(morphology, :simple_past),
+        do: [vgroup.(:past, :any)], else: []
+
+    third_singular =
+      if verb? and Map.get(node, :finite_present_verb?, false),
+        do: [vgroup.(:present, :singular)], else: []
+
+    base =
+      if verb? and Map.get(node, :base_present_verb?, false),
+        do: [vgroup.(:present, :non_third_singular), make.(:verb_base, %{})],
+        else: []
+
+    present_participle =
+      if verb? and MapSet.member?(morphology, :present_participle),
+        do: [make.(:participle_present, %{})], else: []
+
+    past_participle =
+      if verb? and MapSet.member?(morphology, :past_participle),
+        do: [make.(:participle_past, %{})], else: []
+
+    aux_do ++ negator ++ past ++ third_singular ++ base ++
+      present_participle ++ past_participle
   end
 
   defp terminals(node) do
@@ -404,6 +504,10 @@ defmodule Core.Syntax.Chart do
     %{head: p.head, number: :unknown,
       roles: %{subject_head: p.head}, required: %{subject_head: [:pos_proper_noun]}})
   defp unary(:possessive_subject, p), do: %{p | kind: :subject}
+  # P-039: a passive verb group with no by-phrase; the agent is unexpressed.
+  defp unary(:agentless_passive, pv),
+    do: item(:cvp, pv.first, pv.last,
+      %{head: pv.head, clause: Map.merge(pv.clause, %{object: nil, agent: :unexpressed})})
   defp unary(_, _), do: nil
 
   defp noun_subject(np, extras, requirements) do
@@ -425,14 +529,6 @@ defmodule Core.Syntax.Chart do
     do: prefix_nominal(modifier, nominal, :adjective)
   defp combine(:noun_modifier, modifier, nominal),
     do: prefix_nominal(modifier, nominal, :noun)
-
-  defp prefix_nominal(modifier, nominal, type) do
-    if length(nominal.modifiers) < @max_nominal_modifiers do
-      item(:nominal, modifier.first, nominal.last,
-        %{head: nominal.head, number: nominal.number,
-          modifiers: [{type, modifier.head} | nominal.modifiers]})
-    end
-  end
 
   defp combine(:determined_subject, determiner, nominal) do
     if Grammar.number_compatible?(Grammar.determiner_number(determiner.word),
@@ -529,7 +625,180 @@ defmodule Core.Syntax.Chart do
     end
   end
 
+  # -- P-039 clause rules (reachable only through Grammar.rules(:clause_v1)) --
+
+  defp combine(:negated_do, aux, negator) do
+    item(:neg_do, aux.first, negator.last,
+      %{head: aux.head, word: aux.word, clause: %{auxiliary: aux.head, negation: negator.head}})
+  end
+
+  defp combine(:do_support_negative, neg_do, verb) do
+    {tense, agreement} =
+      case Grammar.do_number(neg_do.word) do
+        :any -> {:past, :any}
+        :singular -> {:present, :singular}
+        :plural -> {:present, :non_third_singular}
+        _ -> {nil, nil}
+      end
+
+    if tense do
+      item(:vgroup, neg_do.first, verb.last, %{head: verb.head, clause: %{
+        tense: tense, aspect: :simple, polarity: :negative, voice: :active,
+        agreement: agreement, predicate: verb.head,
+        auxiliaries: [neg_do.clause.auxiliary], negation: neg_do.clause.negation}})
+    end
+  end
+
+  defp combine(:progressive, cop, participle),
+    do: be_group(:vgroup, cop, participle, :progressive, :active)
+
+  defp combine(:passive, cop, participle),
+    do: be_group(:pvgroup, cop, participle, :simple, :passive)
+
+  defp combine(:transitive, vgroup, object) do
+    if vgroup.clause.voice == :active do
+      item(:cvp, vgroup.first, object.last, %{head: vgroup.head,
+        clause: Map.merge(vgroup.clause, %{object: object, agent: :not_applicable})})
+    end
+  end
+
+  defp combine(:passive_agent, pvgroup, pp) do
+    # Only an un-nested "by" phrase is an agent; any other PP stays an adjunct.
+    if Map.get(pp, :word) == "by" and pp.adjuncts == [] do
+      item(:cvp, pvgroup.first, pp.last, %{head: pvgroup.head,
+        clause: Map.merge(pvgroup.clause, %{object: nil, agent: {:by, pp}})})
+    end
+  end
+
+  defp combine(:clause_predication, subject, cvp) do
+    clause = cvp.clause
+
+    with true <- is_map(clause) and clause_agreement?(subject.number, clause.agreement),
+         {:ok, object_roles, object_required} <- object_roles(clause.object) do
+      {sub_roles, sub_required} = subject_adjunct_roles(subject.adjuncts)
+      {vp_roles, vp_required} = predicate_adjunct_roles(cvp.adjuncts)
+      {agent_roles, agent_required} = agent_roles(clause.agent)
+      {aux_roles, aux_required} = auxiliary_roles(clause)
+
+      roles =
+        subject.roles
+        |> Map.merge(sub_roles)
+        |> Map.merge(object_roles)
+        |> Map.merge(agent_roles)
+        |> Map.merge(vp_roles)
+        |> Map.merge(aux_roles)
+        |> Map.put(:predicate, clause.predicate)
+
+      required =
+        subject.required
+        |> Map.merge(sub_required)
+        |> Map.merge(object_required)
+        |> Map.merge(agent_required)
+        |> Map.merge(vp_required)
+        |> Map.merge(aux_required)
+        |> Map.put(:predicate, [:pos_verb])
+
+      item(:sentence, subject.first, cvp.last, %{head: subject.head,
+        roles: roles, required: required, number: subject.number,
+        predicate: clause.predicate,
+        adjuncts: subject.adjuncts ++ cvp.adjuncts,
+        clause: %{
+          tense: clause.tense, aspect: clause.aspect, polarity: clause.polarity,
+          voice: clause.voice, agent: agent_status(clause.agent),
+          attachments: attachments(subject, clause.object, cvp.adjuncts)
+        }})
+    else
+      _ -> nil
+    end
+  end
+
   defp combine(_, _, _), do: nil
+
+  defp prefix_nominal(modifier, nominal, type) do
+    if length(nominal.modifiers) < @max_nominal_modifiers do
+      item(:nominal, modifier.first, nominal.last,
+        %{head: nominal.head, number: nominal.number,
+          modifiers: [{type, modifier.head} | nominal.modifiers]})
+    end
+  end
+
+  # -- P-039 clause helpers ---------------------------------------------------
+
+  defp be_group(kind, cop, participle, aspect, voice) do
+    tense = if cop.word in ~w(is are), do: :present, else: :past
+
+    item(kind, cop.first, participle.last, %{head: participle.head, clause: %{
+      tense: tense, aspect: aspect, polarity: :positive, voice: voice,
+      agreement: {:copula, cop.word}, predicate: participle.head,
+      auxiliaries: [cop.head], negation: nil}})
+  end
+
+  # Past forms (and "did") agree with any subject, including an unknown
+  # proper-noun number. Present forms keep the copular chart's strictness:
+  # an unknown subject number never licenses a present-tense clause.
+  defp clause_agreement?(_number, :any), do: true
+  defp clause_agreement?(number, :singular), do: number == :singular
+  defp clause_agreement?(number, :non_third_singular),
+    do: number in [:plural, :first_person_singular]
+  defp clause_agreement?(number, {:copula, word}), do: agreement?(number, word)
+  defp clause_agreement?(_, _), do: false
+
+  # An object (or by-agent) NP is an ordinary :subject constituent; its role
+  # keys are re-keyed from subject_* to object_* through a closed, compile-time
+  # map. An unexpected key abstains rather than colliding with subject roles.
+  defp object_roles(nil), do: {:ok, %{}, %{}}
+
+  defp object_roles(np) do
+    {adjunct_roles, adjunct_required} = subject_adjunct_roles(np.adjuncts)
+
+    with {:ok, roles} <- rekey(Map.merge(np.roles, adjunct_roles)),
+         {:ok, required} <- rekey(Map.merge(np.required, adjunct_required)) do
+      {:ok, roles, required}
+    end
+  end
+
+  defp rekey(map) do
+    Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
+      case Map.fetch(@object_rekey, key) do
+        {:ok, object_key} -> {:cont, {:ok, Map.put(acc, object_key, value)}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp agent_roles({:by, pp}),
+    do: {%{agent_preposition: pp.roles.preposition, agent_head: pp.roles.object},
+         %{agent_preposition: [:pos_preposition], agent_head: [:pos_noun_or_pronoun]}}
+  defp agent_roles(_), do: {%{}, %{}}
+
+  defp agent_status({:by, _}), do: :expressed
+  defp agent_status(other), do: other
+
+  defp auxiliary_roles(clause) do
+    {roles, required} =
+      case clause.auxiliaries do
+        [aux] -> {%{auxiliary: aux}, %{auxiliary: [:pos_auxiliary]}}
+        _ -> {%{}, %{}}
+      end
+
+    if is_integer(clause.negation),
+      do: {Map.put(roles, :negation, clause.negation),
+           Map.put(required, :negation, [:pos_adverb])},
+      else: {roles, required}
+  end
+
+  # Where each top-level PP is attached. Competing attachments are separate
+  # full-span signatures; none is chosen here.
+  defp attachments(subject, object, vp_adjuncts) do
+    pps = fn adjuncts, site ->
+      for %{kind: :pp} = pp <- adjuncts,
+          do: %{preposition: pp.roles.preposition, object: pp.roles.object, attached_to: site}
+    end
+
+    pps.(subject.adjuncts, :subject) ++
+      pps.(if(is_map(object), do: object.adjuncts, else: []), :object) ++
+      pps.(vp_adjuncts, :predicate)
+  end
 
   # Unknown subject number cannot license a positive clause.
   defp agreement?(:unknown, _), do: false
@@ -593,6 +862,43 @@ defmodule Core.Syntax.Chart do
         {Map.put(roles, key, adj.head), Map.put(requirements, key, [:pos_adverb])}
       end
     end)
+  end
+
+  # P-039: one construction id for every finite-clause realization. Tense,
+  # aspect, polarity and voice are features of the parse, not separate ids.
+  defp signature(%{clause: %{voice: _} = clause} = parse) do
+    attachment_evidence =
+      clause.attachments
+      |> Enum.map(fn
+        %{attached_to: :subject} -> :subject_pp_attachment
+        %{attached_to: :object} -> :object_pp_attachment
+        %{attached_to: :predicate} -> :predicate_pp_attachment
+      end)
+      |> Enum.uniq()
+
+    evidence =
+      Enum.concat([
+        [:chart_finite_clause, :attested_verb_morphology, :source_aligned_full_span,
+         :clause_rules_v1_harness_only],
+        if(clause.voice == :passive, do: [:passive_be_participle], else: []),
+        if(clause.aspect == :progressive, do: [:progressive_be_participle], else: []),
+        if(clause.polarity == :negative, do: [:do_support_negation], else: []),
+        if(clause.agent == :expressed, do: [:by_agent_phrase], else: []),
+        if(Enum.any?(Map.keys(parse.roles), &(&1 in [:subject_quantifier, :object_quantifier])),
+          do: [:quantifier_unapplied], else: []),
+        attachment_evidence
+      ])
+
+    %{
+      id: :finite_clause,
+      source: :core_syntax,
+      span: {parse.first, parse.last},
+      roles: parse.roles,
+      required_features: parse.required,
+      evidence: evidence,
+      clause: Map.take(clause, [:tense, :aspect, :polarity, :voice, :agent, :attachments]),
+      factual_authority?: false
+    }
   end
 
   defp signature(parse) do

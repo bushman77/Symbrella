@@ -61,12 +61,55 @@ defmodule Core.Syntax.Grammar do
     %{lhs: :sentence, rhs: [:subject, :vp], op: :predication}
   ]
 
+  # P-039 (`:clause_v1`, harness-only): finite transitive clauses built from
+  # the SAME noun-phrase constituents as the copular grammar above. Objects
+  # and by-agents are ordinary `:subject` (NP) items re-keyed at combination,
+  # so every NP rule (determiners, quantifiers, modifiers, PP adjuncts) is
+  # reused rather than re-implemented. Clause VPs use their own category
+  # `:cvp`, so the copular `:predication` rule can never consume them.
+  @clause_rules [
+    %{lhs: :neg_do, rhs: [:aux_do, :negator], op: :negated_do},
+    %{lhs: :vgroup, rhs: [:neg_do, :verb_base], op: :do_support_negative},
+    %{lhs: :vgroup, rhs: [:copula, :participle_present], op: :progressive},
+    %{lhs: :pvgroup, rhs: [:copula, :participle_past], op: :passive},
+    %{lhs: :cvp, rhs: [:vgroup, :subject], op: :transitive},
+    %{lhs: :cvp, rhs: [:pvgroup, :pp], op: :passive_agent},
+    %{lhs: :cvp, rhs: [:pvgroup], op: :agentless_passive},
+    %{lhs: :cvp, rhs: [:cvp, :pp], op: :predicate_pp},
+    %{lhs: :cvp, rhs: [:cvp, :adverb], op: :predicate_adverb},
+    %{lhs: :sentence, rhs: [:subject, :cvp], op: :clause_predication}
+  ]
+
+  @rule_sets [:default, :clause_v1]
+
+  @do_numbers %{"do" => :plural, "does" => :singular, "did" => :any}
+  @be_paradigm ~w(am is are was were be been being)
+
+  @doc false
+  def rule_sets, do: @rule_sets
+
   @doc false
   def rules, do: @rules
   @doc false
+  def rules(:default), do: @rules
+  def rules(:clause_v1), do: @rules ++ @clause_rules
+  @doc false
   def unary_rules, do: Enum.filter(@rules, &(length(&1.rhs) == 1))
   @doc false
+  def unary_rules(rule_set), do: Enum.filter(rules(rule_set), &(length(&1.rhs) == 1))
+  @doc false
   def binary_rules, do: Enum.filter(@rules, &(length(&1.rhs) == 2))
+  @doc false
+  def binary_rules(rule_set), do: Enum.filter(rules(rule_set), &(length(&1.rhs) == 2))
+
+  @doc false
+  def do_auxiliary?(word), do: Map.has_key?(@do_numbers, word)
+  @doc false
+  def do_number(word), do: Map.get(@do_numbers, word, :unknown)
+  @doc false
+  def be_form?(word), do: word in @be_paradigm
+  @doc false
+  def clause_negator?(word), do: word == "not"
 
   @doc false
   def copula?(word), do: word in @copulas
