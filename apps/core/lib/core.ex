@@ -181,6 +181,8 @@ defmodule Core do
     atl_opts = Keyword.get(opts, :atl_opts, [])
 
     si
+    # P-036 shadow: whole-sentence POS tags; no consumer reads :pos_tags yet.
+    |> Core.Syntax.PosTagger.attach()
     |> Core.Syntax.Signatures.attach()
     |> StateDump.capture(:sentence_signatures)
     |> Core.Syntax.RoleCompetition.attach()

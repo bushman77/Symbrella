@@ -1989,3 +1989,17 @@ No change to `SymbolicGeneration` wording, `SemanticStrategy`, or P-033's frame 
 **Draft FileScope:** NEW `apps/core/lib/core/syntax/pos_tagger.ex`, NEW `apps/core/priv/pos/ewt_hmm.json`, NEW `scripts/build_pos_hmm.py`, NEW `scripts/pos_tagger_shadow_census.exs`, NEW `NOTICE.md`, `apps/core/lib/core.ex` (one pipeline line), `apps/core/lib/core/semantic_input.ex` (field, if needed), Explain panel LiveView/component (path TBC), NEW `apps/core/test/core/syntax/pos_tagger_test.exs`, this log. Requires `Approve: P-036`.
 
 **Unnumbered earlier chat suggestions** (routing golden set; topic-invitation reply with WM active subject) remain open and are not part of P-036.
+
+## 30. P-036 implementation — shadow POS tagger · 2026-11-20 12:50 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, chat 2026-11-20 12:26: `Approve: P-036`.
+
+**Files:** NEW `apps/core/lib/core/syntax/pos_tagger.ex`; NEW `apps/core/priv/pos/ewt_hmm.json` (568,110 bytes); NEW `scripts/build_pos_hmm.py` (rebuild from a local UD_English-EWT checkout is **byte-identical** to the committed JSON; held-out test accuracy printed 0.8931); NEW `scripts/pos_tagger_shadow_census.exs`; NEW `NOTICE.md` (code MIT; Wiktionary- and EWT-derived data CC BY-SA 4.0); `apps/core/lib/core.ex` (one line: `PosTagger.attach/1` before `Signatures.attach/1`); `apps/core/lib/core/semantic_input.ex` (`:pos_tags` field, list-validated; **contract v13 → v14**); `apps/symbrella_web/lib/symbrella_web/live/home_live/explain_evidence.ex` (adds `:pos_tags` to evidence only when non-empty); `apps/symbrella_web/lib/symbrella_web/live/home_live/html/evidence_sections.ex` ("POS tagger (shadow)" block); NEW `apps/core/test/core/syntax/pos_tagger_test.exs`.
+
+**FileScope addition (disclosed):** `apps/core/test/core/semantic_input_sense_candidates_test.exs` — `contract_version() == 13` → `14` plus `assert :pos_tags in SI.contract_fields()`. Required by the SemanticInput contract rule ("increment when field names change"); an intentional contract change, not a red-to-green edit.
+
+**Design notes:** Elixir built-in `JSON` (Core does not declare Jason). Tables cached in `:persistent_term` on first use; missing/invalid file ⇒ `:pos_tags == []`. Deterministic tie-breaking (score, then path). ≤ 64 base tokens. No consumer reads `:pos_tags`.
+
+**Tests (6):** experiment sentences (expected tags reproduced in Python with the committed rounded tables and identical tie-breaking; match Bradley's 12:11 live receipt); known limitation `draw/noun` pinned as such; candidate augment; determinism/empty/oversize/unknown; `attach/1` adds only `:pos_tags`; `Signatures.detect/1` identical with and without it.
+
+**Status: UNTESTED in ExUnit.** Gate: Brain + Core + **symbrella_web** suites (`mix test` umbrella, or the three test paths); P-030 census unchanged vs `c79641d` baseline numbers on v1 (shadow proof); then `mix run scripts/pos_tagger_shadow_census.exs --corpus docs/collab/r001/census_corpus.md` (and v2 on the laptop) for review.

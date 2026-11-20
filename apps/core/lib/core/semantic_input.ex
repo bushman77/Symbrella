@@ -40,7 +40,9 @@ defmodule Core.SemanticInput do
   @type cell :: term()
 
   # Version 13 adds bounded, optional action decision-lineage metadata.
-  @contract_v 13
+  # Version 14 adds :pos_tags, the shadow whole-sentence POS tagger output
+  # (P-036). No consumer reads it yet.
+  @contract_v 14
 
   @list_fields MapSet.new([
                  :tokens,
@@ -65,7 +67,8 @@ defmodule Core.SemanticInput do
                  :lexical_constructions,
                  :episodic_candidates,
                  :sentence_signatures,
-                 :construction_candidates
+                 :construction_candidates,
+                 :pos_tags
                ])
 
   @map_fields MapSet.new([
@@ -227,6 +230,7 @@ defmodule Core.SemanticInput do
 
           # Grammatical evidence and sense candidates
           sentence_signatures: [sentence_signature()] | nil,
+          pos_tags: [map()] | nil,
           sentence_competition: map() | nil,
           role_competition: map() | nil,
           lexical_focus: map() | nil,
@@ -333,6 +337,7 @@ defmodule Core.SemanticInput do
             token_cover: nil,
             resolved_tokens: [],
             sentence_signatures: [],
+            pos_tags: [],
             sentence_competition: nil,
             role_competition: nil,
             lexical_focus: nil,

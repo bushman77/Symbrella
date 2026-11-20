@@ -27,7 +27,29 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
       field(evidence, :atl_verb_particles)
     )
     |> hypotheses_section(field(evidence, :unverified_phrasal_hypotheses))
+    |> pos_tagger_section(field(evidence, :pos_tags))
   end
+
+  # P-036: shadow whole-sentence POS tags. Read-only; nothing consumes them.
+  defp pos_tagger_section(sections, tags) when is_list(tags) and tags != [] do
+    line =
+      Enum.map_join(tags, "  ", fn t -> "#{field(t, :word)}/#{field(t, :tag)}" end)
+
+    items =
+      [{"tags", line}] ++
+        Enum.map(tags, fn t ->
+          {"#{field(t, :word)} (#{field(t, :token_index)})",
+           "candidates: #{Enum.join(List.wrap(field(t, :candidates)), ", ")}"}
+        end)
+
+    append(sections, :pos_tagger_shadow, "POS tagger (shadow)",
+      Integer.to_string(length(tags)),
+      "Whole-sentence HMM tags from UD English Web Treebank statistics, limited to dictionary-attested POS. Shadow only: no signature, LIFG choice or reply uses these.",
+      items
+    )
+  end
+
+  defp pos_tagger_section(sections, _), do: sections
 
   def build(_), do: []
 

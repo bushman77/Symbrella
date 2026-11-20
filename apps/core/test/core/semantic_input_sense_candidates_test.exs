@@ -7,7 +7,9 @@ defmodule Core.SemanticInputSenseCandidatesTest do
 
   describe "contract helpers" do
     test "exposes a versioned field contract" do
-      assert SI.contract_version() == 13
+      # v14 (P-036): :pos_tags shadow field added.
+      assert SI.contract_version() == 14
+      assert :pos_tags in SI.contract_fields()
       assert :decision_lineage in SI.contract_fields()
       assert :sentence_signatures in SI.contract_fields()
       assert :lexical_focus in SI.contract_fields()

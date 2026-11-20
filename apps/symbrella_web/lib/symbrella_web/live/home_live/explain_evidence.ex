@@ -74,7 +74,16 @@ defmodule SymbrellaWeb.HomeLive.ExplainEvidence do
                                 :particle_position, :dictionary_check, :verified?]))
     }
 
-    if empty?(result), do: %{}, else: result
+    if empty?(result), do: %{}, else: maybe_put_pos_tags(result, si)
+  end
+
+  # P-036 shadow tagger output; only added when present so existing
+  # evidence payloads are unchanged.
+  defp maybe_put_pos_tags(result, si) do
+    case si |> get(:pos_tags, []) |> list() do
+      [] -> result
+      tags -> Map.put(result, :pos_tags, Enum.map(tags, &pick(&1, [:token_index, :word, :tag, :candidates])))
+    end
   end
 
   defp substantive_cognition?(si) do
