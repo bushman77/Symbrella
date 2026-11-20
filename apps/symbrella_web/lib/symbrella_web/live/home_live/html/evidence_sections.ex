@@ -30,6 +30,9 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
     |> pos_tagger_section(field(evidence, :pos_tags))
   end
 
+
+  def build(_), do: []
+
   # P-036: shadow whole-sentence POS tags. Read-only; nothing consumes them.
   defp pos_tagger_section(sections, tags) when is_list(tags) and tags != [] do
     line =
@@ -50,8 +53,6 @@ defmodule SymbrellaWeb.HomeLive.HTML.EvidenceSections do
   end
 
   defp pos_tagger_section(sections, _), do: sections
-
-  def build(_), do: []
 
   defp runtime_section(sections, runtime) when is_map(runtime) and map_size(runtime) > 0 do
     items =
