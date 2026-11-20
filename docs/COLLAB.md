@@ -522,3 +522,23 @@ The third command is the seed-only smoke run. It is expected to finish with `scr
 If a test fails, please send the raw output; **I will diagnose rather than change expectations.**
 
 **Next:** Bradley's receipt for the commands above; Bradley adds representative rows; GPT-6 reviews this implementation read-only. P-023 stays unapproved until the Stage 0 screen result exists.
+
+### 8.7 Receipt: P-022 Core suite · 2026-11-19 17:51 MST · recorded by CLAUDE
+
+**RUN BY BRADLEY** (local shell). Claude did not execute anything. Branch `symbolic_generation`, SHA `78b523aa`.
+
+| Item | Result |
+| --- | --- |
+| Command | `mix test apps/core/test` |
+| Exit | `0` |
+| ExUnit | `Result: 2027 passed` (seed 490564) |
+| `git status --short` | `?? core` before and after: a pre-existing untracked root entry, not produced by the run |
+
+**[V] Reading:** the previous Core count was 2011 at `b4ac29cf` (§2), and 2011 + 16 new `coverage_ladder_test.exs` tests = 2027. This is consistent with all P-022 tests passing and no Core regressions.
+
+**[U] Still unverified:**
+- the per-test identity (no `--trace` output);
+- umbrella-wide `mix test`;
+- the census script (`scripts/comprehension_coverage_census.exs`) has **not** been run, so the resolver and probe integration is unexercised.
+
+P-022 status: **Core suite VERIFIED BY BRADLEY**; script UNTESTED.
