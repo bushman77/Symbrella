@@ -930,3 +930,46 @@ Bradley runs the command in Claude's chat reply. For "The report is a draft.", "
 - Brain files, response code, chart.
 
 **Acceptance:** as in §10.5, plus a **D-1 rerun**. All four BE sentences must show no SVO-family signature, no `:preferred` SVO structural result, no verb-predicate role at the BE index, and no SVO-sourced provisional meaning. Both controls must be identical to this receipt.
+
+### 10.10 P-024 approval and implementation · 2026-11-19 · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Bradley, verbatim (18:40 America/Whitehorse):** `approve: P-024`. Code commit `f2cefb9`, limited to the amended FileScope in §10.9:
+- `apps/core/lib/core/syntax/signatures.ex`: `@be_forms` plus `not be_form?(predicate)` in `finite_present_svo/1`, `finite_past_svo/1`, `finite_past_pronoun_svo/1` and `counted_present_svo/1`. Helper `be_form?/1`.
+- `apps/core/lib/core/syntax/predicate_evidence.ex`: `@be_forms` plus one `with` guard in `plural_present/3`.
+- NEW `apps/core/test/core/syntax/svo_be_predicate_exclusion_test.exs`: 7 tests.
+
+**Not changed:** no existing test, fixture or expectation; no Brain file, response code, chart, detector order or other detector. **Status: UNTESTED** (no Elixir runtime for Claude).
+
+**Test design:**
+- Every BE negative has a **counterfactual twin**: the same sentence with the BE token replaced by a nonce verb that copies the BE verb rows exactly. The twin must still be detected or proposed. A twin failure means the fixture, not P-024, is wrong.
+- The tests cover:
+  - signature absence for six BE sentences;
+  - no pre-LIFG predicate proposal or verb role at the BE index, including "The reports are/were the problem.";
+  - `PredicateEvidence.plural_present` (BE negatives plus the "The artists draw pictures" control);
+  - unchanged Stage1 boosts for a "be" sense, but a boosted real verb;
+  - no `:preferred` SVO structure for "The report was the problem." with correct LIFG choices;
+  - SVO kept for draws / has / does / bought / drew;
+  - the "draws" control still `:preferred`.
+
+**Commands for Bradley (umbrella root):**
+```bash
+git rev-parse --short HEAD
+mix test apps/core/test/core/syntax/svo_be_predicate_exclusion_test.exs --trace; echo "exit=$?"
+mix test apps/core/test/core/syntax apps/core/test/core/semantic apps/core/test/core/response apps/core/test/core/social apps/brain/test/brain/lifg; echo "exit=$?"
+mix test apps/core/test; echo "exit=$?"
+mix test; echo "exit=$?"
+mix run scripts/comprehension_coverage_census.exs --arm all --out tmp/r001_census_seed_p024.json; echo "exit=$?"
+```
+Then rerun the D-1 command (§10.6).
+
+**Acceptance:**
+- the new file shows 7 passed;
+- every existing suite is green **with no expectation changes**;
+- Core = 2029 + 7 = 2036 if nothing else changed;
+- the umbrella suite exits 0;
+- the census seed run is a **new, separately labelled run**. Expected: the 4 `attested_role_conflict` rows become `no_full_span_signature`, and any other changed row is reported;
+- D-1: no SVO signature, `:preferred` SVO or SVO-sourced provisional meaning for the four BE sentences, with both controls identical to §10.9.
+
+**Rollback:** `git revert f2cefb9`.
+
+**Note on order:** §10.8 recommended a representative v2 baseline *before* P-024. That baseline can still be produced afterwards by running the frozen v2 corpus with `git checkout 06f4460` (the pre-P-024 code), then rerunning at the P-024 commit.
