@@ -577,3 +577,36 @@ P-022 status: **Core suite VERIFIED BY BRADLEY**; script UNTESTED.
 - (c) Add tests for (a), including an `:unresolved` single-candidate conflict and its unattested negative.
 
 This changes a definition **after** a seed run but **before** any representative row exists; the screen counts representative rows only. The corpus and definitions are frozen once P-022.1 lands.
+
+### 8.9 P-022.1 implementation · 2026-11-19 · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Bradley, verbatim (17:56 America/Whitehorse):** `Approve: P-022.1`. Code commit `1fc6043`, limited to the FileScope proposed in §8.8:
+- `coverage_ladder.ex`
+- `coverage_ladder_test.exs`
+- `comprehension_coverage_census.exs`
+
+No other file changed. **Status: UNTESTED.**
+
+**What changed:**
+- `structural` now inspects a *focus* reading: the preferred candidate when the status is `:preferred`, otherwise the best-ranked candidate when the status is `:unresolved`.
+- `conflict_eligible?` is true for either status when the focus has a role conflict whose required POS is already attested.
+- New fields:
+  - `focus_conflicting_roles`;
+  - `candidate_conflicts`: up to 12 entries of `%{conflicting_roles, attested_alternative?}`.
+- An `:unresolved` single candidate with such a conflict now gets `blocker_detail: :attested_role_conflict`.
+- A tie whose best candidate also has a conflict still counts **once** as an opportunity.
+- Colony probe rows report the new fields as `nil`, because they are unobservable there.
+- The script's always-true `is_atom/1` branch is removed.
+
+**Tests:** two new ones, 18 in total:
+- an unresolved single-candidate conflict, with its unattested negative and its aggregate count;
+- a tie plus conflict that counts once.
+
+Existing expectations are unchanged.
+
+**Commands for Bradley:**
+- `mix test apps/core/test/core/comprehension/coverage_ladder_test.exs --trace`
+- `mix test apps/core/test` (expect 2029 if nothing else changed)
+- rerun the census seed command from §8.5 (the type warning should be gone)
+
+**Freeze:** once Bradley's receipt is green, the census definitions are frozen. The next step is adding representative rows under the §8.4 protocol. Any later definition change needs a new ticket and a new corpus version.
