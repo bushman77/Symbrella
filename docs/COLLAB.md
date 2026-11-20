@@ -1843,3 +1843,4 @@ Requires `Approve: P-028`.
 **Tests added (2):** meta/generic gloss words filtered so only `water` matches; a determiner target in Stage1 carries no `:neighbor_gloss_matches`.
 
 **Status: UNTESTED.** Gate (same as §20/§21): suite with the switch on in `config/test.exs` fully green; then, with the switch on in dev, the P-030 census, the context-fit one-liner and the neighbour-term audit.
+- **[V-receipt, Bradley, laptop, 08:29]** HEAD `7a3177a`, switch on in `config/test.exs`: Brain **729 passed, 3 skipped**; Core **2042 passed**; **exit=0**; restored ("Updated 1 path"). P-030 census, v1, switch on in dev: weak 77/118, degraded 22/24, proxy 22/24, uncertain 57, understood 1 (identical to off). Context-fit count and neighbour audit not yet run for P-031b.
