@@ -2031,3 +2031,628 @@ States: **base** = `apps/` + `config/` at `b09345aa` (pre-P-027; scripts current
 | | uncertain terms | 393 | 384 | 380 |
 
 **[H] Reading:** the weak-decision rate fell ~17 points overall, mostly function words (P-028/P-029); rows on the lexical-gap path fell from 110 to 95 (−15), concentrated in chat (46 → 36 of 48). Uncertain *terms* barely moved and Colony's not at all: remaining uncertainty is content words and phrases, i.e. context evidence (parked P-032) and missing constructions. Temperature 0.5 adds a modest further gain (−20 weak, −2 degraded rows). Census output is a proxy; it does not assess reply quality.
+
+## 32. R-002 — Episodic Language Learning Feasibility Review (READ-ONLY) · 2026-11-20 14:10 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Revision audited:** `0d54bb3` (`symbolic_generation`). Code read only; no episode rows, sentences or DB contents inspected; no tests run by Claude. Evidence tags: **[V]** verified in code, **[H]** hypothesis/assessment, **[U]** unknown.
+
+### 32.1 Task 1 — Audit of episodic mechanisms
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| Turn → episode write | **Live** | `core.ex:317` `Core.Brain.Hippocampus.encode/2` sends `si.atl_slate` + `episode_meta` (sentence, intent, keyword, confidence, session, appraisal, mood, self-model summary, response text/tone/meta) to `Brain.Hippocampus` (in-memory window); `core.ex:319` `persist/2` → `Brain.Hippocampus.Writer.maybe_persist/2` → `Db.Episode.insert/1`. Persistence defaults on when episodic mode is on (`config/runtime.exs:182-195`). [V] |
+| What survives in the DB row | **Live, lexical only** | `Db.Episode.build_si_from_slate/2` (`episode.ex:529`) keeps ≤12 ATL `winners` (id/norm/lemma/pos/score/margin/token_index) and slate tokens; plus sentence, normalized text, tokens, intent, confidence, uncertainty, meta, tags. The full SemanticInput is a *virtual* field. **Not persisted:** `sentence_signatures`, `sentence_meaning`, `comprehension` (uncertain/degraded), `structural_competition`, ATL constituents, LIFG posteriors, P-036 `pos_tags`. [V] |
+| Diagnostic evidence for failed/partial turns | **Transient only** | `Core.Curiosity.ComprehensionGaps` is a session-bound, read-only projection from WM with `@max_age_ms` 20 min (`comprehension_gaps.ex:13`); nothing about *why* a turn failed is persisted beyond a confidence/uncertainty number and winner scores. [V] |
+| Episode retrieval | **Live, lexical** | In-memory: Jaccard over word `norms` × recency (`hippocampus/recall.ex:46`). DB hybrid: token-array overlap (`&&`) + pgvector kNN (`episodes.ex` `recall_hybrid/3`). [V] |
+| Semantic similarity via embeddings | **Placeholder** | `config/config.exs:236` sets `MyEmbeddings`, whose `embed/1` is `sin(byte_size(text) + i)` (`my_embeddibgs.ex:6`): vectors depend only on text *length*. Vector recall ranks by byte length, not meaning. [V] |
+| Comparison by abstract structure | **Absent** | No code compares episodes by POS sequence, signature id or role pattern. [V] |
+| Hypothesis formation / induction of constructions | **Absent** | No induction/anti-unification module exists (repo-wide search). [V] |
+| Verification / reinforcement with guards | **Present, other domains** | `Brain.Cerebellum.learn_lifg/5` refuses to learn without an independently verified label (`cerebellum.ex:140`). `Brain.Synapses.Shadow`: shadow-only provisional weights from user reports, explicit independence rule ("an identical claim is not independent corroboration", `shadow.ex:8`), reversible human review, authenticated receipts, never influences LIFG. `Core.Agency.SemanticHoldout`: sealed, two-reviewer lexical-sense benchmark harness. `Core.Agency.ReflectiveCorrection`: shadow repair of formal derivations only. [V] |
+| Consolidation | **Absent for language** | `Hippocampus.SemanticAssociations` stores opaque pointers to semantic records (retrieval hints only); no replay/consolidation of structure. [V] |
+| Curiosity / agency initiation | **Live, fact-oriented** | `Brain.CuriosityLearning` projects investigation receipts over `CognitiveIssue` kinds (missing_link/direct/two_hop/acquisition) and requires proof-authorized resolution; `Core.Curiosity.EpisodeProbe` builds clarification questions from recent episodes. None targets grammar. [V] |
+| Structure available *per turn* | **Live (not stored)** | `Core.Syntax.Signatures` (hand-written detectors), P-033 frames, P-036 shadow `pos_tags` (EWT bigram HMM, 0.893 held-out; Claude-measured in Python). [V] |
+
+### 32.2 Task 2 — The five questions
+
+1. **Cross-vocabulary structural recognition across experiences:** **No.** Within one turn, signatures and P-036 tags expose structure; across episodes nothing structural is stored or compared, and the vector path is length-based. [V]
+2. **Tentative structural hypothesis from multiple episodes:** **No.** No induction mechanism exists. [V]
+3. **Independent confirmation/refutation:** **Partially available, not wired.** Independent sources exist: Wiktionary POS attestations (`active_cells`), EWT-derived tag statistics (external human-labelled corpus, independent of Symbrella's own grammar but *not* an oracle — 89% accurate), human review (Synapses.Shadow pattern), sealed two-reviewer harness pattern (SemanticHoldout). [V for existence; H for suitability]
+4. **Generalization to unseen sentences:** **[U]** — untested; this is what V1 must measure.
+5. **Safety against self-reinforcing errors:** the *patterns* exist (verified-label gate, independence rule, reversible review, shadow-only weights). The risk appears only if an induced construction is allowed to relabel the evidence that later trains it. [H]
+
+**Smallest missing capability:** a way to represent and compare sentences by *abstract structure* (tag/slot sequences with role positions) plus a rule that only independently labelled instances may confirm a structural hypothesis. Induction itself is small (anti-unification of aligned slot sequences); the hard prerequisite is **labels that do not come from the parser under test**.
+
+**Circularity:** a sentence parsed by construction X cannot be evidence for X. Proposed discipline: (a) *self-parsed* instances may **nominate** a hypothesis (provenance `:self_parse`) but carry zero confirming weight; (b) confirmation requires ≥ k instances with **distinct content vocabulary** whose structure labels come from an independent source (human review, or EWT-tagger + dictionary agreement treated as weak evidence); (c) identical or near-identical utterances count once (Synapses.Shadow independence rule); (d) a hypothesis is never applied to relabel its own training evidence; (e) promotion beyond shadow requires a sealed held-out pass and separate approval.
+
+### 32.3 Task 3 — Approaches
+
+| | A: hand-authored syntax/POS/composition | B: retrieve verified similar examples | C: induce construction from validated examples |
+| --- | --- | --- | --- |
+| Generalization | High precision on covered patterns; zero outside them (S008 modal clause missed; 7/7 seed verb-particle false positives, §30.1) | Only as good as the similarity metric; today lexical/length-based ⇒ transfers to same-word sentences, not new vocabulary | Potentially to unseen vocabulary *if* abstraction is right; unproven |
+| Complexity | Grows per construction; collisions (Bradley, 11:19) | Small *if* structural fingerprints existed; currently none | Small core (anti-unification ~100 lines) + labelling discipline; large if made autonomous |
+| Wrong-interpretation risk | Low per rule, high in aggregate (overlaps) | Medium: retrieval ≠ verification | Highest: overgeneralization, self-confirmation |
+| Cost | Negligible | DB query per turn | Offline only (V1) |
+| Fit with architecture | Native | Needs structure persisted in episodes | Fits as shadow artifact consumed by an offline matcher; must not touch LIFG/WM |
+
+**[H] Assessment:** C is not automatically superior. It only demonstrates *learning* if it beats B on held-out sentences with **disjoint vocabulary** and degrades under label-shuffling. B is the honest baseline for "experience helps". A remains necessary for long-range constraints (bigram tagger limit, §30).
+
+### 32.4 Task 4 — R-002 / Episodic Structural Generalization V1 (design only)
+
+**Target relationship:** declarative *subject + modal + lexical verb + determiner + noun object* ("You should check the logs"). Chosen because the unchanged system has **no detector for it** (§30.1, S008) — any structural gain must come from the examples, giving a clean baseline.
+
+**Data (synthetic, no real episodes):**
+- *Training (unsealed):* 12 positives, 6 negatives. Vocabulary pools: subjects {you, she, they, we, I, he}, modals {should, can, must, will, might, could}, verbs/nouns drawn from a training pool.
+- *Held-out (frozen before any run; SHA recorded):* 30 positives using **verbs and nouns disjoint from training** (exact-memorization guard), 20 negatives, 10 ambiguity/adversarial:
+  - negatives: modal + BE + adjective ("she can be late"); modal + verb + particle ("you should give up"); modal + intransitive ("they might leave"); inverted question ("can you open the door?"); no modal ("you check the logs").
+  - ambiguity/adversarial: noun homographs ("the can should open"), "they can fish" (verb *can* ↔ modal), double object ("you must buy them food"), verb/noun homograph objects ("we should report the report"), embedded ("I think you should check it").
+- *Labels:* POS per token, structure (span + roles subject/modal/verb/object), and a semantic note; each held-out item labelled independently by **two reviewers** (Bradley + one of GPT-6/Claude, blind to system output); disagreements removed or adjudicated before freeze. Symbrella output is never a label.
+
+**Arms:**
+- **0 Baseline:** unchanged `Signatures` (expected: no detection).
+- **1 Retrieval:** for a held-out sentence, retrieve the nearest *training* example by P-036 tag-sequence similarity; transfer its role spans if the tag sequences align exactly; else abstain.
+- **2 Induction (bounded):** anti-unify the 12 training positives' (tag, closed-class word) sequences into one slot construction (variable positions → POS sets; invariant closed-class positions → word sets), reject if it also matches ≥1 training negative, apply via the declarative slot matcher (P-036 census code). k-ablation: induce from 1, 3, 6, 12 positives. **Shuffle control:** induce from training sentences with permuted role labels — must fail.
+
+**Measures (per arm, held-out only):** POS accuracy (P-036 tags vs gold); structure accuracy (exact span+roles); semantic note correctness (reviewed, not scored by Symbrella); correct / **wrong-confident** / abstain counts; runtime per sentence; regressions: P-030 and P-036 censuses unchanged (harness is offline, so expected identical).
+
+**Predeclared GO for proceeding to an episodic V2:**
+1. Arm 2 structure accuracy on held-out positives ≥ 0.80 **and** ≥ 0.15 above Arm 1;
+2. wrong-confident rate on held-out negatives + adversarial ≤ 0.05;
+3. monotone or saturating improvement with k (1 < 3 ≤ 6 ≤ 12);
+4. shuffle control ≤ 0.20 structure accuracy;
+5. no change to any existing census/test.
+**NO GO** if any of 1, 2 or 4 fails. Failure of 3 alone ⇒ CONDITIONAL (memorization or a single-example artifact suspected).
+
+**Constraints honoured:** offline script; no DB, no episodes, no persistence, no WM/LIFG/response effect, no rule installation, no new dependency.
+
+### 32.5 Task 5 — Smallest future FileScope (if V1 is approved)
+
+NEW `scripts/r002_structural_generalization.exs` (harness: arms, anti-unification, metrics); NEW `docs/collab/r002/training.md`; NEW `docs/collab/r002/heldout_manifest.md` (digest + reviewer declarations; held-out content stored outside the repo until scoring, mirroring `SemanticHoldout` discipline); a COLLAB receipt. **Reuse:** `Core.Syntax.PosTagger` (tags), slot-matcher logic from `scripts/pos_tagger_shadow_census.exs`, `Core.Syntax.Signatures` (baseline). No Brain/Core/DB module changes. A production module (e.g. a pure `Core.Syntax.ConstructionInduction`) only after V1 GO, under a separate approval.
+
+**Prerequisite for any *episodic* V2 (not authorized):** persist a structural fingerprint per episode — tag sequence, signature ids, comprehension status — via `Db.Episode` compaction, without new prose; and replace or disable the placeholder embedder so vector recall is not mistaken for semantics. Real-episode inspection requires Bradley's explicit authorization.
+
+### 32.6 Task 6 — Verdict
+
+1. **Episodic grammatical learning on the current architecture: NO GO.** Episodes do not retain structure, retrieval is lexical (and the vector path is length-based), and no induction mechanism exists. **Bounded offline induction experiment (V1): CONDITIONAL GO** — conditional on held-out labels from two independent reviewers frozen before any run.
+2. **Enablers:** P-036 tagger (external-statistics tags), dictionary POS attestations, Signatures as baseline, the Synapses.Shadow independence/review pattern, Cerebellum's verified-label gate, SemanticHoldout's sealed-review pattern, P-030/P-036 census tooling. **Blockers:** no persisted structure, placeholder embedder, no structural comparison, no grammar labelling channel.
+3. **Smallest credible experiment:** §32.4, falsified by criteria 1, 2 or 4.
+4. **Smallest FileScope:** §32.5 (scripts + docs only).
+5. **Major risks:** self-confirming errors (parser-labelled training data); overgeneralization (an induced slot over-broad, e.g. treating *can* as modal in "they can fish"); tagger error leakage (89% accuracy ⇒ ~1 in 9 tokens wrong); memorization masquerading as generalization (mitigated by disjoint vocabulary); small-sample artifacts (mitigated by k-ablation and shuffle control); scope creep toward an autonomous learner (explicitly excluded).
+6. **What success would and would not prove.** It *would* show that a reusable structural rule absent from the system can be derived from several independently labelled examples and transfer to unseen vocabulary better than retrieving the nearest example. It would *not* show: learning from unlabelled or self-parsed experience; semantic understanding; scalability beyond one construction; safety in production; or anything about consciousness. Three distinct outcomes must be reported separately: **(i) improved parsing** (better tags — P-036's effect, no learning), **(ii) improved retrieval** (Arm 1 reusing stored examples — memory, not generalization), **(iii) learned generalization** (Arm 2 beats Arm 1 on disjoint vocabulary, scales with k, fails under shuffled labels).
+
+**Challenge to the premise [H]:** the bottleneck is not memory but *labels*. Symbrella cannot currently tell, from her own experience, whether she parsed a sentence correctly, so experience alone cannot teach her grammar without becoming self-confirming. The smallest measurable prerequisite is an independent labelling channel — even a reviewed synthetic set — and V1 measures whether, given such labels, induction adds anything that retrieval does not.
+
+— Claude (Opus 5.5), READ-ONLY; no code, test or config changed; this entry is uncommitted pending Bradley's authorization to push.
+
+## 33. R-002.1 — CLAUDE Embedding Integrity and Native Representation Assessment (READ-ONLY) · 2026-11-20 14:50 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Revision audited:** `0d54bb3`. Source read only; no queries, episode contents, tests or config changes. Tags: [V] verified in source, [H] hypothesis/proposal, [U] unknown.
+
+### 33.0 Correction to my earlier statements
+In chat (relayed to GPT-6) and implicitly in §32.1 I said `episodes.embedding` "is populated on every write" by the placeholder. **That overstated it [V]:** the live turn path writes through `Brain.Hippocampus.encode/2` → `Brain.Hippocampus.Writer.maybe_persist/2` → `Db.Episode.insert/1`, which stores an embedding **only if the episode map carries one** (`hippocampus/writer.ex:141`), and nothing sets `:episode_embedding`. The placeholder is written only by `Db.Episodes.write_episode/2`, whose sole caller `Brain.Episodes.Writer.store/3` **has no callers**. The placeholder *is* still invoked at **query time** (`Db.Episodes.search/1`). Whether any stored rows carry vectors is **[U]**; it can be answered without content by `SELECT count(*), count(embedding) FROM episodes;`.
+
+### 33.1 Executive verdict
+- **P-037 placeholder quarantine: GO** (small, reversible; proposal in §33.4).
+- **P-032 dictionary IDF for ContextFit: CONDITIONAL GO** for an offline benchmark only (§33.6).
+- **Native embeddings: CONDITIONAL GO** for a sampled offline benchmark; **not** justified for stages 1, 2 or 4 (§33.7).
+- **R-002 structural learning:** embeddings are **not** the bottleneck; persisted structure and labels are (§33.8).
+
+### 33.2 Embedding producer/consumer inventory [V]
+
+| Component | Role | Live? | Notes |
+| --- | --- | --- | --- |
+| `MyEmbeddings.embed/1` (`apps/db/lib/db/my_embeddibgs.ex:6`) | producer | configured live (`config/config.exs:236`) | `sin(byte_size(text)+i)`, dim 1536; **length-only** |
+| `Db.Episodes.write_episode/2` (`episodes.ex:65`) | producer | **no live caller** | sync embed unless `async_embedding`; only caller `Brain.Episodes.Writer.store/3` (uncalled) |
+| `Db.Episode.insert/1` via `Brain.Hippocampus.Writer` | writer | **live** | embedding only if supplied ⇒ live rows likely NULL |
+| `Db.Episodes.recall_hybrid/3` (`episodes.ex:107-220`) | consumer | live via pMTG | token prefilter `tokens && cues` (limit 200) ∪ vector kNN (`<->`, limit 100); score `0.7·jaccard + 0.2·vec_sim + 0.1·recency`; top 10 |
+| `Db.Episodes.search/1` (`:242`) | consumer | live for **multi-word** pMTG lemmas | embeds the query text with the placeholder ⇒ vector branch active |
+| `Db.Episodes.find_by_lemma/2` (`:226`) | consumer | **live**: `Brain.PMTG.episodes_hits/2` (`pmtg.ex:333-341`) | single word ⇒ `recall_hybrid(cues, nil)` (no vectors); multi-word ⇒ `search/1` |
+| `Brain.PMTG.do_boost/2` (`pmtg.ex:483-501`) | indirect consumer | live (`pmtg_mode: :boost`) | **any** episode or lexicon hit ⇒ chosen cell +0.15, alts −0.05 (presence-based, score ignored) |
+| `Db.Episode.knn/2` (`episode.ex:181`) | consumer | via `Brain.Hippocampus.DB` only | filters user/tokens/tags/since; orders by `<->` |
+| `Brain.Hippocampus.DB.recall/1` | consumer | **dormant** | needs `:embedding`; `recall_source` defaults `:memory` (`hippocampus/config.ex:15`, `runtime.exs:239`); no caller passes `:embedding` |
+| `Brain.Hippocampus` memory recall (`hippocampus/recall.ex:46`) | consumer | **live** | Jaccard on norms × recency; no vectors |
+| `Db.rerank_word_candidates/3`, `Db.context_word_candidates/3` | consumer | **dormant** | only via `Core.Text.Fuzzy` when `:context_embedding` is passed; nothing passes it |
+| `Core.Vectors.fetch/1` | producer (perception) | stored in perception output only | second placeholder: 3-D hash vectors; no scorer consumes it (`lifg_perception_candidate_bias?` default false) |
+| `brain_cells.embedding` (768) | storage | unpopulated (Bradley: 0/1,696,102) | ivfflat `vector_l2_ops` |
+
+### 33.3 Ranking correctness review [V unless marked]
+1. **Metric mismatch:** queries use `<->` (L2). The episodes index is `hnsw (embedding vector_cosine_ops)` (`apps/db/priv/db/migrations/20251001000000_create_episodes.exs:42-44`), so **the index cannot serve these queries** (operator/opclass mismatch ⇒ sequential scan) and the "cosine" docstring in `Db.Episode` is inaccurate.
+2. **Wrong similarity transform:** `Brain.Hippocampus.DB.recall/1` uses `sim = 1.0 - distance`, a cosine-distance formula applied to an L2 distance; with placeholder norms (≈27.7) almost all `sim < 0` and are dropped by `min_sim 0.35`, except near-equal byte lengths (`sim ≈ 1`). Dormant today.
+3. **Two scales mixed in one score:** in `recall_hybrid`, vector-branch candidates get `1/(1+L2)` ∈ (0,1] while token-only candidates get a cosine fallback ∈ [−1,1] (`compute_emb_sim_fallback/2`, `episodes.ex:435-444`). Equal relevance can score differently depending on which branch found the row; negative cosine can *subtract* score.
+4. **Candidate expansion with zero overlap:** the vector branch adds up to 100 rows irrespective of tokens; with the placeholder these are byte-length neighbours, which can reach top-10 when few token matches exist (score up to 0.2 + 0.1).
+5. **No renormalization:** when vectors are absent, maximum score is 0.8; harmless for ranking, misleading for any absolute threshold (no current threshold consumer found; pMTG uses presence only).
+6. **Nil/empty:** empty cues ⇒ `tokens && []` returns no rows ⇒ token branch empty; `query nil` ⇒ no vector branch ⇒ `[]`. Single-word pMTG queries never use vectors.
+7. **Ownership:** `recall_hybrid` applies **no user/session/source filter** (global across all rows); `Episode.knn/2` supports `user_id`, and memory recall supports `:scope`. Inconsistent boundary (single-user today) — decision for Bradley.
+8. **Cues not normalized like stored tokens** beyond downcasing in `search/1` ([H] minor recall loss, e.g. punctuation-attached words).
+
+### 33.4 P-037 — Placeholder Embedding Quarantine V1 (PROPOSAL; not implemented)
+**Goal:** placeholder vectors cannot influence any recall; token and recency recall unchanged; no row deleted or backfilled; embedder status explicit.
+**Design [H]:**
+1. **Explicit status:** an embedder module declares `status/0` returning `:trusted` or `:placeholder`; a module without `status/0` is `:unverified` and treated as untrusted. `MyEmbeddings.status/0 -> :placeholder`. `Db.Episodes.embedder_trusted?/0` (public, documented).
+2. **`recall_hybrid/3` when untrusted:** clause B does **not** call the embedder (query ⇒ nil); vector branch skipped; `vec_sim` is `nil` for every item (no cosine fallback); score `alpha·jaccard + gamma·recency` (no renormalization, keeping ranks of token candidates comparable); each item gains `vector_used?: false`.
+3. **`write_episode/2` when untrusted:** insert without embedding (as `async_embedding` already does); existing rows untouched.
+4. **`Episode.knn/2` / `Brain.Hippocampus.DB.recall/1` when untrusted:** return `[]` with a single debug log (dormant paths; prevents future accidental enablement via `HIPPO_RECALL_SOURCE`).
+5. **Telemetry/visibility:** `[:db, :episodes, :recall]` metadata `vector_used?` (if the existing telemetry module is present; otherwise none — no new subsystem).
+**Out of scope (separate tickets):** metric unification (`<=>` vs `<->` + opclass) and the `1 - distance` fix (P-038 candidate); ownership filter (decision); real embeddings.
+**Expected behavioural impact [H]:** only multi-word pMTG lemmas (`search/1`) lose vector-only candidates; pMTG `has_hits` may become false more often for MWE lemmas, removing some +0.15/−0.05 activation nudges. If stored rows have NULL embeddings (likely), impact ≈ none.
+**FileScope (exact):** `apps/db/lib/db/my_embeddibgs.ex` (`status/0`); `apps/db/lib/db/episodes.ex` (status check in clause B, vector branch, fallback, write); `apps/db/lib/db/episode.ex` (`knn/2` guard); `apps/brain/lib/brain/hippocampus/db.ex` (guard); `apps/db/test/db/episodes_test.exs` (**fixture addition only**: `Db.TestEmbedder.status/0 -> :trusted`, so all 8 existing tests keep their current expectations); NEW `apps/db/test/db/embedding_quarantine_test.exs`; COLLAB entry.
+
+### 33.5 Regression and differential testing [H]
+- **Existing:** `apps/db/test/db/episodes_test.exs` (8 tests) and `apps/db/test/db_episode_knn_test.exs` (1) must pass unchanged with a trusted test embedder.
+- **New (quarantine test):** with a placeholder-status embedder that *raises if called*: `search/1` and `recall_hybrid(cues, "text")` never invoke it; results equal `recall_hybrid(cues, nil)`; every item `vec_sim == nil`, `vector_used? == false`; zero-overlap rows never appear; `write_episode/2` stores `embedding: nil`; `Episode.knn/2` returns `[]`; with a trusted embedder, previous results are byte-identical.
+- **Differential:** P-030 census (three corpora, §31) before/after — expected identical or within MWE-only drift; pMTG boost counts from telemetry on the v1 seed corpus before/after. Full umbrella suite incl. `apps/db/test`.
+
+### 33.6 P-032 dictionary IDF — feasibility [H unless marked]
+- **Why it fits:** P-031/P-031b failed because generic and template words matched (§21.1, §28). IDF down-weights exactly those, *by data rather than lists*, and applies equally to literal and neighbour-gloss evidence.
+- **Document unit:** sense-level definitions (+ examples as a separate field), but **count a term at most once per lemma** so lemmas with dozens of near-duplicate senses ("up": 74) don't depress IDF for their own words.
+- **Template/metadata vocabulary:** parenthetical labels ("(countable, uncountable)") and form-of glosses ("plural of …") become very frequent ⇒ low IDF automatically; additionally **exclude form-of senses** (`semantic_atoms` `tag:form-of`) from DF and from evidence — they define nothing.
+- **Morphology:** reuse ContextFit's `normalize_token/1` for DF so lookup and counting agree.
+- **Short definitions:** IDF does not create evidence where none exists; ContextFit's saturating `overlap_strength/1` already limits single-hit inflation.
+- **Rare misleading terms:** high-IDF rarities (names, typos like the `previou` artefact) need a floor `DF ≥ 2–3` and an IDF cap (e.g. 95th percentile).
+- **Correlation with disambiguation:** **[U]** — must be measured.
+- **Runtime:** table pruned to DF ≥ 2 (vocabulary size [U]) in `:persistent_term`/ETS, O(1) per lookup. **Version tracking:** build script version, brain_cells row count, SHA-256 of the extracted `(id, definition)` stream, normalization version — stored inside the table file.
+- **Provenance:** CC BY-SA 4.0 (Wiktionary), add to `NOTICE.md`.
+- **Benchmark (offline, unsealed, independently reviewed):** ~40 sentences each containing one ambiguous target (bank, check, cold, sister, window, …), gold sense chosen by two reviewers (Bradley + GPT-6) from the live candidate list. Arms: unchanged ContextFit; P-031b neighbour; IDF-weighted literal; IDF-weighted literal + neighbour. Metrics: top-1 gold-sense accuracy; **winner changed away from gold** (harm); obscure-sense promotions (sense index > 10); `all_zero`; latency. **GO:** IDF arm ≥ +10 pts top-1 over unchanged, harm ≤ unchanged, obscure promotions ≤ 50 % of P-031b. No production enablement in this ticket.
+
+### 33.7 Native semantic representations — offline feasibility [H]
+| | A: sparse TF-IDF (definitions) | B: truncated SVD/LSA | C: Axon encoder |
+| --- | --- | --- | --- |
+| Retrieval quality | lexical, no synonymy; ≈ BM25 | captures co-occurrence relatedness (shore ~ bank) | potentially best; needs training signal |
+| Cost | cheap; sparse | SVD over ~1.7M × V sparse matrix: laptop-feasible offline; dense storage grows with d (1.7M × d × 4 B) — too large for the phone at sense level for d ≳ 128 | high; training infra |
+| Complexity | low (same pass as IDF) | moderate; adds an offline numerical toolchain (not a repo dependency) | high |
+| Limits | dictionary register only | dictionary register; polysemy blurred | data hunger; provenance |
+- **Challenge:** stage 1 (retrieval integrity) needs **no embeddings** — token + recency + P-037 suffice. Stage 2 (context evidence) needs **IDF, not vectors**. Stage 4 (grammar) needs **structure** — vectors cannot distinguish "the dog chased the cat" from "the cat chased the dog". Only stage 3 might benefit, and only if B beats A.
+- **Minimal benchmark:** sample, don't populate: all senses of ~5,000 lemmas (including the §33.6 targets), sweep d ∈ {32, 64, 128, 256}; tasks: (i) the §33.6 WSD set by cosine(context, sense); (ii) a small reviewed relatedness list. Compare first-sense, ContextFit, IDF-overlap, TF-IDF cosine, LSA-d. **GO for B** only if it beats IDF-overlap by ≥ 5 pts with no more harm. Any future vector must carry model id/version, dimension, metric, provenance and training-data fingerprint; **no padding/truncation** into the 768/1536 columns (a new column/table would be a migration decision).
+
+### 33.8 Relationship to R-002 [H]
+- "The dog chased the cat" vs "The cat chased the dog": retrieval (lexical or vector) may return either as a *candidate experience*; **roles must be computed from the current sentence's structure** (P-036 tags + signature/role positions: pre-verb NP = agent, post-verb NP = patient), never copied from the retrieved episode. Retrieved experience may contribute priors (e.g. what *chase* typically takes) but no role assignment.
+- **Four outcomes, never conflated:** (1) retrieval improvement (better candidates); (2) WSD improvement (better senses — IDF/embeddings); (3) structural generalization (correct roles on unseen vocabulary); (4) acquisition of a reusable construction from experience (§32 V1 Arm 2 with k-ablation and shuffle control).
+- **Missing from episodes (bounded):** P-036 tag sequence (≤ 64 tags), signature ids + spans + role indices (≤ 8 signatures), `sentence_meaning.kind/status`, comprehension status (`degraded?`, weak/uncertain counts), and the role-head sense ids (already partly in `winners` with `token_index`). No additional prose; not the full SemanticInput.
+
+### 33.9 Risks and decisions for Bradley
+1. Approve **P-037** as scoped (incl. the fixture-only `Db.TestEmbedder.status/0` addition)?
+2. Run the metadata-only count `SELECT count(*), count(embedding) FROM episodes;` to size P-037's real impact (no text).
+3. **Ownership policy** for `recall_hybrid` (global vs user/session-scoped).
+4. **Metric unification** ticket (P-038 candidate): adopt `<=>` to match the cosine HNSW index and fix `1 - distance`.
+5. Whether a Python/numerical offline toolchain is acceptable for §33.6/§33.7 benchmarks (outside repo dependencies), or Elixir-only.
+6. Reviewer assignment for the WSD gold set (two independent reviewers).
+**Risks:** IDF may not correlate with disambiguation (benchmark may say NO GO); LSA storage/phone constraints; mistaking any of outcomes (1)–(3) for (4).
+
+— Claude (Opus 5.5), READ-ONLY. No source, test or config change. §§32–33 remain uncommitted pending Bradley's authorization to push.
+
+### 33.10 Receipt — episode embedding census (metadata only) · 2026-11-20 14:04 PST
+- **Executor:** Bradley (local `brain` DB, psql). **Revision:** `0d54bb3`. **Command:** `SELECT count(*), count(embedding) FROM episodes;` **Result:** `819 | 0`. No episode text read.
+- **Consequence [V]:** the vector branch of `recall_hybrid` filters `not is_nil(e.embedding)` (`episodes.ex:141`) ⇒ returns no rows; `compute_emb_sim_fallback(nil, _)` ⇒ `nil` (`:431`) ⇒ every `vec_sim` is nil and scores are `0.7·jaccard + 0.1·recency`. **The placeholder currently has zero effect on any ranking**; its only live cost is computing a 1536-float vector per multi-word pMTG lookup (`search/1`).
+- **Revised P-037 standing [H]:** preventive, not corrective. Its value is ensuring that a future write path (or setting `async_embedding: false` on a revived `Brain.Episodes.Writer`) cannot begin storing length-only vectors that would then enter ranking. Expected differential: none (census and pMTG hit counts identical). Priority drops below P-032's benchmark; Bradley may defer it.
+
+— Claude (Opus 5.5). Documentation-only append; uncommitted.
+
+## 34. R-004 — CLAUDE Generalized Semantic Structure Assessment (READ-ONLY) · 2026-11-20 15:30 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Revision audited:** `0d54bb3339969be71146bf4e67e6b9dcd8229b93` (`symbolic_generation`). Source read only. **No tests or pipeline runs were executed by me**; every capability claim below is derived from source and tagged accordingly. A read-only probe (`r004_s0_probe.exs`, kept outside the repo) is provided to convert the §34.5 predictions into execution receipts. R-003 (exemplar routing/embeddings) is deferred per Bradley's decision.
+
+### 34.1 Executive verdict
+- **Semantic unification (Option C): NO GO.** The premise is aimed at the wrong layer. For the R-004 synthetic set, the source shows that nearly all failures occur **before composition**: no grammatical structure is recognized, so there is nothing for a unified composer to unify [V source, H runtime]. A shared semantic IR also already exists in partial form (`Core.Semantic.Proposition`), so a new one is not justified by a demonstrated deficiency (§34.4).
+- **Option B, applied at the structure layer: CONDITIONAL GO for the S-1 experiment only.** The one reusable operation that would improve a whole class of sentences is **building clauses from reusable constituents** (noun phrase, verb group, PP adjunct) instead of 25 fixed-width token windows. The repository already contains the mechanism: `Core.Syntax.Chart` is a data-driven CKY chart with NP, determiner/quantifier agreement and PP-attachment rules. It is restricted to Colony copular sentences (§34.2, §34.7).
+- **Prerequisite, not optional:** the proof-admission contract (P-025 revised, §13.4) plus a bias-provenance record. Without them, any broader parser can inflate "verified" structure through the LIFG feedback loop (§34.6).
+
+### 34.2 Existing semantic data-flow map [V] (`apps/core/lib/core.ex:179-300`)
+
+| Order | Stage | Function | Authority |
+| --- | --- | --- | --- |
+| 1 | `PosTagger.attach` (P-036) | statistical POS prior over the whole sentence | **shadow**; no consumer |
+| 2 | `Signatures.attach` | **discovers structure**: 25 fixed-window detectors over dictionary-attested POS and morphology (`signatures.ex:81-125`); Chart only when `source == :colony_external` (`:119`) | hypotheses |
+| 3 | `RoleCompetition.attach` | PredicateEvidence / NominalEvidence / ArgumentEvidence → `Brain.LIFG.RoleCompetition.resolve` | pre-LIFG POS-role adjudication |
+| 4 | `ConstructionSchema`, `SentenceCompetition` | definition-request schema; MWE-vs-clause competition | hypotheses |
+| 5 | LIFG Stage1 | **proposes senses**; consumes signatures as **score biases**: role competition +0.30, finite-present +0.32, copular-relative +0.36, bounded-past +0.40 (`brain/lifg/grammar_evidence.ex:254,319,397,466`; called at `stage1.ex:852-899`) | lexical winners |
+| 6 | `EventFrames` | sentence-level **regex** domain frames (location, population, medication, sleep; `event_frames.ex:41-480`) | domain frames |
+| 7 | ATL ingest | integrates **LIFG winners** (`core/brain/atl.ex:10-18`) | not independent of 5 |
+| 8 | `StructuralCompetition` (Core→Brain) | ranks complete-span signatures by agreement with LIFG winners; `:preferred` needs ≥2 matched roles (`brain/lifg/structural_competition.ex:218-237`) | **provisional** |
+| 9 | `Composition` (typed λ) | **composes** nominal + progressive-locative properties; RoleWitness | derived, **closed vocabulary** (§34.4) |
+| 10 | `EpisodicProjection` → `SVOEvent.project` | **assigns participant roles** for full finite SVO clauses | user-attributed assertion |
+| 11 | `FrameUnifier` | definition requests only | |
+| 12 | `SentenceMeaning.build` | **12-builder priority cascade** (`sentence_meaning.ex:90-113`); first non-nil wins | `structurally_interpreted` / `provisional` / `unknown` |
+| 13 | `Proposition.build` | typed proposition for 4 frames | partial shared IR |
+| 14 | `ProvisionalInterpretation` | **exposes unresolved evidence** for fragments and questions | non-factual |
+| 15 | Summary → SpeechActs → SemanticStrategy / SymbolicGeneration | **response planning**; consumes construction ids directly (e.g. `:finite_past_svo_candidate`, `:wh_aux_object_question` in `response/semantic_strategy.ex`) | |
+
+Validation in the brief's sense (stage 5) happens only in a distributed way: SVOEvent's exact-surface/LIFG/ATL checks, Composition `Proof.verify`, and StructuralCompetition's re-detection. No single admission gate exists; P-025 is designed but **not implemented** (`admitted/2` absent) [V].
+
+### 34.3 Verified duplication [V] and whether it is necessary
+1. **Four SVO detectors for one relation:** `finite_present_svo` (4 patterns), `finite_past_svo` (D-N-V-D-N), `finite_past_pronoun_svo`, `counted_present_svo`, plus `bounded_past_transitives` (`signatures.ex:949-991, 1381-1568`). Each hard-codes the **subject shape** (det+noun, pronoun, count+noun) instead of reusing `noun_phrase_constructions` (`:1570`), which already exist in the same module. **Not necessary for provenance:** the evidence atoms are near-identical. The genuine differences are tense morphology and agreement, which belong to the verb group, not the clause shape. **This is the root of "one handler per sentence shape."**
+2. **Parallel lexical-feature builders:** `base_nodes`, `witnessed?`, `simple_past_verb?` and `plural_noun?` are re-implemented in `predicate_evidence.ex` (5 helpers), `argument_evidence.ex`, `nominal_evidence.ex`, `construction_schema.ex`, `coverage_ladder.ex`, `pos_tagger.ex` and `brain/lifg/{grammar_evidence,role_competition}.ex`, alongside the canonical `Signatures.build_lexicon/base_nodes` (`:160-300`). Closed-class lists are also duplicated: determiner lists appear in about 19 places and pronoun lists in about 11 (grep counts). **Partly necessary:** Brain cannot call Core, so the Brain copies are justified by `db <- brain <- core`. The Core-side copies are not.
+3. **Construction-specific LIFG biases:** four named functions with hand-set constants (§34.2 row 5). This is a provenance concern, not just duplication (§34.6).
+4. **Role naming with no syntax/semantics boundary:** syntactic `subject_head` is copied directly to semantic `"actor"` (`svo_event.ex:44-50`), and object to `"patient"`. `actor` is assigned in about 22 semantic files independently. The brief's distinction (subject ≠ agent) is **not represented anywhere**; it is only safe today because every recognized construction is active voice.
+5. **Tense in 11 files, from different sources:** the signature id (`svo_event.ex:41`), a hard-coded `:present` (`proposition.ex:137`), VerbLemma, FinitePastLocative, and others.
+6. **Absolute positional assumptions:** about 42 grep matches for fixed token indices or spans in `semantic/` and `syntax/`, 17 of them in `sentence_meaning.ex`. Examples: `wh_object_question` requires subject span `{2,3}` and predicate index 4 (`proposition.ex:87,104`); the temporal connective must be at `index == 7` (`composition/role_witness.ex:227`). **Not necessary;** these are overfits to a single example length.
+7. **Not duplication (necessary differences):** ConstructionSchema/FrameUnifier (definition requests), temporal composers (two-clause proofs with their own replay), and EventFrames' regex domain frames are construction-specific semantics with distinct provenance. Leave them alone.
+
+### 34.4 Representation gaps [V]
+- **A shared IR already exists:** `Proposition` has `type`, `content.predicate`, `arguments`, `modifiers`, `epistemic_status`, `polarity`, `grounding`, `provenance` (`proposition.ex:12-170`). It covers most of the illustrative R-004 map. Concrete deficiencies:
+  1. **Past-tense assertions lose their proposition.** `Proposition.build` matches only `source_frame: :finite_present_svo` (`:125`), but SentenceMeaning also emits `:finite_past_svo` participant assertions (`sentence_meaning.ex:793`). These fall through to `build(_, _) -> nil`.
+  2. **No voice, aspect, negation or quantification fields** in participant propositions. `polarity: :positive` is a constant (`sentence_meaning.ex:875`). Negated sentences are **rejected** (`svo_event.ex:117,122-127`), never represented with negative polarity.
+  3. **No syntactic-vs-semantic role layer** (§34.3 item 4).
+- **The typed λ Composition is closed-vocabulary:** 3 nouns, 3 adjectives (`composition/expression.ex:10-11`), 3 actors, 3 landmarks, 3 actions (`composition/lexical.ex:17-19`). By construction it **cannot** compose meaning for unseen vocabulary. This is a prototype boundary, not a defect, but it means the "unified typed representation" in the code today generalizes to nothing outside nine words.
+- Distinctions already well preserved: structural vs factual truth (`factual_authority?: false`, `external_facts: :not_checked`); dictionary selection vs contextual meaning (`grounding_status: :selected_not_contextually_verified`); attributed vs verified (`epistemic_status: :user_reported_unverified`). **Keep these as they are.**
+
+### 34.5 Construction-by-construction capability (source-derived; runtime [U] until the probe runs)
+
+| # | Sentence | Detector that matches (source) | Meaning produced (source prediction) | Missing |
+| --- | --- | --- | --- | --- |
+| A1 | The dog chased the cat. | `finite_past_svo` [V] | `participant_assertion`, tense past; **proposition nil** (§34.4.1) [H] | proposition clause |
+| A2 | The cat was chased by the dog. | none (no passive rule anywhere) [V] | unknown / fragment [H] | voice; by-agent |
+| T1 | The dog chases the cat. | `finite_present_svo` [V] | assertion + proposition (present) [H] | — (best case) |
+| T2 | The dog is chasing the cat. | none: progressive requires a locative PP (`:1220-1272`) [V] | unknown [H] | progressive transitive |
+| N1 | The dog did not chase the cat. | none; negation excluded (`svo_event.ex:117,124`) [V] | unknown [H] | polarity |
+| M1 | …chased the cat in the garden. | 5-token SVO window inside a 8-token sentence → **rejected** by the full-span check (`svo_event.ex:153-156`) [V] | unknown [H] | adjunct PP; attachment |
+| M2 | The dog in the garden chased… | none (subject shapes are fixed) [V] | unknown [H] | NP-internal PP |
+| Q1 | Did the dog chase the cat? | PredicateEvidence `modal_questions` gives only POS support ("did" is in `@modals`) [V] | unknown/provisional [H] | polar question |
+| Q2 | What did the dog chase? | `wh_aux_object_question` (exactly 5 tokens, `:594-649`) [V] | `wh_object_question`, patient unbound [H] | other lengths |
+| Q3 | Who chased the cat? | **`finite_past_pronoun_svo` likely matches** with `who` as subject pronoun; the detector does not check `?` (`:1475-1521`) [V source; H that "who" carries pronoun POS] | probably `structural_hypothesis` with `subject_head = who` (a question shaped as a declarative structure); participants blocked by the punctuation check (`sentence_meaning.ex:236-243`) [H] | subject-WH question |
+| C1 | The dog is tired. | none in chat; Chart is Colony-only (`signatures.ex:119`) [V] | unknown [H] | chat copular |
+| C2 | The dog is an animal. | none; the Chart's `complement` is adjectival/participial only (`chart.ex` terminals) [V] | unknown [H] | nominal predicate |
+| R1 | The cat chased the dog. | `finite_past_svo` [V] | roles reversed relative to A1, correctly [H] | — |
+
+**Reading:** of 12 target realizations, source predicts 3 recognized (A1, T1, Q2), 1 mis-shaped (Q3), and 8 unrecognized. None of the 8 fails in a composer; all fail in Signatures. *Do not treat this table as passing anything until the probe confirms it.*
+
+### 34.6 LIFG/grammar circularity and verification [V unless marked]
+- **Loop:** a signature (dictionary-attested POS, any sense) → Stage1 bias (+0.30 to +0.40) → LIFG winner → ATL (built from LIFG winners) → StructuralCompetition counts LIFG winners agreeing with the signature's required POS as `matched_roles` → `:preferred` → `SentenceMeaning.provisional_structure` (`sentence_meaning.ex:160-217`). So **the structural "confirmation" includes the echo of its own bias**. The ATL-agreement check in SVOEvent (`svo_event.ex:184-195`) is likewise not independent of LIFG.
+- **RoleWitness `:construction_alternative`** accepts a non-winning but attested POS when the construction requires it (`composition/role_witness.ex:200-275`). This is a structure-supports-itself path, bounded to specific roles.
+- **Observability gap:** Stage1 records `after_grammar_logit` per row (`stage1.ex:1070`) but **not which signature caused the bias**, so a downstream checker cannot tell independent agreement from echoed agreement.
+- **Independent evidence actually available:** (1) dictionary POS attestation for the surface (any sense); (2) form-of morphology tags; (3) closed-class inventories; (4) complete contiguous coverage; (5) agreement constraints; (6) P-036 tag (independent of signatures and LIFG, statistical, 0.893 accuracy; **corroboration only, never sufficient or required**).
+- **Minimum admission proposal [H]**, extending the revised P-025 contract rather than adding a mechanism:
+  - every required role has (1) (plus (2) where morphology is required);
+  - (4) complete coverage;
+  - (5) where applicable;
+  - **no competing complete analysis**, or the ambiguity is exposed as alternatives;
+  - LIFG/ATL agreement on a token that was **biased by the same signature** is recorded as `:consistent_not_independent` and **does not count toward `matched_roles`**.
+  This needs a `biased_by: [signature_id]` field on Stage1 decisions. That is observability, not a scoring change. **P-026** (the offline Stage1 differential) is the right harness to measure what the biases actually do.
+
+### 34.7 Options compared [H]
+
+| | A: extend composers | B: shared constituent operations at the structure layer (reuse the Chart) | C: unified semantic IR plus adapters |
+| --- | --- | --- | --- |
+| Generalization | one shape per ticket (history: P-033, P-035) | one transitive VP rule plus a verb group covers A1, T1, T2, N1, M1, M2, R1, X1-X3 shapes with any NP length; PP attachment ambiguity falls out of the chart | none by itself: §34.5 failures are upstream |
+| Complexity | low per change, growing total | moderate: grammar data plus a few `combine/3` clauses plus one adapter | high: re-plumb about 22 actor sites and response consumers |
+| Regression risk | low per change | low **if** shadow-only and source-gated | high |
+| Provenance | preserved | preserved: chart items carry role → token indices and required features (existing `sentence_signature` type, `semantic_input.ex:176-190`) | at risk during migration |
+| Runtime | negligible | bounded by existing chart budgets (48 tokens, 6 items/span, 400 total); `:lexical_ambiguity_budget` risk [U] | adds a pass |
+| Testability | per construction | one grammar, many held-out sentences | broad |
+| SemanticInput contract | unchanged | unchanged (a new signature id fits the existing type) | likely change |
+| Episodic learning | fragmented | single clause shape for future episodes (§32/§33.8 fingerprint) | best long-term |
+
+**Recommendation:** B at the structure layer, with **only two** semantic-side changes, both inside the existing Proposition: (i) the past-tense clause, and (ii) tense/aspect/polarity/voice fields filled from the verb group. Explicitly do not migrate the existing detectors or composers in this step; they remain the production path.
+
+### 34.8 S-1 — Cross-Construction Semantic Generalization (design; not implemented)
+- **Relation:** transitive event `PRED(agent, patient)` with tense, aspect, polarity and voice.
+- **Realizations (≥2 required; 6 used):** active past; active present (3sg); progressive; `did not` negation; passive with `by`-agent; PP adjunct (on the subject NP, or ambiguous between object NP and VP).
+- **Data:**
+  - authored by GPT-6 and Bradley, independently of the implementer;
+  - **dev set** frozen first: 10 verbs × 8 nouns;
+  - **held-out set**: disjoint verbs and nouns (≥20 verbs, ≥30 nouns), 6 realizations × 20 = 120 items, varying NP length (det, det+adj, det+adj+adj, pronoun, proper noun);
+  - every item has its **role-reversed twin**;
+  - expected structures written as `{lemma, agent, patient, tense, aspect, polarity, voice, attachment}`, reviewed by both reviewers before any run;
+  - **controls (30):** Q1-Q3-type questions (must not become assertions); noun/verb garden paths ("The old man the boats"); relative clauses, coordination and modals (must abstain); unknown-word sentences.
+- **Arms:**
+  - **(0)** unchanged pipeline, read via `sentence_meaning` / `proposition`;
+  - **(1)** the same SIs plus an offline extended chart (transitive VP, verb group, passive), with the Colony-source gate and question/negation rejection lifted **only inside the harness**;
+  - **(1t)** arm 1 restricted to P-036-consistent POS (an ablation: is lexical-ambiguity budget the bottleneck?).
+- **Outcome classes per item:** `correct` (all fields exact); `provisional` (structure exact, sense or referent unresolved, marked as such); `abstain`; `wrong_confident` (any role swap, wrong polarity or voice, question rendered as assertion, or an unexposed attachment choice).
+- **GO (all must hold):**
+  - arm 1 `correct + provisional` ≥ 0.70 on held-out declaratives, and ≥ 0.40 absolute above arm 0;
+  - **zero role swaps** across reversed twins;
+  - `wrong_confident` ≤ 0.02;
+  - controls: ≥ 0.95 abstain or correct;
+  - ambiguous-attachment items expose both readings or abstain ≥ 0.90;
+  - dev−held-out gap ≤ 0.15;
+  - chart p95 latency ≤ 20 ms/sentence on the laptop [U baseline];
+  - arm 0 byte-identical before and after, and the full suite green.
+- **Falsification / NO GO:**
+  - held-out gain < 0.30, or gain concentrated in dev vocabulary → the shape generalizes but the lexicon does not;
+  - `:lexical_ambiguity_budget` abstentions > 0.30 → **stop; the prerequisite is POS-ambiguity handling** (arm 1t tells whether the P-036 prior fixes it), not semantics;
+  - any role swap → NO GO regardless of accuracy.
+- **Regression:** existing tests unchanged; P-030 census (§31) unchanged, since nothing is wired.
+- **Cost recorded:** lines changed, new grammar rules, runtime.
+- **A response that reads well is not evidence**; only the structured fields are scored.
+
+### 34.9 Smallest future FileScope (proposal only; needs `Approve: P-###`)
+- `apps/core/lib/core/syntax/grammar.ex`: data for transitive VP, verb group (aux / `do`+`not` / BE + participle) and passive `by`-agent rules, behind a named rule set (default rule set unchanged).
+- `apps/core/lib/core/syntax/chart.ex`:
+  - verb and auxiliary terminals;
+  - object-NP role re-keying (`object_*`);
+  - verb-group features;
+  - a `diagnose/4` option selecting the rule set and the harness-only source/rejection override.
+  The default path stays byte-identical.
+- NEW `apps/core/lib/core/semantic/clause_proposition.ex`: chart signature → Proposition-shaped map with `syntactic_roles` and `semantic_roles` kept separate (passive subject → patient) and `polarity`, `tense`, `aspect`, `voice`. Pure, not wired.
+- `apps/core/lib/core/semantic/proposition.ex`: the `:finite_past_svo` clause (deficiency §34.4.1). This is the **only production-visible change**, and it is separable as its own ticket.
+- NEW `apps/core/test/core/syntax/chart_clause_rules_test.exs`, NEW `apps/core/test/core/semantic/clause_proposition_test.exs`, NEW `scripts/r004_s1_harness.exs` (structured output only), dev/held-out fixtures under `docs/collab/r004/` (synthetic only).
+- **Explicitly out of scope:** Signatures.detect, Stage1, GrammarEvidence, StructuralCompetition, SentenceMeaning wiring, SpeechActs, response modules, Brain, config, migrations.
+
+### 34.10 Risks, prerequisites and decisions for Bradley
+- **Risks:**
+  - dictionary POS ambiguity overwhelming chart budgets [U];
+  - chart parses exposing more ambiguity than downstream can use (correct but unhelpful);
+  - mistaking parse coverage for comprehension (the S-1 scoring guards this);
+  - the Q3 mis-shaping (§34.5) may already affect live chat [H].
+- **Prerequisites:**
+  - run the S-0 probe and record receipts (converts §34.5 to [V]);
+  - P-025 contract plus a `biased_by` provenance design before any chart output is *admitted*;
+  - independent authorship of S-1 data.
+- **Decisions:**
+  1. accept "structure layer first, Proposition as the IR" (rejecting Option C now)?
+  2. may the S-1 harness bypass the Chart's Colony-only gate and question/negation rejection **inside the harness only**?
+  3. who authors and reviews the S-1 dev and held-out sets?
+  4. should the `Proposition` past-tense fix be ticketed separately now (small, production-visible)?
+  5. should Q3 (`who` as a pronoun subject in a declarative SVO detector) get its own investigation ticket after the probe?
+
+— Claude (Opus 5.5), READ-ONLY. No source, test, config or format change; no tests executed. §§32–34 uncommitted pending Bradley's authorization to push.
+
+### 34.11 Receipt — S-0 capability probe · 2026-11-20 14:58 PST
+- **Executor:** Bradley (laptop). **Command:** `mix run ~/Downloads/r004_s0_probe.exs > log/r004_s0.txt 2>&1` (probe outside the repo; read-only resolver options with persistence and learning disabled). **Revision:** `fd241a5e3b5cb6520ed6d89aee9711ae2f1af0f0` (Bradley, `git rev-parse HEAD`); `fd241a5..0d54bb3` differs only in `docs/COLLAB.md`, so the code is identical to the audited revision. 16 synthetic sentences; no private text. Compile emitted the two known `chart.ex` warnings (combine/3 grouping, unused `item/4` default).
+- **Results [V-exec]** (S = complete-span signature; P = `structural_competition` preferred):
+
+| # | Signature(s) | Structural | Meaning | Note |
+| --- | --- | --- | --- | --- |
+| A1 | finite_past_svo {0,4} | P | participant_assertion, actor dog / patient cat | **proposition nil** (§34.4.1 confirmed) |
+| A2 | none | none | unknown | LIFG chose `chased|adjective`, `by|noun`; tagger had verb/preposition |
+| T1 | finite_present_svo {0,4} | P (3/0) | participant_assertion + proposition (present) | only fully composed case |
+| T2 | none | none | unknown | |
+| N1 | none | none | unknown | tagger `chase→noun` (tagger error) |
+| M1 | finite_past_svo {0,4} (partial); verb_particle `cat in` | none | unknown | LIFG `cat|adjective`; spurious particle with "cat" as verb |
+| M2 | **finite_past_svo {3,7}: subject "garden"** (partial); verb_particle `dog in` | none | unknown | **wrong-role partial hypothesis**; LIFG `dog|adjective` |
+| Q1 | none | none | unknown | LIFG `dog|adjective`; tagger `chase→noun` |
+| Q2 | wh_aux_object_question {0,4}; **finite_past_svo {0,3}: what/did/dog** | P (wh, 5/0) | **structural_hypothesis, provisional** | my §34.5 prediction (`wh_object_question`) was **wrong**: the composed path did not fire [cause U] |
+| Q3 | finite_past_svo {0,3} with `who` as subject | P (2/0) | structural_hypothesis, provisional | §34.5 Q3 prediction **confirmed**: a question is ranked as a declarative clause |
+| C1 | none | none | unknown | |
+| C2 | none | none | unknown | LIFG `dog|proper_noun` |
+| R1 | finite_past_svo {0,4} | P | assertion, actor cat / patient dog | role reversal correct |
+| X1 | finite_past_svo {0,3} | P | structural_hypothesis, provisional | participants not printed by the probe [U] |
+| X2 | **none** | none | unknown | one adjective in the subject defeats every detector |
+| X3 | **finite_past_svo {0,4}: object_head "small"** (partial) | none | unknown | **wrong-role partial hypothesis** |
+
+- **Baseline for S-1 (12 R-004 targets A1-C2 + R1):** 3 structurally interpreted (A1, T1, R1), 1 correct-shape provisional (Q2), 1 mis-shaped provisional (Q3), 8 unrecognized. **Wrong-confident: 0**: the current pipeline abstains rather than asserting wrongly. That is a property to preserve.
+- **New findings:**
+  1. **Partial fixed windows create wrong-role hypotheses** (M2 garden-as-subject, X3 small-as-object, Q2 what/did/dog). They are not admitted today only because consumers require the full span. Any consumer that reads partial signatures inherits them [H; audit consumers]. A full-span constituent chart cannot produce these, which strengthens the case for Option B.
+  2. **Without structure, LIFG POS goes wrong on common nouns and verbs** (`cat|adjective`, `dog|adjective` ×2, `dog|proper_noun`, `chased|adjective`, `by|noun`). On the visible tokens the P-036 tagger was right in each of those six cases, and itself erred 4 times (`chase→noun` ×2 after a noun, `garden→proper_noun` ×2). This is evidence for arm 1t and P-026, not for authoritative use of the tagger.
+  3. Latency: 56–359 ms per full resolve (first call warm-up), so a chart pass budget of ≤ 20 ms is proportionate.
+- **Confirmed:** §34.4.1, §34.5 for A1, A2, T1, T2, N1, M1, M2, Q1, Q3, C1, C2 and R1. **Corrected:** Q2.
+
+— Claude (Opus 5.5). Documentation-only append; uncommitted.
+
+## 35. Decision record and P-039 proposal — Chart Clause Rules V1 (S-1 harness) · 2026-11-20 15:10 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Decision recorded (Bradley, 15:02):** §34.10 decision 1 is **accepted**. Structure layer first; `Core.Semantic.Proposition` remains the semantic IR; Option C (a new unified IR) is rejected for now. Decisions 2–5 remain open. **Approving P-039 as written also answers decision 2** (harness-only bypass of the Chart's Colony and question/negation gates).
+
+### 35.1 P-039 — Chart Clause Rules V1 (PROPOSAL; not authorized)
+**Goal:** test whether **one** set of reusable clause rules over constituents recognizes transitive events across six realizations (§34.8) with unseen vocabulary, without changing any production path.
+
+**Grammar (data, `apps/core/lib/core/syntax/grammar.ex`) [H]:** a named rule set `:clause_v1`. `rules/0` and the default set are byte-identical to today.
+- New terminal categories, each requiring dictionary-attested POS (any sense) plus morphology where stated:
+  - `:verb_past` (verb + `:simple_past`)
+  - `:verb_present` (verb + `finite_present_verb?`, or base verb with a plural subject; agreement checked at `:predication`)
+  - `:verb_base`
+  - `:participle_present`
+  - `:participle_past`
+  - `:aux_be` (closed: am/is/are/was/were)
+  - `:aux_do` (closed: do/does/did)
+  - `:negator` (closed: not/n't)
+  - `:agent_marker` (closed: "by", with preposition POS)
+- New rules (binary, as the chart requires):
+  - `vgroup -> verb_past | verb_present` (unary)
+  - `neg_do -> aux_do negator`; `vgroup -> neg_do verb_base` (polarity negative; tense from `do`)
+  - `vgroup -> aux_be participle_present` (aspect progressive; tense from `be`)
+  - `pvgroup -> aux_be participle_past` (voice passive)
+  - `object -> subject` (unary re-key of the existing NP item to `object_*` roles; reuses all NP, determiner, quantifier and possessive rules)
+  - `vp -> vgroup object` (transitive)
+  - `agent_pp -> agent_marker subject`; `vp -> pvgroup agent_pp`; `vp -> pvgroup` (agent unexpressed)
+  - Existing reuse: `object -> object pp`, `subject -> subject pp`, `vp -> vp pp`, `vp -> vp adverb`, `sentence -> subject vp`. **PP-attachment ambiguity therefore yields two full-span signatures, which must be preserved, not chosen.**
+- Features carried on the vgroup item: `tense ∈ {past, present}`, `aspect ∈ {simple, progressive}`, `polarity ∈ {positive, negative}`, `voice ∈ {active, passive}`, `number` (for BE/present agreement).
+- **Questions, modals, coordination and subordinate clauses** are not covered in V1 and **must abstain** (S-1 controls).
+
+**Chart (`apps/core/lib/core/syntax/chart.ex`) [H]:**
+- `diagnose/4` accepts `rule_set: :clause_v1` and `harness_override: true`. Only that combination skips the `:unsupported_source` check and the `:negation` / non-copular `:no_clause_core` rejections. `:interrogative`, `:modal`, `:multiple_clauses`, `:instruction_shaped` and the budgets are unchanged.
+- Verb-group terminals and `combine/3` clauses are added, **grouped with the existing `combine/3` clauses**; this also clears the existing compiler warning.
+- Without these options, output is byte-identical (guarded by the existing 26 chart tests).
+
+**Adapter (NEW `apps/core/lib/core/semantic/clause_proposition.ex`) [H]:** pure; not wired into the pipeline.
+- Maps a `:clause_v1` sentence signature (plus the SI) to a Proposition-shaped map:
+  - `type: :event_clause`
+  - `predicate: %{surface, token_index, lemma, lemma_basis}`
+  - `syntactic_roles: %{subject, object, by_object}` (token spans)
+  - `semantic_roles`: active → agent = subject, patient = object; passive → patient = subject, agent = by-object or `:unexpressed`
+  - `tense`, `aspect`, `polarity`, `voice`
+  - `attachments: [%{pp_span, attached_to: :subject | :object | :vp}]`
+  - `epistemic_status: :structural_hypothesis_not_verified`
+  - `factual_authority?: false`
+- `lemma` comes from `Core.Semantic.VerbLemma` **only if** the LIFG choice at the predicate index is a verb sense (`lemma_basis: :lifg_selected_form_of`); otherwise `lemma: nil, lemma_basis: :unresolved`, giving a provisional outcome.
+- **The structure never depends on LIFG; only the lemma does**, and that dependence is recorded.
+
+**Harness (NEW `scripts/r004_s1_harness.exs`) [H]:**
+- Reads frozen synthetic fixtures (`docs/collab/r004/s1-dev.json`, `docs/collab/r004/s1-heldout.json`, each with a SHA-256 recorded in the report).
+- Per item it resolves with the P-030 resolver options, then scores three arms:
+  - **arm 0:** existing `sentence_meaning` / `proposition`
+  - **arm 1:** `Chart.diagnose(si, Signatures.chart_nodes(si), [], rule_set: :clause_v1, harness_override: true)` → `ClauseProposition`
+  - **arm 1t:** the same, with each node's POS set restricted to P-036-consistent POS (ablation only)
+- Output:
+  - per-item outcome class (`correct` / `provisional` / `abstain` / `wrong_confident`)
+  - per-field mismatches
+  - reversed-twin role-swap count
+  - ambiguity exposure
+  - chart abstention reasons
+  - p50 and p95 chart time
+  - aggregates
+- **Synthetic sentences only.**
+
+**Tests (NEW):**
+- `apps/core/test/core/syntax/chart_clause_rules_test.exs`, pure fixture nodes with no DB:
+  - one positive per realization;
+  - reversed twins;
+  - two readings for an ambiguous PP;
+  - passive with and without agent;
+  - `did not` polarity;
+  - BE/present agreement conflict → abstain;
+  - questions and modals → abstain;
+  - the default rule set and missing override → identical to today;
+  - budget overflow → abstain, never truncate.
+- `apps/core/test/core/semantic/clause_proposition_test.exs`:
+  - passive role mapping;
+  - unresolved lemma → `:unresolved`;
+  - no `factual_authority?`;
+  - malformed input → `:error` without raising.
+
+**Fixtures:** `docs/collab/r004/` (written by GPT-6 / Bradley, not by the implementer; §34.8 composition).
+
+**FileScope (exact):**
+- `apps/core/lib/core/syntax/grammar.ex`
+- `apps/core/lib/core/syntax/chart.ex`
+- NEW `apps/core/lib/core/semantic/clause_proposition.ex`
+- NEW `apps/core/test/core/syntax/chart_clause_rules_test.exs`
+- NEW `apps/core/test/core/semantic/clause_proposition_test.exs`
+- NEW `scripts/r004_s1_harness.exs`
+- COLLAB entry
+
+**Explicitly excluded:** `Signatures.detect`, `core.ex` pipeline, Stage1/GrammarEvidence/Brain, StructuralCompetition, SentenceMeaning, Proposition, SpeechActs, response modules, config, dependencies, migrations.
+
+**Gates:**
+- `mix test apps/core/test` green, with the existing 26 chart tests unchanged;
+- `mix test apps/brain/test` and `apps/symbrella_web/test` green;
+- `--warnings-as-errors` compile clean for the touched files;
+- the S-0 probe re-run is identical (no production change).
+
+**Then:** the S-1 run on held-out data, scored against §34.8 GO/NO GO, reported as a receipt.
+
+### 35.2 Still open for Bradley
+- **Decision 3:** S-1 fixture authorship. P-039 tests can be written against hand-built nodes before the fixtures exist, but the S-1 run cannot happen without them.
+- **Decision 4:** the `Proposition` `:finite_past_svo` clause (A1/R1 show `proposition=nil`), as its own small ticket.
+- **Decision 5:** the Q3 mis-shaping (`who` as a declarative subject), as its own investigation ticket.
+
+— Claude (Opus 5.5). Proposal only; nothing implemented. Uncommitted.
+
+## 36. R-004 addendum — Option B as literally defined: extract shared compositional operations (READ-ONLY) · 2026-11-20 15:25 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Request (GPT-6 via Bradley):** investigate Option B as the brief defines it: keep the existing composers and factor genuinely duplicated semantic operations into small reusable functions or types. §34.7 reinterpreted B at the structure layer; this section evaluates the literal version separately. Revision `fd241a5` (code identical to `0d54bb3`). Source only.
+
+### 36.1 Method
+I grepped for private helpers defined in ≥2 files under `core/semantic`, `core/syntax` and `core/brain`, then read every implementation of the operations the composers actually share. Trivial helpers (`normalize` in 17 files, `get` in 9, `norm` in 5, `clean` in 3) are **cosmetic**. Extracting them changes nothing measurable and is **not recommended**.
+
+### 36.2 Operations that are genuinely shared [V]
+
+| Op | Implementations | Divergence | Matters for |
+| --- | --- | --- | --- |
+| **B1 Lexical role witness** ("the selected sense at token i is POS p") | `SVOEvent.single_choice` (`svo_event.ex:170`) + `atl_match?` (`:184`); `SentenceMeaning.provisional_selected_witness` (`sentence_meaning.ex:299`) + `object_roles_agree_with_winners?` (`:750`); `ParticipantSpatial.selected` / `selected_or_attested` (`participant_spatial.ex:105, 203`); `Composition.RoleWitness.resolve` (`composition/role_witness.ex:19`) | **Four different evidence standards for the same claim.** SVOEvent: POS checked by id substring `"|noun|"`, no surface match, no `active_cells` attestation. SentenceMeaning: exact norm = surface **and** an attested cell. ParticipantSpatial: falls back to dictionary attestation **with no LIFG choice at all** (`:219-223`). RoleWitness: may accept a non-winning attested alternative (§34.6). **Choice source also differs:** SentenceMeaning reads `semantic_choices` (MWE-reanchored) before `lifg_choices`; SVOEvent, ParticipantSpatial and RoleWitness read only `lifg_choices` | **provenance**: identical inputs can be "witnessed" by one composer and rejected by another |
+| **B2 Complete-surface alignment** ("this span is exactly the user's sentence") | `SVOEvent.clause_tokens` (`svo_event.ex:132`); `ParticipantSpatial.tokens` (`participant_spatial.ex:85`, hard-coded `0..6` at `:100`, also `:33`); `SentenceMeaning.surface_range` / `original_sentence` (`sentence_meaning.ex:1198, 1212`); `Chart.valid_original_tokens?` (`chart.ex:151`) | same intent; ParticipantSpatial fixes the length to 7 tokens | verification; shape rigidity |
+| **B3 Assertion admissibility** (hedges, negation, quotes, questions block an attributed assertion) | `SVOEvent.admissible_text?` (`svo_event.ex:122`); `ParticipantSpatial.admissible?` (`participant_spatial.ex:261`); `EpisodicEvents` prefix filter (`episodic_events.ex:136`) | **three different word lists:** SVOEvent blocks `no`, `probably` and leading `i think` / `according to` but not `allegedly`; ParticipantSpatial blocks `allegedly` but not `no` or `probably`; EpisodicEvents only checks sentence prefixes | epistemic boundary (what counts as a claim) |
+| **B4 Syntactic → semantic role mapping** | subject → `"actor"`, object → `"patient"` copied directly (`svo_event.ex:44-50`; about 22 files name `actor`) | active-voice assumption is implicit everywhere | required for passive (P-039) |
+| **B5 Tense / aspect / polarity derivation** | from signature id (`svo_event.ex:41`), hard-coded (`proposition.ex:137`), VerbLemma, FinitePastLocative | no single source | needs a verb group first (P-039) |
+
+### 36.3 Does literal Option B improve generalization? [V-exec + H]
+**No.** Of the 8 unrecognized S-0 sentences (§34.11), **every one fails before any composer runs** (empty `signatures`, `structural=:no_complete_candidate`). Extracting B1–B3 changes the outcome of **zero** S-0 sentences. Even B2's de-hard-coding (the `0..6` and `{2,3}` assumptions) cannot help while the detectors upstream only produce fixed-width windows.
+
+**What literal B does buy [H]:**
+1. **One evidence standard** for "witnessed role", which is exactly the `witnesses: [%{role, token_index, selected_id, pos, basis}]` record that the revised P-025 contract (§13.4) already specifies. B1 *is* the P-025 primitive.
+2. **One epistemic boundary** for attributed assertions (B3), closing the word-list inconsistencies.
+3. **Lower cost for P-039.** `ClauseProposition` needs a lemma witness and an admissibility check. Without B1/B3 it would become the **fifth** witness implementation and the **fourth** admissibility list.
+
+**Risk:** the four B1 implementations are **not behaviourally equivalent**. Replacing them with one strict function would change outcomes (SVOEvent would gain surface and cell checks; ParticipantSpatial would lose its attestation fallback). Extraction must therefore be **policy-parameterized and byte-identical first**, with any tightening done later as separate measured tickets.
+
+### 36.4 Proposal — P-040 Lexical Witness and Assertion Boundary V1 (PROPOSAL; not authorized)
+- NEW `apps/core/lib/core/semantic/lexical_witness.ex`:
+  - `witness(si, index, pos, surface, policy)` → `{:ok, %{role_index, selected_id, pos, basis, choice_source}}` or `{:error, reason}`.
+  - Policies reproduce today's standards **exactly**: `:id_pos_only` (SVOEvent), `:selected_exact` (SentenceMeaning), `:selected_or_attested` (ParticipantSpatial), plus `choice_source: :lifg | :semantic_preferred`.
+  - `atl_agrees?(si, [{index, id}], choice_source)`.
+  - RoleWitness's alternative logic **stays where it is** (construction-specific, §34.6).
+- NEW `apps/core/lib/core/semantic/assertion_boundary.ex`: `admissible?(text, profile)`, with profiles `:svo_v1`, `:spatial_v1` and `:episodic_prefix_v1` holding **today's lists verbatim**. It also exposes a computed `differences/0` so the inconsistency is visible and testable rather than hidden.
+- **No consumer migrated in P-040.** Migration of SVOEvent, SentenceMeaning and ParticipantSpatial would be one ticket each, each with a differential test showing byte-identical output on existing tests plus the S-0 sentences.
+- **First consumer:** P-039's `ClauseProposition`, using `:selected_exact` + `:semantic_preferred` (the strictest existing standard).
+- NEW tests:
+  - `apps/core/test/core/semantic/lexical_witness_test.exs`: each policy reproduces its source function on a fixture matrix (surface mismatch, missing cell, MWE re-anchoring, no choice, two choices);
+  - `apps/core/test/core/semantic/assertion_boundary_test.exs`: each profile equals the original regex on a word-by-word table.
+- **FileScope:** the two new lib files, the two new test files, COLLAB. No existing file changed.
+
+### 36.5 Recommendation
+- **Literal Option B (P-040): GO as provenance hygiene, NOT as the generalization lever.** It is small, adds files only, and has zero behaviour change.
+- **Sequencing [H]:** P-040 first (2 lib + 2 test files), then P-039 uses it.
+  - This is better than P-039 alone, which would add a fifth witness copy.
+  - It is also better than B alone, which would leave S-0 at 3/12.
+  - B4 and B5 are delivered by P-039's verb group and `ClauseProposition`, not by extraction from today's composers.
+- **Decisions for Bradley / GPT-6:**
+  1. Approve P-040 as scoped (adds files only)?
+  2. Agree that P-039 should consume P-040 rather than add its own witness and admissibility logic?
+  3. Which single admissibility profile should be canonical in the long run? The three lists genuinely disagree on `no`, `probably` and `allegedly`, so this is a semantic choice, not a refactor.
+
+— Claude (Opus 5.5), READ-ONLY. No source or test changes. §§32–36 uncommitted pending Bradley's authorization to push.
+
+## 37. P-040 + P-039 implementation report · 2026-11-20 16:05 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Authorization:** Bradley, 15:09: "Approve: P-039 build on P-040". I read this as approving both P-039 and its stated dependency P-040 (adds files only), and said so before writing code. **Commits (pushed to `symbolic_generation`):** `64ad883` (P-040), `155634c` (P-039). Both are inside the §35.1 and §36.4 FileScopes; no other file is touched. This entry is uncommitted with §§32–36.
+
+### 37.1 What changed
+- **P-040** (new files only):
+  - `Core.Semantic.LexicalWitness`: policies `:id_pos_only`, `:selected_exact` and `:selected_or_attested`, plus `atl_agrees?/3` in modes `:winner_only` and `:winner_and_selection`.
+  - `Core.Semantic.AssertionBoundary`: profiles `:svo_v1`, `:spatial_v1` and `:episodic_prefix_v1`, plus `disagreements/0`.
+  - No consumer migrated.
+- **P-039:**
+  - `Grammar.rules(:clause_v1)` adds 10 rules. `rules/0`, `unary_rules/0` and `binary_rules/0` are unchanged.
+  - `Chart.diagnose/4` honours the clause rules **only** with `rule_set: :clause_v1` **and** `harness_override: true`.
+  - New `:finite_clause` signature, carrying `clause: %{tense, aspect, polarity, voice, agent, attachments}`.
+  - New `Core.Semantic.ClauseProposition`.
+  - New `scripts/r004_s1_harness.exs`.
+  - The two existing `chart.ex` compiler warnings are cleared: `combine/3` is now grouped and the unused `item/4` default is removed.
+- **Implementation decisions to review [H]:**
+  1. **Harness negation gate:** a negative cue is admitted only as a bare `not` directly after do/does/did. "nobody", "never", "no" and contractions still abstain, so a negated clause can never be read as positive.
+  2. **Passive "by":** a by-phrase after a passive yields **two** readings, agentive and agentless-plus-adjunct. Neither is chosen. This keeps the P-021 dev-corpus D08 principle that "a by phrase is not an agent without evidence".
+  3. **Agreement:** present tense requires a known subject number. Unknown-number proper nouns abstain, as in the copular chart. Past tense and "did" agree with any subject.
+  4. **Lemma:** taken only via a P-040 `:selected_exact` witness plus VerbLemma's attested form-of gloss, or a non-inflected attested row. Progressives have no proof path, so they get `lemma: nil`, `:unresolved`, and the outcome is provisional.
+  5. **Known V1 limitation:** a nominative pronoun in object position ("chased he") is not rejected, because the chart's pronoun item does not retain its surface.
+
+### 37.2 Receipts (executor: CLAUDE, my workspace; Elixir 1.18.4 / OTP 25; **not** the umbrella; hex.pm is unreachable from my workspace)
+- **Standalone ExUnit** (`elixir run.exs <lib files> <test files>`), loading only `grammar.ex`, `boundaries.ex`, `chart.ex`, `lexical_witness.ex`, `assertion_boundary.ex`, `verb_lemma.ex` and `clause_proposition.ex`:
+  - files run: the 4 new test files;
+  - result: `35 tests, 0 failures`.
+  - **[V] for these files only.** The umbrella suite (`mix test apps/core/test` etc.) is **UNVERIFIED** until Bradley runs it.
+- **`elixirc --warnings-as-errors`** on the same 7 lib files: exit 0.
+- **Default-path differential [V]:**
+  - method: the `fd241a5` `chart.ex` / `grammar.ex` renamed to `ChartOrig` / `GrammarOrig`, compared against the new `Chart.diagnose/4`;
+  - inputs: 78 sentences (P-021 dev corpus D01–D52, every quoted sentence in the chart test files, plus extras) × 3 sources (`:colony_external`, `:user`, `:prod`) × 6 option sets (none, `per_span: 2`, `results: 1`, `total: 30`, `rule_set: :clause_v1` without override, `harness_override: true` without rule set);
+  - result: **1404/1404 identical**, with 19 Colony candidates, so the comparison is not vacuous.
+- **Harness smoke [V-stubbed]:** end-to-end run with stub `Core.resolve_input` and `Signatures.chart_nodes`, a 6-item fixture in `/tmp` (not S-1 data); it produced aggregates, role-swap counts, timings and abstain reasons as designed. This is a mechanics check only.
+- **Fixture-chart results** (from the tests, fixture lexicon; [V] on fixtures, [U] on the live lexicon):
+  - all 10 §34.5/S-0 declarative shapes parse, including X2 (adjective subject), M1 (two attachments exposed), M2 (subject PP), passive with and without agent, `did not` (negative polarity) and progressive;
+  - questions, modals and "nobody"/"never" abstain;
+  - BE + NP never becomes a transitive clause.
+
+### 37.3 Gates for Bradley
+Run `bash ~/Downloads/p039_gates.sh` (placed on the laptop). It pulls, then runs:
+- the 7 targeted test files: the 4 new ones plus the 3 existing chart test files, which must stay green unchanged;
+- `apps/core/test`, `apps/brain/test` and `apps/symbrella_web/test`;
+- a count of warnings in the touched files;
+- a re-run of the S-0 probe, diffed against `log/r004_s0.txt` with timings stripped. **Expected: identical**, since nothing is wired.
+
+**Next after green:** the S-1 run needs the independently authored dev and held-out fixtures (decision 3).
+
+— Claude (Opus 5.5). Code VERIFIED standalone as stated; umbrella gates pending Bradley's run.
+
+### 37.4 Receipts — umbrella gates and probe A/B (executor: Bradley's laptop; logs read by CLAUDE)
+- **Gates (`bash ~/Downloads/p039_gates.sh`, HEAD `155634cc`, `symbolic_generation`):**
+
+  | Run | Result |
+  | --- | --- |
+  | targeted 7 files | `Result: 96 passed` |
+  | `mix test apps/core/test` | `Result: 2090 passed` (2055 before, plus 35 new) |
+  | `mix test apps/brain/test` | `Result: 735 passed, 3 skipped` (unchanged) |
+  | `mix test apps/symbrella_web/test` | `Result: 213 passed` (unchanged) |
+  | warnings in touched files | 0 |
+
+  **[V].**
+- **S-0 probe before/after differed.** Two causes:
+  1. **Map print order** of atom-keyed role maps (e.g. `object_head` printed before `subject_determiner`). Contents are identical; the new code creates new atoms, which changes small-map print order on this OTP.
+  2. **Sense numbers within the same POS** (e.g. `dog|noun|8/19/26/3`, `chase|verb|10/13/7/12`, `a|determiner|3/4/9/7`). Signatures, structural status, meaning kind/status, roles and propositions are identical across every run.
+- **A/B (`p039_probe_ab.sh`; old commit in a separate worktree):**
+  - new run 1 vs new run 2, seconds apart, same code: **identical**.
+  - the same code (`155634c`) at 15:29 vs 15:39 **differs** in those sense numbers. **Therefore the sense-number variation predates P-039 and is not caused by it [V].**
+  - old (`fd241a5`) vs new: differs only in the same sense-number slots. This comparison is **confounded**: Bradley's working tree has an uncommitted `config/dev.exs` change (`lifg_softmax_temperature 0.5`, left from the P-034 experiment), and the worktree used the committed `1.0`. All earlier probe and census runs on the laptop used 0.5.
+- **New finding [V, cause H]: LIFG's choice among same-POS senses is not reproducible across runs** of identical code, though stable within seconds. Candidate causes [H]:
+  - exact or near ties broken by floating-point summation order over atom-keyed maps, whose iteration order depends on atom-table order (module load order);
+  - time-dependent state (activation or recency).
+  This matters for receipts and any future episodic learning. Proposed as a separate read-only investigation, not a fix.
+
+— Claude (Opus 5.5).
