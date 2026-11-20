@@ -1306,3 +1306,232 @@ Extraction is a read-only `mix run -e` and needs no repo code. Claude will suppl
 5. Whether a `grammar_version` field is required before P-021b (my view: yes, as a P-021b acceptance item, since §4.3 invariant 1 replays the proof).
 
 **STOP.** Documentation handoff only. GPT-6 reviews next; Bradley decides.
+
+## 13. CLAUDE review of the P-025 admission contract and corpus v2 readiness · 2026-11-19 · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**READ-ONLY. Documentation append only.** Source read at `2e29a653`. Claude ran nothing: no queries, no Colony fetch, no corpus files, no sealed material, and no implementation or test change.
+
+Labels:
+- **[V]** read in the cited source;
+- **[H]** hypothesis;
+- **[U]** unknown.
+
+### 13.1 Verdict
+
+- **CONDITIONAL GO on a revised, Core-only P-025** (§13.3–13.4). It needs **no Brain change**. My §12.3 proposal (option A) is **withdrawn**: GPT-6 is right that it contradicted itself.
+- **GO on the corpus v2 procedure in §13.5**, after Bradley's authorization and decisions (§13.6). The commands are published here for inspection only and have **not been run**.
+- **P-025 is not strictly required before P-021b,** but its contract is. It is cleaner as its own small ticket (§13.7).
+
+### 13.2 Task 1: the observability contradiction
+
+**[V] GPT-6 is correct.**
+- `Brain.LIFG.StructuralCompetition.resolve/1` returns `preferred: preferred` where `preferred` *is* a candidate map, along with `candidates: candidates` (`brain structural_competition.ex:54-64`). Candidates are built in `assess/3` (`:150-215`).
+- Adding `unchecked_roles` therefore changes the `resolve/1` value even when every decision is identical.
+- It also bypasses `version: 1` (`:57`) without a bump, which is a silent contract change.
+- **Exposure [V grep]:**
+  - `Core.Syntax.StructuralCompetition.verified/1` (`core structural_competition.ex:66-86`) compares the attached map with a fresh `resolve/1`. Both would carry the field, so it stays consistent.
+  - `Composition` (`composition.ex:405-415`) uses the same equality.
+  - Trace and telemetry use `candidate_summary/1`'s `Map.take` (`:92-97`), so they are unaffected.
+  - No test asserts a full candidate map: `lexical_role_evidence` appears only in `coverage_ladder_test.exs`.
+  - No persistence of `structural_competition` was found in `db/`, `discourse/` or the hippocampus.
+  - Low exposure is still a silent change.
+
+| Option | Compatibility | Regression risk | Traceability | Cost | Architecture |
+| --- | --- | --- | --- | --- | --- |
+| A. add the field to the candidate | changes the `resolve/1` value; needs a version bump | low but nonzero; every equality guard and future snapshot is affected | in Brain output | ~0 | mixes diagnostics into the decision record |
+| B. separate Brain report (`unchecked/1`) | `resolve/1` unchanged | low; touches a Brain file | separate call | one extra pass over ≤12 candidates | duplicates Brain's skip logic in a second Brain function |
+| **C. derive in Core from Brain's existing output** | **nothing in Brain changes** | **lowest: no Brain diff** | Core result names its evidence | one map diff per call | **Brain keeps ranking; Core owns admission (matches the guardrails split)** |
+
+**[V] Why C is exact, not an approximation.** Brain records a comparison only for roles whose index is an integer *and* whose `required_features` map to a non-empty POS list (`:156-158`). So, for the preferred candidate:
+- **unchecked roles** = the roles of the matching signature's `required_features` (with an integer index) **minus** the roles present in `preferred.lexical_role_evidence`.
+
+Core already has the signature: `sentence_signatures` is revalidated by `detect/1` inside `verified/1`. This uses Brain's *output*, not a re-implementation of `expected_pos/1`. If Brain later maps `:simple_past`, that role appears in the evidence and Core automatically stops reporting it as unchecked.
+
+**Acceptance tests separating the two kinds of equivalence:**
+- **Representation equivalence (must hold):**
+  - `Brain.LIFG.StructuralCompetition.resolve/1` is `==` to a frozen expectation on the P-024 fixtures ("The artist draws a picture.", "The report was the problem.");
+  - `git diff` shows no change under `apps/brain/`.
+- **Decision equivalence (must hold):**
+  - for every SI in the existing structural and composition tests, `Core.Syntax.StructuralCompetition.verified/1` and `Composition.verified/1` return identical values before and after;
+  - `admitted/1` is a new function, so no existing call site changes.
+
+### 13.3 Task 2: strict admission evidence contract
+
+**[V] What RoleWitness does today.**
+- `resolve/4` first accepts the exact selected LIFG winner if its POS is expected and its row is attested (`role_witness.ex:19-46,298-312`).
+- Otherwise `alternative/7` (`:201-282`) admits, for roles in `@alternative_roles` (temporal connective, auxiliary, predicate, location head, preposition, modifier_1/2; `:13-14`), any **scored** candidate with **score ≥ 0** that is attested with the expected POS:
+  - POS-only roles (preposition, modifiers) take the top candidate with `sense_id: nil`;
+  - other roles need a unique or strictly highest-scored alternative;
+  - the predicate also needs present-participle morphology (`:314-318`).
+
+**[V] The circularity GPT-6 suspected exists in a weaker form.**
+- The only gate on an alternative is "the dictionary has a row with this POS, and LIFG scored it". That is the same dictionary-POS evidence the grammar used to propose the signature (`Signatures.build_lexicon/1` unions dictionary POS).
+- The ranking *among* alternatives uses Stage1 scores, and those scores include grammar boosts derived from the same signatures (`grammar_evidence.ex:200-331`, applied at `stage1.ex:839-864`).
+- So an alternative witness is **not independent of the grammar that requires it**.
+- This is pre-existing and bounded: only the existing progressive-event and stacked-nominal proofs use it. It should be measured in the v2 audit, not changed here.
+
+**Evidence hierarchy (for new admissions):**
+
+| Level | Evidence | Independent of the signature? | Role in admission |
+| --- | --- | --- | --- |
+| E1 | **Selected exact witness**: the LIFG winner at the index has the required POS and an attested row | partly: LIFG integrates context and sense evidence beyond grammar, though grammar boosts can contribute | **necessary** for every checked role |
+| E2 | **Scored alternative POS witness** (RoleWitness `:construction_alternative` / `:construction_pos_only`) | **no**: dictionary POS plus grammar-influenced scores | **never sufficient** for admission. A role supported only by E2 counts as a conflict |
+| E3 | **Grammatical signature requiring that POS** | it *is* the hypothesis | defines what must be witnessed; **never evidence for its own roles** |
+| E4 | **Verified semantic derivation** (a typed proof that replays) | built on admitted roles | can only be built **on top of** an admission; it cannot validate roles retroactively |
+
+**Rule:** admission requires E1 for every required role, plus the declared morphology and agreement coverage below. E2 can keep a *hypothesis* alive (an L1 `:provisional` reading, or an investigation candidate) but cannot make it *verified*. The grammar therefore cannot validate its own unsupported POS alternatives: Brain's comparison uses the selected POS only (`:160-185`), so an E2-only role already appears as `:conflict`.
+
+**Case handling in `admitted/1`:**
+
+| Case | Handling |
+| --- | --- |
+| Unchecked `:simple_past` role | Admitted only if (a) the signature's `evidence` contains its declared morphology atom (`:attested_simple_past_verb` / `:simple_past` in `required_features`, re-derived by `detect/1`), and (b) the selected LIFG id at that index has POS `verb`. Otherwise `{:abstain, :unchecked_role}` |
+| Unchecked adverb or quantifier role | `{:abstain, :unwitnessed_semantic_role}` by default. A caller may pass a closed neutral list (N-037 §5.3), checked against the selected id's surface. No default list in P-025 |
+| Conflicting selected POS | `{:abstain, :conflicting_role}`. No E2 rescue |
+| Missing lexical witness (no LIFG choice, or nil selected POS) | `{:abstain, :unresolved_role}` |
+| Multiple competing complete interpretations | `{:abstain, :competing_complete_interpretation}` if any *other* candidate also has 0 conflicts and 0 unresolved checked roles (genuine ambiguity is preserved, not resolved by margin) |
+| Source restriction | The caller **must** pass `sources: [...]`; `Map.get(si, :source)` not in the list gives `{:abstain, :source_not_permitted}`. No default |
+| Morphology and agreement | Not re-implemented. They are covered because `verified/1` requires every signature to be in a fresh `Signatures.detect/1` (`core structural_competition.ex:71-74`); the detectors check agreement and morphology. Admission also requires the preferred signature to be found **exactly** (id, span, roles) in `si.sentence_signatures`, otherwise `:signature_not_found` |
+| Stale or altered signatures | Inherited from `verified/1` (attached result `==` fresh `resolve/1`; signatures ⊆ fresh detect). Its failure gives `{:abstain, :not_verified}` |
+| Deterministic replay | `admitted/1` is pure. The result carries `digest: sha256(:erlang.term_to_binary(premises, [:deterministic]))` over `{construction, span, roles, required_features, evidence, [{role, index, selected_id}]}`, plus `structural_version: expected.version` and `admission_version: 1`. Replaying `admitted/1` must reproduce the digest |
+
+### 13.4 Revised P-025 proposal (not authorized)
+
+**FileScope (Core only):**
+- `apps/core/lib/core/syntax/structural_competition.ex`: add `admitted/2` and private helpers. `attach/1`, `verified/1`, `preferred_summary/1` and `candidate_summary/1` stay **unchanged**.
+- NEW `apps/core/test/core/syntax/structural_admission_test.exs`.
+- No Brain, RoleWitness, Composition, SentenceMeaning, response, Colony or config change.
+
+**Contract:**
+```elixir
+@spec admitted(map(), keyword()) ::
+        {:ok, %{
+          construction: atom(), span: {non_neg_integer(), non_neg_integer()},
+          roles: map(), source: atom(),
+          witnesses: [%{role: atom(), token_index: non_neg_integer(),
+                        selected_id: String.t(), pos: String.t(), basis: :selected_exact}],
+          morphology_witnesses: [%{role: atom(), token_index: non_neg_integer(),
+                                   feature: :simple_past, evidence: atom()}],
+          structural_version: pos_integer(), admission_version: 1,
+          digest: String.t(), factual_authority?: false}}
+        | {:abstain, reason}
+# opts: sources: [atom()] (required), neutral_roles: %{role => [String.t()]} (optional, default %{})
+# reason ::= :invalid_input | :source_not_permitted | :not_verified | :signature_not_found
+#          | :conflicting_role | :unresolved_role | :unchecked_role
+#          | :unwitnessed_semantic_role | :competing_complete_interpretation
+```
+- Missing `sources:` gives `{:abstain, :invalid_input}`. It never raises on malformed SIs.
+
+**Tests.** Real `Signatures.detect/1` + `StructuralCompetition.attach/1` with fixture lexicons, in the P-024 test style:
+
+- **Positive:**
+  - "The artist draws a picture." with exact LIFG winners and `sources: [:user]` returns `{:ok, _}`; every required role is in `witnesses`, and the digest is stable across two calls.
+  - "He bought some bread." returns `{:ok, _}` with a `:simple_past` morphology witness.
+- **Negative:**
+  - the same sentence with `sources: [:colony_external]` gives `:source_not_permitted`;
+  - `draws|noun` selected gives `:conflicting_role`, even though a `draws|verb` alternative is scored and attested (**no E2 rescue**);
+  - a missing choice at the object gives `:unresolved_role`;
+  - an injected extra signature or altered `lifg_choices` gives `:not_verified`;
+  - a past SVO whose selected predicate is not a verb gives `:unchecked_role`;
+  - a construction with an adverb role and no neutral list gives `:unwitnessed_semantic_role`.
+- **Adversarial:**
+  - two complete candidates, both fully witnessed (constructed from existing detector outputs where possible, otherwise a hand-built SI that `verified/1` accepts), give `:competing_complete_interpretation`;
+  - a 2-matched / 1-conflict `:preferred` candidate gives `:conflicting_role` (the exact case §11.4 point 1 worried about);
+  - a malformed SI gives `:invalid_input`, with no raise.
+- **Compatibility:**
+  - Brain `resolve/1` output is unchanged on the P-024 fixtures;
+  - `verified/1` results are unchanged for every fixture in the new file;
+  - full Core and umbrella suites green with **no expectation changes**.
+
+**Go/no-go:**
+- all of the above green;
+- `git diff --stat` limited to the two files;
+- Core count = previous + new tests.
+
+**Rollback:** revert the single commit. Because no caller exists until P-021b, there is nothing downstream to revert.
+
+### 13.5 Task 4: corpus v2 extraction protocol (for inspection; NOT run)
+
+**Key point, agreeing with GPT-6:** inputs ≠ eligible failures.
+- The screen needs ≥ 30 *eligible representative failures* (`coverage_ladder.ex` `@min_eligible_failures 30`). With about 60 inputs it may well not reach that.
+- The census already reports `:insufficient_eligible_failures` in that case (`screen/1`). That result is reported as **insufficient evidence**, never as pass or fail.
+- **Predeclared extension rule:** if eligible representative failures < 30 after batch 1, extract batch 2 by the same rule (the next-older 40 chat rows; the next 40 Colony posts by offset), up to a cap of 200 inputs per arm. Stop at the first batch that reaches ≥ 30. The decision uses only the failure *count*, never row content or correctness.
+
+**Step 0: discovery (D-3, read-only).** The `episodes.role` and `source` values are **[U]**, so count them first:
+```elixir
+# NOT RUN: requires Bradley's authorization
+import Ecto.Query
+Db.all(from e in Db.Episode, group_by: [e.role, e.source], select: {e.role, e.source, count(e.id)})
+```
+
+**Step 1: chat extraction (after Bradley names the user role/source values and cutoff T).**
+```elixir
+# NOT RUN. Prints to a LOCAL, untracked file only; nothing committed.
+import Ecto.Query
+t = ~N[YYYY-MM-DD HH:MM:SS]                     # Bradley's cutoff
+rows = Db.all(from e in Db.Episode,
+  where: e.role == ^"<user role>" and e.inserted_at < ^t and not is_nil(e.sentence),
+  order_by: [desc: e.inserted_at, desc: e.id], select: {e.id, e.inserted_at, e.sentence}, limit: 400)
+# then, in order: trim; drop exact duplicates; drop rows equal to any v1 seed / P-021 DEV / test fixture
+# sentence; keep first 40 => batch 1. Write case_id = "C" <> zero-padded rank; record e.id only locally.
+```
+- Bradley reviews the 40 rows **before any census run** and may *exclude* rows for privacy (the count is recorded, and the next row moves up) or substitute the fixed placeholder `Sam` for personal names (the count is recorded). No paraphrasing.
+
+**Step 2: Colony extraction (cutoff T₂ = fetch time).**
+```elixir
+# NOT RUN. Read-only GET; chronological per client.ex:139-146 (sort default :newest).
+{:ok, page} = Llm.Colony.Client.posts(limit: 40, sort: :newest, offset: 0)
+# take post titles in returned order; record post ids, fetch time, endpoint "/posts".
+```
+- **[U]** The response field names and whether `max_posts` permits 40 are unknown. Inspect the first page shape before freezing.
+- `posts/1` (chronological) is preferred over `feed/1` (`/feed/for-you`, personalized).
+
+**Step 3: freeze.**
+- Chat rows go in a local `log/r001_census_v2_chat.md` (untracked; `/log/` is gitignored per AGENTS.md).
+- Colony rows go in NEW `docs/collab/r001/census_corpus_v2_colony.md`.
+- Both use the v1 JSON shape with `"representative": true` and origins `bradley_chat_sample` / `public_social`. Families are labelled by Bradley after extraction and before the run.
+- Commit the Colony file. Record both SHA-256s, the cutoffs, the endpoint, the batch number and the exclusion counts in COLLAB. v1 is untouched.
+
+**Step 4: run.** The census script on each file at the current head, saving `--out` to `tmp/`.
+
+**Step 5: audit.** As predeclared in §12.4:
+- all tie/conflict opportunities;
+- all `:preferred` rows with `preferred_conflicting_roles > 0`;
+- `max(10, 20%)` of provisional/interpreted rows, chosen by `sha256(case_id)` order.
+
+Auditor labels: `correct`, `wrong`, `ambiguous_should_abstain`, `correct_abstention`, `wrong_abstention`. Raw screen and audited tables are kept separate.
+
+### 13.6 Decisions for Bradley
+
+1. Authorize D-3 and steps 1–2 (read-only).
+2. Choose cutoffs *T* and *T₂*.
+3. Privacy: are local-only chat rows acceptable? Is the placeholder rule acceptable?
+4. Auditor(s).
+5. Approve the revised P-025 (§13.4) or reject it.
+6. Whether `grammar_version` becomes a P-021b acceptance item (my view: yes).
+
+### 13.7 Task 5: sequencing
+
+**Is P-025 a prerequisite for P-021b?**
+- **Not strictly.** A source-local check inside `AttributedPredication.verified/1` could implement the same rules.
+- **But** the same contract will be needed again: by the chat copular path, and possibly by `provisional_structure/2` (§12.8 item 4). Two hand-written copies of "what counts as witnessed" would drift.
+- A Core-only P-025 is small, testable on today's SVO constructions with zero behaviour change, and shrinks P-021b's review surface.
+
+**Recommendation: keep it separate.** Either way, P-021b's acceptance must include `admitted/2` semantics.
+
+**Sequence.** GPT-6's list is justified with one change: **P-025 can be implemented in parallel with corpus v2 steps 1–4.** It has no dependency on the corpus, and the corpus has none on it.
+- Measure (corpus v2 baseline and audit) ∥ P-025.
+- Then review.
+- Then P-021b, using `admitted/2`.
+- Then a separately approved chat copular design.
+- Then reconsider Soar only if audited, genuine repair opportunities remain.
+
+**Dependencies:**
+- corpus v2 before the chat copular design;
+- P-025 contract before the P-021b verifier.
+
+### 13.8 Recommended next step
+
+Bradley runs D-3, the role/source discovery count. It is read-only, a single query, and it unblocks the chat extraction. The cutoffs and the privacy rule can be decided in the same reply. P-025 approval can follow independently.
+
+**STOP.** Documentation handoff only. No implementation authorized.
