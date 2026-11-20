@@ -1005,3 +1005,39 @@ Then rerun the D-1 command (§10.6).
 - the labelled census seed rerun.
 
 Bradley will run these on a desktop. **P-024 status: targeted tests and D-1 VERIFIED BY BRADLEY; regression suites pending.**
+
+### 10.12 Receipt: P-024 regression suites and census · 2026-11-19 20:11–20:13 MST · recorded by CLAUDE
+
+**RUN BY BRADLEY** (desktop, `pop-os`) after `git pull`, at **`56ad7e3c`** (printed by `git rev-parse`). An earlier desktop run at `fa57bc82` was **pre-P-024** and is *not* a P-024 receipt. Its Core 2029 and unchanged census merely reconfirm the P-022.1 baseline.
+
+| Command | Result |
+| --- | --- |
+| `mix test apps/core/test/core/syntax … apps/brain/test/brain/lifg` | brain **237**, core **1209** (pre-P-024 run: 1202; +7), exit 0 |
+| `mix test apps/core/test` | **2036 passed** (2029 + 7), exit 0 |
+| `mix test` (umbrella) | db 90, llm 58, brain 719 (3 skipped), core 2036, symbrella 1, web 213, exit 0 |
+| `mix run scripts/comprehension_coverage_census.exs --arm all --out tmp/r001_census_seed_p024.json` | revision `56ad7e3c`, corpus `1a3c2e5a…cde7b2`, `probe_errors: []`, exit 0 |
+
+**Census delta: separately labelled run "P-024 seed"**, compared with the P-022.1 receipt (§8.10), which stays unchanged:
+
+| Measure | P-022.1 (`fa57bc82`) | P-024 (`56ad7e3c`) |
+| --- | --- | --- |
+| `no_full_span_signature` | 10 | **15** |
+| `structural_unresolved_single_candidate` | 5 (4 `attested_role_conflict`) | **0** |
+| conflict / tie opportunities | 4 / 0 | **0 / 0** |
+| policy abstentions | 5 | 5 (unchanged) |
+| provisional (Colony chart) | 2 | 2 (unchanged) |
+| chat interpreted | 2 | 2 (unchanged) |
+
+**[V-receipt] Change beyond the §10.10 prediction:**
+- One **Colony** row also moved from `structural_unresolved_single_candidate` to `no_full_span_signature`. It is the Colony `noun_verb_ambiguity` row ("The record is old."; Colony `no_full_span` 2 → 3, unresolved 1 → 0).
+- **Explanation [V code]:** `Signatures.detect/1` runs the chat detectors on Colony input as well, and only the chart is Colony-only (`signatures.ex:112`). The same false `finite_present_svo` reading of "is" was being built and rejected there.
+- No other row changed class.
+
+**P-024 status: VERIFIED BY BRADLEY.** That covers the targeted tests (§10.11), D-1 (§10.11), the related suites, full Core, the umbrella suite and the census.
+
+**Observation (seed only; decides nothing):** every eligible seed failure is now `no_full_span_signature:all_tokens_witnessed`: missing grammar with full lexical coverage. No tie or conflict opportunities remain.
+
+**Next (§10.8):**
+1. Corpus v2 representative rows, then the baseline census. A pre-P-024 baseline is still available via `git checkout 06f4460`.
+2. P-021b proof and consumer obligations.
+3. Design the chat copular path.
