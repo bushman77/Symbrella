@@ -13,6 +13,8 @@ defmodule Core.Syntax.PredicateEvidence do
   @determiners MapSet.new(~w(a an the this that these those my your his her its our their))
   @wh MapSet.new(~w(what when where why how which who))
   @modifiers MapSet.new(~w(please not))
+  # P-024: closed BE paradigm; never a transitive/plural-present predicate.
+  @be_forms MapSet.new(~w(am is are was were be been being))
   @count_words MapSet.new(~w(one two three four five six seven eight nine ten
                               eleven twelve thirteen))
   @required_present [
@@ -192,6 +194,7 @@ defmodule Core.Syntax.PredicateEvidence do
          true <- MapSet.member?(@determiners, Map.get(tokens, 0)),
          true <- witnessed?(tokens, cells, 0, "determiner"),
          true <- plural_noun?(tokens, cells, 1),
+         true <- not MapSet.member?(@be_forms, Map.get(tokens, 2)),
          true <- present_base_verb?(tokens, cells, 2),
          true <-
            (last == 3 and witnessed?(tokens, cells, 3, "noun")) or

@@ -60,6 +60,12 @@ defmodule Core.Syntax.Signatures do
   ]
   @third_person_singular_pronouns MapSet.new(~w(he she it))
 
+  # P-024: the closed BE paradigm never takes a direct object, so it can
+  # never fill a transitive predicate slot. Copular/auxiliary BE has its own
+  # constructions (progressive, copular relative, Colony chart); this guard
+  # applies only to the SVO detectors and is independent of open vocabulary.
+  @be_forms MapSet.new(~w(am is are was were be been being))
+
   @have_words ~w(have has had)
   defp regex_have_contract, do: ~r/^(?:i|you|we|they)'ve$/u
   defp regex_have_or_be_contract, do: ~r/^(?:he|she|it|that|there|who)'s$/u
@@ -1299,6 +1305,7 @@ defmodule Core.Syntax.Signatures do
             else: not subject.plural_noun?
 
         if compatible? and third_person_subject? and predicate.finite_present_verb? and
+             not be_form?(predicate) and
              valid_surface?(segment) do
           [
             signature(
@@ -1339,6 +1346,7 @@ defmodule Core.Syntax.Signatures do
       if contiguous? and
            pos?(sd, "determiner") and pos?(subject, "noun") and
            pos?(predicate, "verb") and form?(predicate, :simple_past) and
+           not be_form?(predicate) and
            pos?(od, "determiner") and pos?(object, "noun") and
            valid_surface?(segment) do
         [
@@ -1382,6 +1390,7 @@ defmodule Core.Syntax.Signatures do
            pos?(subject, "pronoun") and
            pos?(predicate, "verb") and
            form?(predicate, :simple_past) and
+           not be_form?(predicate) and
            pos?(det, "determiner") and
            pos?(object, "noun") and
            valid_surface?(segment) do
@@ -1432,6 +1441,7 @@ defmodule Core.Syntax.Signatures do
 
       if counted_plural? and pos?(subject, "noun") and subject.plural_noun? and
            pos?(predicate, "verb") and predicate.base_present_verb? and
+           not be_form?(predicate) and
            MapSet.member?(@determiners, det.word) and
            pos?(det, "determiner") and pos?(object, "noun") and
            valid_surface?(segment) do
@@ -1761,6 +1771,10 @@ defmodule Core.Syntax.Signatures do
   end
 
   defp pos?(%{pos: options}, pos), do: MapSet.member?(options, pos)
+
+  defp be_form?(%{word: word}) when is_binary(word), do: MapSet.member?(@be_forms, word)
+  defp be_form?(_), do: false
+
   defp form?(%{morphology: options}, kind), do: MapSet.member?(options, kind)
 
   defp auxiliary_have?(nil), do: false
