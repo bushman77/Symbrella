@@ -1609,3 +1609,37 @@ The `{nil,nil}` rows run from 2026-09-14 to 2026-11-20. They carry chat intents 
 - **Colony:** none (no interpreted rows).
 
 **Pending:** the audit labels; the preferred-with-conflicts count; the chat privacy-review counts; the decision on Colony batch 2; whether to commit the Colony file.
+
+### 14.4 Audit result (independent auditor: Bradley) · 2026-11-19 21:04 MST · recorded by CLAUDE
+
+**Preferred-with-conflicts rows** (Bradley's run, chat v2 `abfe081e…`): **6**. Conflict detail came from a read-only `resolve_input` rerun of those rows:
+
+| Row | Preferred construction | Conflicting role: LIFG choice versus expected |
+| --- | --- | --- |
+| C027 | `finite_past_locative_candidate` | subject_head "bird": adjective vs noun |
+| C030 | `progressive_locative_candidate` | predicate "sleeping": adjective vs verb |
+| C032 | `progressive_locative_candidate` | predicate "sitting": adjective vs verb |
+| C033 | `progressive_anaphoric_locative_candidate` | predicate "sitting": adjective vs verb |
+| C036 | `noun_phrase` | modifier_2 "black": noun vs adjective |
+| C040 | `progressive_locative_candidate` (matched 2, conflicts 2) | predicate "sleeping": adjective vs verb; preposition "under": noun vs preposition |
+
+**Labels (Bradley, verbatim in substance). Claude did not author or suggest any label.**
+- **Structure:** C018, C026, C027, C028, C030, C032, C033, C036, C040, C048: **all 10 `correct`**.
+- **Word choice at each conflicting role:** all **7 `grammar right`**, i.e. the LIFG selection was wrong. That covers C027 bird; C030 sleeping; C032 sitting; C033 sitting; C036 black; C040 sleeping and under.
+
+**Findings:**
+1. **[V-audit] No wrong-confident structural readings** in this sample after P-024: 10 of 10 interpreted rows have the correct structure.
+2. **[V-audit] A real, distinct failure class:** a **correct structure containing wrong LIFG POS selections**. It affects 6 of 10 interpreted rows and 7 roles, and in every case the grammar's expected POS was the right one. This is the **inverse** of P-024, where the grammar was wrong and LIFG right.
+3. **[V-code] The existing live repair cannot fix it.** `Core.LIFG.RelationalFeedback` performs same-POS revision only (`relational_feedback.ex:8,19,26`). Every error here needs a POS change.
+4. **Correction to my own census definition.** "Opportunity" was counted only among *failed* rows (`coverage_ladder.ex` `summarize/1` → `eligible`). These 6 rows are `:provisional`, so they never entered the count. The chat screen (`0 / 38`) is correct **for failures** but **incomplete as a measure of repair opportunity**. The frozen definition and receipts are left unchanged; this is reported alongside them, not rewritten.
+5. **P-025 interaction.** `admitted/2` (§13.3) would reject all 6 with `:conflicting_role`. That is the intended conservative behaviour (they remain observable L1 hypotheses), but it means P-025 alone yields **no verified meaning** for this class.
+6. **Sample caveat:** these chat rows are largely Bradley's own construction probes ("the bird … on the fence"). The sample is representative of his real traffic, which includes heavy testing, not of casual conversation.
+
+**Consequence for R-001.** §6.1's NO GO on a general Soar-style cycle stands: failures are grammar coverage. But there is now **one narrow, independently audited candidate**: *structure-guided POS repair inside a correct structure*. It cannot be decided by the grammar alone, because P-024 shows the grammar can be confidently wrong. Any design needs **independent arbitration evidence** that distinguishes the P-024 case (grammar wrong) from the §14.4 case (LIFG wrong).
+
+Candidate evidence, all **[H]**, unproposed:
+- the alternative POS row's own morphology, e.g. present-participle `-ing` form-of tags for a progressive predicate (already checked in `role_witness.ex:314-318`);
+- a structure that is *complete only with* the alternative;
+- the absence of any competing complete reading that agrees with the LIFG choice.
+
+**Open question for GPT-6 (no implementation implied):** can a bounded, observation-only "POS-repair proposal" be specified whose arbitration evidence is demonstrably independent of the grammar's own POS-union lexicon, and which would reject all four pre-P-024 BE conflicts (§8.11) while accepting the seven §14.4 roles? If no such evidence exists, the class stays an honest abstention.
