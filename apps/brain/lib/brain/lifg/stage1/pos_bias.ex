@@ -36,6 +36,17 @@ defmodule Brain.LIFG.Stage1.PosBias do
   ))
   @predicate_modifiers MapSet.new(~w(please not))
   @question_prefixes MapSet.new(~w(what when where why how which who))
+
+  # P-029: a wh-word immediately followed by an auxiliary/BE/HAVE form is a
+  # wh-pronoun ("what are you…", "who is…", "which can…"). The reverse
+  # (wh-determiner before a noun) is left neutral: the next token's POS is
+  # not yet resolved during left-to-right scoring.
+  @wh_pronoun_words MapSet.new(~w(what which who whom whose))
+  @wh_pronoun_followers MapSet.new(~w(
+    can could may might must shall should will would do does did
+    am is are was were has have had
+  ))
+  @wh_pronoun_bias 0.34
   @imperative_followers MapSet.new(~w(
     a an the some any this that these those my your his her its our their
     me him her us them it
@@ -72,6 +83,7 @@ defmodule Brain.LIFG.Stage1.PosBias do
       end
 
     fine_day_pos_bias(token_phrase, next_token_phrase(ctx, tok), family) +
+      wh_pronoun_bias(token_phrase, next_token_phrase(ctx, tok), family) +
       greeting_chain_pos_bias(ctx, tok, token_phrase, family) +
       infinitive_object_bias(ctx, tok, family) +
       predicate_fallback +
@@ -315,6 +327,19 @@ defmodule Brain.LIFG.Stage1.PosBias do
   def token_start(_), do: 0
 
   # ===== Internal helpers =====
+
+  defp wh_pronoun_bias(token_phrase, next_phrase, family) do
+    if MapSet.member?(@wh_pronoun_words, token_phrase) and
+         MapSet.member?(@wh_pronoun_followers, next_phrase) do
+      case family do
+        :pronoun -> @wh_pronoun_bias
+        fam when fam in [:determiner, :particle] -> -@wh_pronoun_bias
+        _ -> 0.0
+      end
+    else
+      0.0
+    end
+  end
 
   defp fine_day_pos_bias("fine", "day", :adjective), do: 0.34
   defp fine_day_pos_bias("fine", "day", :verb), do: -0.34

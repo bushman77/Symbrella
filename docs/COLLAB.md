@@ -1859,3 +1859,13 @@ Requires `Approve: P-028`.
 **Draft FileScope:** `apps/brain/lib/brain/lifg/stage1/pos_bias.ex`, NEW `apps/brain/test/brain/lifg/stage1/pos_bias_wh_pronoun_test.exs`, this log. Requires `Approve: P-029`.
 
 **Next (separate, read-only investigation first):** "up to" as a phrase. Wiktionary has the idiom *be up to* ("to be doing; to be scheming"); how MWE candidates reach Stage1 for "up to" will be traced before any proposal (P-033).
+
+## 24. P-029 implementation — wh-pronoun POS bias · 2026-11-20 08:50 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, chat 2026-11-20 08:37: `Approve: P-029`. **FileScope:** `apps/brain/lib/brain/lifg/stage1/pos_bias.ex`, NEW `apps/brain/test/brain/lifg/stage1/pos_bias_wh_pronoun_test.exs`, this entry.
+
+**Change:** `PosBias.window/3` adds `wh_pronoun_bias/3`: token in `what which who whom whose` and next token in `can could may might must shall should will would do does did am is are was were has have had` ⇒ `:pronoun` +0.34, `:determiner`/`:particle` −0.34, others 0.0; otherwise 0.0. **Always on** (not config-gated), as with the module's other local rules.
+
+**Tests (3):** delta vs control sentence for five wh+aux pairs (pronoun +0.34, determiner/particle −0.34, noun 0); non-wh and non-aux contexts unchanged; Stage1 integration: "what are" selects a pronoun sense and raises pronoun posterior mass by > 0.1 over "what time".
+
+**Status: UNTESTED.** Gate: `mix test apps/brain/test/ apps/core/test/` green; P-030 census on v1 (compare 77/118 weak); live probe on "hey symbrella what are you up to?" expecting `what` absent from `uncertain`.
