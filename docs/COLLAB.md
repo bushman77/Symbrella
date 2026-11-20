@@ -1535,3 +1535,77 @@ Auditor labels: `correct`, `wrong`, `ambiguous_should_abstain`, `correct_abstent
 Bradley runs D-3, the role/source discovery count. It is read-only, a single query, and it unblocks the chat extraction. The cutoffs and the privacy rule can be decided in the same reply. P-025 approval can follow independently.
 
 **STOP.** Documentation handoff only. No implementation authorized.
+
+## 14. Corpus v2 extraction and first representative census · 2026-11-19 20:42–20:53 MST · recorded by CLAUDE
+
+**RUN BY BRADLEY** (desktop). Claude executed nothing and saw no corpus sentences: only counts and census aggregates were shared.
+
+### 14.1 Extraction receipts
+
+**D-3 discovery:** `episodes` grouped by (role, source):
+- `{"user","user"}` 7;
+- `{nil,"core_introspection"}` 257;
+- `{nil,nil}` 452.
+
+The `{nil,nil}` rows run from 2026-09-14 to 2026-11-20. They carry chat intents (unknown 260, ask 72, statement 24, greet 22, define 16, …) and `response_meta` / `response_tone` / `session_id` meta keys. Bradley confirmed they are his chat turns.
+
+**Chat batch 1 (rule fixed beforehand in Claude's chat reply):**
+- Population: role `user` OR (role nil AND source nil). `core_introspection` excluded.
+- `inserted_at < 2026-11-19 07:00:00 UTC` (before R-001 work), newest first.
+- Dedupe by normalized sentence, most recent copy kept.
+- Exclude exact matches to v1 seeds / DEV corpus, empty rows and rows over 500 bytes.
+- Take 48 candidates.
+
+| Count | Value |
+| --- | --- |
+| raw | 335 |
+| distinct | 150 |
+| excluded | 0 |
+| written | 48 |
+
+- File: `log/r001_census_v2_chat.md` (**local only, never committed**); episode ids in `log/r001_census_v2_chat_ids.txt`.
+- **SHA-256 `abfe081eed46f3b79c8aad80f2ed041d078fb7ba3060096193a5852ef45b63d6`**, as printed by the census.
+
+**Colony batch 1:**
+- `Llm.Colony.Client.posts(limit: 25, sort: :newest)` at offsets 0 and 25. The config cap is `max_posts: 25` (`config/llm.exs`); `limit: 40` was correctly refused with `:invalid_limit`.
+- Fetched `2026-11-20T03:49:31Z`. Titles only, unedited.
+- Dedupe; exclude exact matches to v1/DEV, empty titles and titles over 500 bytes. The first 40 kept.
+
+| Count | Value |
+| --- | --- |
+| fetched | 50 |
+| distinct | 50 |
+| excluded | 0 |
+| written | 40 |
+
+- `author.user_type` was added afterwards by post-id lookup, without changing row selection: **agent 37, human 3, unknown 0**.
+- File: `docs/collab/r001/census_corpus_v2_colony.md` (in Bradley's tree; whether to commit it is pending his decision).
+- **SHA-256 `d6f11b11bbb20f44ea3962f49ff729b87ff7c32df9a30297d91217587ec7e39a`**.
+
+**Departures from §13.5, recorded honestly:**
+1. The chat file was run with all **48** candidates rather than trimmed to 40. The selection is still deterministic. Whether a privacy review removed any rows or replaced any names is **pending Bradley**.
+2. The SHA-256s were recorded at run time, from the census output, rather than committed before the run. **Both files are frozen from this point.**
+
+### 14.2 Census results (revision `56ad7e3c`, exit 0 both, `probe_errors: []`)
+
+| | Chat (48) | Colony (40; 37 agent / 3 human) |
+| --- | --- | --- |
+| provisional / interpreted | 9 / 1 | 0 / 0 |
+| policy or budget abstentions | 0 | **32**: multiple_clauses 16, structured_record 8, instruction_shaped 4, negation 2, interrogative 1, budget 1 |
+| eligible failures | **38** | 8 |
+| `no_full_span_signature:all_tokens_witnessed` | 27 | 7 |
+| `no_full_span_signature:unwitnessed_tokens_present` | 8 | 1 |
+| `full_span_not_clause_eligible` | 3 | 0 |
+| tie / conflict opportunities | **0 / 0** | 0 / 0 |
+| screen | **`:insufficient_eligible_opportunities_in_this_distribution`** (38 eligible ≥ 30; ratio 0.0) | `:insufficient_eligible_failures` (8 < 30) |
+
+**[V-receipt] Interpretation:**
+- **Chat (the screen is valid, n = 38):** zero tie or conflict repair opportunities. **Every** eligible failure is missing grammar: 35 have no full-span signature and 3 have a full span that is not clause-eligible. 27 of the 35 had full lexical coverage. This is the evidence R-001 Stage 0 was built to collect. For Bradley's real chat distribution, a Soar-style impasse/repair stage (P-023) has **no observed opportunity**, and coverage is the bottleneck. This is a pre-declared screening heuristic, not proof; the audit is still required.
+- **Colony:** the screen is insufficient. Agent-written titles are dominated by deliberate refusals, so the arm currently measures **policy fit for agent-authored titles**, not human social language (3 human rows). Batch 2 (offsets 50+) is allowed by the predeclared extension rule. At about 8 eligible per 40 rows, reaching 30 would need roughly 150 titles. That decision is Bradley's.
+
+### 14.3 Audit (predeclared, §12.4 / §13.5)
+
+- **Chat:** all provisional and interpreted rows (9 + 1 = 10 = `max(10, 20%)`), plus any `:preferred` rows with conflicts. Bradley is the auditor. The labels go into this log by `case_id` only.
+- **Colony:** none (no interpreted rows).
+
+**Pending:** the audit labels; the preferred-with-conflicts count; the chat privacy-review counts; the decision on Colony batch 2; whether to commit the Colony file.
