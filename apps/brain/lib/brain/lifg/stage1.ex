@@ -764,7 +764,7 @@ defmodule Brain.LIFG.Stage1 do
               ClosedClass.closed_class_pos_bias(token_phrase, pos) +
                 PosBias.local_context(acc, tok, pos) +
                 PosBias.window(ctx, tok, pos) +
-                activity_frame_gloss_bias(ctx.si, tok_index, token_phrase, c)
+                activity_frame_gloss_bias(ctx.si, tok, token_phrase, c)
 
             perception_bias =
               perception_candidate_bias(ctx.si, tok_index, id, ctx.perception_candidate_bias?)
@@ -2081,14 +2081,27 @@ defmodule Brain.LIFG.Stage1 do
   @activity_gloss_cues ~w(doing involved engaged occupied busy)
   @activity_frame_gloss_bias 0.34
 
-  defp activity_frame_gloss_bias(si, tok_index, "up to", cand) do
+  # Phrase senses reach Stage1 as a *virtual* MWE token appended by
+  # Core.MWE.LIFGBridge (index = length(tokens) + k), carrying the real
+  # character span. Match the frame's predicate base token by span start,
+  # not by token index (receipt COLLAB §26.1).
+  defp activity_frame_gloss_bias(si, tok, "up to", cand) do
+    tok_start = PosBias.token_start(tok)
+    tokens = si |> Safe.get(:tokens, []) |> List.wrap()
+
     frame? =
       si
       |> Safe.get(:sentence_signatures, [])
       |> List.wrap()
       |> Enum.any?(fn
-        %{id: :wh_be_activity_question, roles: %{predicate: ^tok_index}} -> true
-        _ -> false
+        %{id: :wh_be_activity_question, roles: %{predicate: p}} when is_integer(p) ->
+          Enum.any?(tokens, fn t ->
+            is_map(t) and (Safe.get(t, :n) || 1) == 1 and Safe.get(t, :index) == p and
+              PosBias.token_start(t) == tok_start
+          end)
+
+        _ ->
+          false
       end)
 
     if frame? and activity_gloss?(Safe.get(cand, :definition)),
@@ -2096,7 +2109,7 @@ defmodule Brain.LIFG.Stage1 do
       else: 0.0
   end
 
-  defp activity_frame_gloss_bias(_si, _tok_index, _phrase, _cand), do: 0.0
+  defp activity_frame_gloss_bias(_si, _tok, _phrase, _cand), do: 0.0
 
   defp activity_gloss?(definition) when is_binary(definition) do
     first_word =

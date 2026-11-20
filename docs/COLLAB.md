@@ -1927,3 +1927,9 @@ Requires `Approve: P-028`.
 **Tests added:** Core 5 (frame with/without vocative and `-ing`; five non-matches; noun-only `doing` rejected; provisional meaning for the live sentence; no frame ⇒ no meaning). Brain 3 (frame selects `up to|preposition|7` and raises it; rivals never gain; frame at another index inert).
 
 **Status: UNTESTED.** Gate: Brain + Core suites (normal config); live Explain panel for "hey symbrella what are you up to?" — expect canonical `up to|preposition|7` and Sentence meaning `:activity_question` / `:provisional`. Reply text expected **unchanged** (still lexical-gap or another fallback) until the deferred stages.
+
+### 26.1 Receipts and fix: "up to" bias did not reach the live MWE path · 2026-11-20 10:45 PST · run by Bradley (laptop), recorded by CLAUDE
+- **[V-receipt]** HEAD `2e7c4d8`, normal config: Brain **735 passed, 3 skipped**; Core **2047 passed** (gate green).
+- **[V-receipt, live `Core.resolve_input`]** `sentence_meaning: %{kind: :activity_question, status: :provisional, source: :sentence_signature}` ✓. `up to` semantic winner still `up to|adjective|1`. `si.tokens` has only base `up` (index 5, span {27,29}); `lifg_choices` has no `up to`; `active_cells` has no `up to` rows.
+- **[V-code] Cause:** `Core.MWE.LIFGBridge.prepare/2` presents phrase senses to LIFG as a *virtual* token at index `length(tokens) + k` (here 7) with the real character span, then `split_choices/2` moves its choice to `:mwe_choices`. The §26 bias matched `roles.predicate == tok_index` (5), so it never fired live; Claude's Brain test had used index 5 for the MWE token, which does not reflect production.
+- **Fix (within §26 FileScope):** `activity_frame_gloss_bias/4` now receives the token map and matches the frame's predicate base token by **character-span start** (`PosBias.token_start/1`). The Brain test now mirrors production (base tokens 5/6 plus virtual MWE token 7 with the real span). **UNTESTED.**
