@@ -2010,3 +2010,24 @@ No change to `SymbolicGeneration` wording, `SemanticStrategy`, or P-033's frame 
 - **[V-receipt] Shadow census v1** (`abfe84f`): 130 tagged tokens; tagger vs LIFG chosen POS agreement **105/129 = 0.814**; slot specs 0 matches vs existing 11 (7 `verb_particle_construction`, 4 `*svo*`).
 - **[V-receipt] Row inspection (8 rows):** all **7 existing `verb_particle_construction` matches are false positives** — BE + prepositional phrase ("keys are on the table", "book is on the shelf", "report is in the folder", incl. a span {3,6} "in the folder on"), plus "slime lives on". Tagger read BE as auxiliary and on/in as preposition. Existing SVO for "The dog chased the ball" / "I fixed the bug" are correct; the census `svo` slot spec (bare pronoun-verb-noun) is too narrow (no determiners) — spec gap, not tagger error. "You should check the logs": tagger correct, **existing detectors find no clause**. Tagger error: "Every slime lives on the chain" → `lives/noun` (bigram noun-noun).
 - **[H] Implications for a consumer proposal:** (1) the existing verb-particle detector over-generates on copular sentences; a tagger-gated version would remove these; (2) slot specs need determiner/modal variants before they can replace SVO detectors; (3) tagger errors cluster on noun/verb homographs after nouns ("lives"), a known bigram weakness.
+
+## 31. Progress measurement — P-030 census, three corpora, three states · 2026-11-20 12:53 PST · run by Bradley (laptop), recorded by CLAUDE
+
+States: **base** = `apps/` + `config/` at `b09345aa` (pre-P-027; scripts current); **now·T1** = `fd241a5` committed config; **now·T0.5** = `fd241a5` + Bradley's local uncommitted `lifg_softmax_temperature 0.5`. Lexical-gap is the P-030 proxy (`degraded? and uncertain != []`).
+
+| corpus (rows / LIFG decisions) | metric | base | now·T1 | now·T0.5 |
+| --- | --- | --- | --- | --- |
+| v1 seed (24 / 118) | weak | 105 (89.0%) | 77 (65.3%) | 76 (64.4%) |
+| | degraded = proxy rows | 24 | 22 | 22 |
+| | uncertain terms | 59 | 57 | 56 |
+| v2 chat, Bradley's messages (48 / 253) | weak | 213 (84.2%) | 165 (65.2%) | 153 (60.5%) |
+| | degraded = proxy rows | 46 (95.8%) | 38 (79.2%) | 36 (75.0%) |
+| | uncertain terms | 118 | 111 | 108 |
+| v2 Colony (40 / 449) | weak | 379 (84.4%) | 333 (74.2%) | 326 (72.6%) |
+| | degraded = proxy rows | 40 (100%) | 37 (92.5%) | 37 (92.5%) |
+| | uncertain terms | 216 | 216 | 216 |
+| **all (112 / 820)** | weak | **697 (85.0%)** | **575 (70.1%)** | **555 (67.7%)** |
+| | degraded = proxy rows | **110 (98.2%)** | **97 (86.6%)** | **95 (84.8%)** |
+| | uncertain terms | 393 | 384 | 380 |
+
+**[H] Reading:** the weak-decision rate fell ~17 points overall, mostly function words (P-028/P-029); rows on the lexical-gap path fell from 110 to 95 (−15), concentrated in chat (46 → 36 of 48). Uncertain *terms* barely moved and Colony's not at all: remaining uncertainty is content words and phrases, i.e. context evidence (parked P-032) and missing constructions. Temperature 0.5 adds a modest further gain (−20 weak, −2 degraded rows). Census output is a proxy; it does not assess reply quality.
