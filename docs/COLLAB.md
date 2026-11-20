@@ -1890,3 +1890,23 @@ Requires `Approve: P-028`.
 - **[V-receipt] P-030 census v1, temperature 0.5 in dev:** weak **76**/118 (0.644; was 77), degraded 22/24, proxy 22/24, uncertain 56 (was 57), understood 1.
 - **[V-receipt] Live probe, temperature 0.5 + P-029, "hey symbrella what are you up to?":** `weak 2/6` (rate 0.333, below `@weak_rate_threshold 0.45`), **`uncertain: ["up to"]`** — `what` no longer uncertain (start of 2026-11-19: weak 5/6, uncertain hey/what/up to).
 - **[H]** On the seed corpus temperature moves little, because most seed words still lack discriminating evidence (context fit silent, §20); its effect concentrates where real evidence exists (e.g. P-029 pattern). Enabling it outside dev needs a proposal including Bradley/GPT-6's policy decision on the reliability-test assertion.
+
+## 25. P-033 proposal — vocative prefix + "what are you doing/up to" frame (NOT authorized) · 2026-11-20 09:25 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Evidence:**
+- **[V-receipt, Bradley, live chat + Explain panel, dev with temperature 0.5 local experiment]** "hey symbrella what are you up to?" → reply `:wm_attention_fallback` / `:attention_lexical_gap_report`: *I can identify "up to"…*. `degraded?: false`; `uncertain: ["up to"]`; canonical MWE winner `up to|adjective|1` "(uncommon) Willing, interested in." (score 0.084, `source: :mwe_lexicon`). Syntax hypotheses only verb-particle `are…up` and `you…up` (unverified). `sentence_meaning` not interpreted.
+- **[V-receipt, Bradley, DB]** `brain_cells` has `up to|adjective|1` and `up to|preposition|1..11`, including **`up to|preposition|7` "Doing, involved in."** No separate `be up to` entry.
+- **[V-code]** `AttentionFallback.lexical_gap_report/5` fires whenever an uncertain term is present and no completed sentence meaning exists (independent of `degraded?`). All question signatures in `Core.Syntax.Signatures` require the wh-word at token index 0 (`wh_aux_questions` L513, `wh_aux_object_questions` L599), so any greeting/vocative prefix ("hey symbrella …") prevents every question frame. No frame covers wh + BE + pronoun subject + activity predicate.
+
+**Proposal [H] (Core only):**
+1. **Vocative/greeting prefix:** question-signature detection may start after a leading prefix of greeting interjections (`hey hi hello yo ok okay so`) and/or an addressee that is the recognised assistant name (`symbrella`), optionally followed by a comma. Role indices stay those of the original tokens; the prefix is recorded as `:vocative` evidence. No change for inputs without such a prefix.
+2. **New signature `:wh_be_activity_question`:** `what` + `am|is|are` + pronoun subject + predicate ∈ {verb ending `-ing` | contiguous MWE `up to`} + `?`, exact span (no trailing material). Roles: `wh, auxiliary, subject, predicate`. Meaning kind `:activity_question` (speaker asks what the subject is currently doing), `epistemic_status: :question_not_assertion`, queried role `:activity`.
+3. **Sense preference inside the frame:** when (2) matches with predicate `up to`, Stage1/ATL handoff prefers the `up to` candidate whose gloss begins with an activity cue (`doing`, `involved in`, `engaged in`, `occupied with`) — selecting `up to|preposition|7` here — via the existing role-gloss compatibility path, not a hard-coded id. If no such sense exists, the frame alone carries the meaning.
+
+**Non-goals:** generating an answer about Symbrella's current activity (separate P-035, self-model/WM); other wh-words; contractions (`what're`, `whatcha`).
+
+**Tests:** frame matches "what are you up to?", "hey symbrella what are you up to?", "symbrella, what are you doing?", "what is she doing?"; does not match "what are you up to the task for" (trailing material), "what are you?" (no predicate), statements without `?`; vocative prefix leaves existing frames' results unchanged for prefix-free inputs; `up to|preposition|7` preferred over `up to|adjective|1` when the frame matches; Summary `uncertain` no longer lists "up to" and `sentence_meaning.kind == :activity_question` for the live sentence.
+
+**Gate:** full Brain + Core suites (normal config, and with temperature 0.5); P-030 census; live Explain panel.
+
+**Draft FileScope:** `apps/core/lib/core/syntax/signatures.ex`, `apps/core/lib/core/semantic/sentence_meaning.ex`, `apps/core/lib/core/semantic/proposition.ex` (if the kind must be registered), the role-gloss preference site (to be confirmed: `apps/brain/lib/brain/lifg/role_gloss_compatibility.ex` or Core ATL handoff), NEW tests under `apps/core/test/core/syntax/` and `apps/core/test/core/semantic/`, this log. Requires `Approve: P-033`; the exact FileScope will be confirmed in the first implementation entry before code is written.
