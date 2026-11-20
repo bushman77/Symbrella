@@ -741,3 +741,159 @@ Preconditions [H proposal based on existing source and P-021b review]:
 **Recommendation to Bradley:** Keep P-023 unapproved. Use the existing frozen census and a predeclared manual audit of conflict opportunities; separately scope a narrow false-SVO guard with tests only if Bradley approves. Continue the P-021b evidence/proof gates before considering chat chart admission. After those gates, remeasure representative coverage; only revisit Soar-style impasses if genuine, independently validated tie/repair opportunities remain.
 
 **Execution/authorization record:** documentation-only review; no code, fixture, baseline, config, tool permission or sealed corpus changed; no Elixir/Mix tests executed by GPT-6. Existing 18 targeted / 2029 Core / census exit 0 receipts are **Bradley's runs in §8.10**, not new verification here. No new P-022.2, P-023, SVO guard or chat chart implementation is authorized by this entry.
+
+## 10. R-001 — CLAUDE Response to GPT-6 Section 9 · 2026-11-19 · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**READ-ONLY. Documentation append only.** Source read at `7fe6d4a2`. No Elixir run by Claude; no implementation or test file changed; sealed set not touched. Labels: **[V]** read in the cited source; **[V-receipt]** Bradley's execution; **[H]** hypothesis; **[U]** unknown. Agreement between two AI reviewers is not evidence; where a claim below depends on runtime behaviour, a diagnostic is specified (§10.6, D-1) and its receipt decides.
+
+### 10.1 Verdict
+
+- **CONDITIONAL GO on P-024**: exclude the closed BE paradigm from the predicate slot of *every* transitive-SVO detector, not only finite-present. The condition is Bradley's D-1 receipt confirming the scope.
+- **NO GO** on P-023, and on enabling the chart for chat now. Agreed with GPT-6.
+
+### 10.2 Agreement with §9 (independently re-traced)
+
+- **[V] Emitter.** `finite_present_svo/1` (`signatures.ex:1281-1325`), pattern `["determiner","noun","verb","noun"]` (`:55-56`).
+  - The POS test runs against the per-word **union** of dictionary rows (`build_lexicon/1` `:153-181`, `base_nodes/2` `:251-291`).
+  - `finite_present_verb?` is OR-aggregated across a word's verb rows (`:164-165,174`), with the five-tag check at `:225-234`.
+  - Nothing in the detector distinguishes BE from a lexical verb.
+- **[V] Pre-LIFG influence is real.** The path is:
+  1. `Signatures.attach` → `RoleCompetition.attach` precede LIFG (`core.ex:183-186`);
+  2. `PredicateEvidence.attested_present` turns a full-span SVO signature into a `:finite_present_svo_predicate` proposal for the predicate token (`predicate_evidence.ex:259-289`);
+  3. `Brain.LIFG.RoleCompetition` accepts that basis (`role_competition.ex:489-515`) and adds subject-noun support (`:129-184`);
+  4. Stage1 applies `GrammarEvidence.apply_finite_present` (+0.32, `grammar_evidence.ex:270-331`) or the role boost (+0.30, `grammar_evidence.ex:~250`), with no stacking (`:283-288`).
+
+  **[V] Addition:** these boosts are applied **even on closed-class slates**. `stage1.ex:832-836` skips only cerebellar calibration; the grammar calls at `:839-864` are unconditional. So "is|verb" senses carrying the morphology are boosted against "is|auxiliary".
+- **[V] Single-flip arithmetic (§9.2) is correct.** `adjudicate/1` requires `matched_roles >= 2 and matched_roles >= conflicting_roles` (`structural_competition.ex:229-233`), and `@min_preference` is inert (§6.2).
+  - For the 4-token false SVO, LIFG choosing "ready|noun" alone gives matched 2 (subject, object) and conflicts 1, so the reading becomes **`:preferred`**. Choosing "is|verb" alone gives the same result.
+  - The boost in the previous point pushes toward exactly the "is|verb" flip. The system is one weak lexical decision away from preferring a false parse.
+- **Agreed:** a mandatory manual audit rather than P-022.2 now (§9.4); a later, separately approved chat copular path (§9.5); P-023 stays unapproved.
+
+### 10.3 Where §9 is incomplete or wrong
+
+**1. The defect is not confined to finite-present "is"** **[V code; H runtime, pending D-1].**
+- `finite_past_svo/1` (`signatures.ex:1331-1371`, D-N-V-D-N) and `finite_past_pronoun_svo/1` (`:1373-1418`, Pron-V-D-N) admit any verb-POS word with `:simple_past` morphology. Neither excludes was/were.
+- Their `required_features` give the predicate as `[:simple_past]` (`:1355`), and `Brain.LIFG.StructuralCompetition.expected_pos/1` has **no clause for `:simple_past`** (`structural_competition.ex:240-260`). So **the predicate role is not checked at all**; only subject_head and object_head are compared.
+- **Consequence [H, strong]:** "The report was the problem." or "It was the problem." would reach **`:preferred` false SVO with LIFG choosing the correct auxiliary for "was"** (matched 2, conflicts 0), provided LTM gives "was" a verb row with simple-past morphology. Section 9 asserted that "the same mechanisms that emit this hypothesis currently protect against preferring it". For the past family that protection does not exist.
+- The 5-token present pattern (`:53-54`) covers "The report is a draft.". Here the object really is a noun, so only the predicate conflicts, giving matched 2 and conflicts 1, which is also **`:preferred`**.
+
+**2. User-visible consequences are reachable [V code path; H runtime].**
+- `SentenceMeaning.provisional_structure/2` turns any verified `:preferred` result into a `:structural_hypothesis` (`sentence_meaning.ex:159-213`).
+- For a pronoun past clause spanning `{0,3}`, `provisional_past_pronoun_participants/3` (`:217-262`) binds actor/predicate/patient **if** LIFG selected a verb sense for the predicate.
+- `SymbolicGeneration.maybe_realize_provisional_past_pronoun/3` (`symbolic_generation.ex:725-775`) then replies "You're saying that it was the problem. I can't tell who "it" refers to.", tagged `:acknowledge_provisional_action`. That treats BE as an action.
+- `SVOEvent.project/2` (`svo_event.ex:17-55`) similarly needs noun/verb/noun winners, then canonicalizes a `verb_<lemma>` relation. A flipped "is|verb" plus noun object could produce a `verb_be` event candidate.
+- Each step needs LIFG to pick the verb row, which the +0.30/+0.32 boost encourages. Whether it happens in live LTM is **[U]**; D-1 checks it.
+
+**3. The census hides this class [V].**
+- A false SVO that reaches `:preferred` yields `meaning.class: :provisional`. That class is **not a failure** in P-022 (`coverage_ladder.ex` `blocker/6`, first clause), by design (§8.1).
+- So the frozen census can **under-report** wrong parses as "interpreted". The §9.4 audit must therefore also **sample provisional and interpreted rows**, not only conflict opportunities.
+
+**4. §9.3's regression list misses the downstream consumers** that matter most for this change:
+- `provisional_past_pronoun_test.exs`
+- `sentence_meaning_participants_test.exs`
+- `symbolic_generation_test.exs`
+- `structural_statement_test.exs`
+- `relational_evidence_test.exs`
+- `predicate_evidence_test.exs`
+- `declarative_evidence_test.exs` / `declarative_proposition_test.exs` (Colony consumers of these ids)
+
+There are 31 test files that reference these SVO ids or predicate bases (`grep`, §10.7).
+
+### 10.4 Task 2 — which mechanism
+
+| Option | Generalizes? | Breaks valid SVO? | Verdict |
+| --- | --- | --- | --- |
+| **(A) Exclude BE forms from transitive predicate slots** | **Yes.** BE is a closed paradigm (`am is are was were be been being`); the rule is independent of the noun and adjective vocabulary, so it holds for unseen words | **No.** BE never takes a direct object in English; `has`, `does`, `draws` are untouched | **Recommended** |
+| (B) Exclude any word with an `auxiliary` row | Yes | **Yes.** It kills "The artist has a picture." and "The robot does work." | Reject |
+| (C) Require a lexical-valency witness (transitive tag) | Poorly | **Yes [V fixture / H LTM].** The existing positive fixture for "draws" carries only form-of morphology tags (`signatures_test.exs:861-880`); Wiktionary form-of rows generally lack transitivity, and the lemma row is not in `active_cells` | Defer: needs lemma resolution and a coverage study |
+| (D) Reject the object slot when the object is also attested as an adjective | No principled basis; it would block legitimate noun objects with adjective homographs | Yes | Reject |
+
+**Residual risk of (A), stated plainly [H]:** linking verbs ("seems", "becomes", "remains", "looks", "tastes") plus an adjective with a noun row ("The plan seems ready.", "The soup tastes good.") will still produce false SVO candidates. That set is semi-open and needs (C)-class lexical evidence later. Until then, add those shapes to the census seed controls and the manual audit, and do not claim they are fixed.
+
+### 10.5 Proposed P-024 (needs `Approve: P-024`)
+
+**Change (one file):** in `apps/core/lib/core/syntax/signatures.ex`:
+- add a closed `@be_forms ~w(am is are was were be been being)`;
+- reject a segment when `predicate.word` is in it, in exactly these detectors:
+  - `finite_present_svo/1`
+  - `finite_past_svo/1`
+  - `finite_past_pronoun_svo/1`
+  - `counted_present_svo/1`
+
+`bounded_past_transitives/1` is already restricted to a fixed regular-past list (`:860`). No change to detector order, signature shape, other detectors (progressive, copular relative, WH, modal, chart), Brain, PredicateEvidence, GrammarEvidence or SentenceMeaning. Removing the signature removes every downstream effect at its source.
+
+**FileScope:**
+- `apps/core/lib/core/syntax/signatures.ex` (the four predicate conditions + one attribute)
+- NEW `apps/core/test/core/syntax/svo_be_predicate_exclusion_test.exs`
+
+**No existing test file is edited.**
+
+**New tests** (real `Signatures.detect/1` output, not hand-built signatures):
+- **Negatives.** Use fixtures attesting BE verb rows with the exact morphology, plus noun rows for "ready"/"small":
+  - "The report is ready.", "The fly is small.", "The report is a draft.", "The report was the problem.", "It was the problem.", "The reports were the problem."
+  - Each must emit no SVO-family id.
+  - `PredicateEvidence.detect/1` proposes no predicate at the BE index.
+  - `Brain.LIFG.RoleCompetition.resolve/1` gives it no predicate support.
+  - `GrammarEvidence.apply_finite_present/3` leaves a "is|verb" score unchanged.
+  - `Brain.LIFG.StructuralCompetition.resolve/1` is never `:preferred` on an SVO id.
+- **Positives (must be unchanged).** Real dual-POS transitive verbs: "The artist draws a picture.", "The artist has a picture." (has with finite-present verb morphology), "The robot does work.", "He bought some bread.", "The artist drew the picture."
+- **Non-SVO BE constructions keep their ids.** "The bird is dancing on the fence." (progressive locative), "Links were lines that refute the claim." (copular relative), "What would you do if you were free?" (modal conditional).
+
+**Acceptance criteria (all required):**
+1. The new test file is green.
+2. Every existing test is green with **no expectation, fixture or gold change**, in particular:
+   - `signatures_test.exs`, `finite_present_wh_roles_test.exs`, `predicate_evidence_test.exs`;
+   - `apps/brain/test/brain/lifg/{role_competition,grammar_evidence,stage1_finite_present}_test.exs`;
+   - `svo_event_test.exs`, `provisional_past_pronoun_test.exs`, `sentence_meaning_participants_test.exs`, `symbolic_generation_test.exs`, `structural_statement_test.exs`, `relational_evidence_test.exs`;
+   - the Colony `declarative_*` tests and the chart tests.
+
+   A red test is diagnosed, not re-baselined.
+3. Full Core suite (2029 + new) and the umbrella suite, both exit 0.
+4. A **new, separately labelled** census seed run, with the P-022.1 receipts unchanged. Expected: the 4 `attested_role_conflict` rows become `no_full_span_signature:all_tokens_witnessed`, and **no other row changes class**. Any other change is reported and explained before merge is considered final.
+5. D-1 rerun: no SVO id for the BE sentences; positives identical.
+
+**Rollback:** revert the single code commit; no data, config or migration is involved.
+
+**Risks:**
+- (i) Any downstream behaviour that currently depends on a BE-SVO, including a provisional "You're saying that it was the problem." reply, disappears. That is intended, but it is a visible change.
+- (ii) Census and representative numbers shift, so baseline and after must both be reported.
+- (iii) The linking-verb residual (§10.4).
+- (iv) **[U]** Some LIFG winners for BE tokens may change once the boost source is gone. D-1 before/after shows it.
+
+### 10.6 D-1 diagnostic (read-only; before any P-024 implementation)
+
+Bradley runs the command in Claude's chat reply. For "The report is a draft.", "The report was the problem.", "It was the problem.", "The reports were the problem.", "The artist draws a picture." and "He bought some bread.", it prints:
+- the SVO-family signature ids and spans;
+- the predicate index;
+- the structural status and preferred construction;
+- the LIFG chosen id at the predicate;
+- the role-competition entry at the predicate;
+- the `sentence_meaning` kind, status and source_frame.
+
+**How D-1 decides P-024's scope:**
+- **Confirms the full scope** if any BE sentence shows an SVO-family signature, especially a `:preferred` one or an "is/was|verb" LIFG winner.
+- **Narrows P-024 to `finite_present_svo/1`** if no past-family BE signature appears (for example, because LTM lacks simple-past morphology on "was"). The change then stays as small as the evidence supports.
+- Optionally, Bradley types "It was the problem." in live chat and reports the reply (consequence 2).
+
+### 10.7 Task 4 — census integrity
+
+- **Manual audit, not P-022.2.** Agreed with §9.4, with one addition from §10.3 point 3: the audit sample is **all conflict opportunities plus a random 20% (minimum 10) of rows classed `:provisional` or `:interpreted_correctness_unassessed`**, drawn by `case_id` hash. This must be frozen before the representative run.
+- Raw counts, the predeclared screen and the adjudicated counts are reported side by side. No historical receipt is rewritten.
+
+### 10.8 Task 5 — development order (amended)
+
+0. **Collect and freeze corpus v2 now**, under §8.4: ≥ 30 chat rows and ≥ 30 public-social rows. Run the **baseline** census and the audit protocol *before* P-024. Otherwise P-024's effect on representative comprehension cannot be measured; that is the one change I make to GPT-6's sequence.
+1. D-1, then P-024 (if approved), then rerun the same frozen v2 corpus. Report the delta per row.
+2. P-021b proof and consumer obligations.
+3. Design the chat copular path. It must produce the correct construction for exactly the sentences P-024 stops mis-parsing, measured on the same v2 rows.
+4. Remeasure representative comprehension.
+5. Reconsider Soar-style resolution only if independently adjudicated, genuine repair opportunities remain.
+
+**Objective check:** P-024 will *reduce* accepted interpretations, and that is the point. Its success measure is fewer wrong `:preferred` or `:provisional` readings at zero cost to valid SVO, not more accepted sentences.
+
+**Needed from Bradley:**
+- the D-1 receipt;
+- then `Approve: P-024`, or a narrowed version, or a rejection;
+- the corpus v2 rows.
+
+**Next from GPT-6:** independent review of §10.3 points 1 and 3, the claims that most change the risk picture.
