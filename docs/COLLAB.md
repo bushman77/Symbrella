@@ -1844,3 +1844,18 @@ Requires `Approve: P-028`.
 
 **Status: UNTESTED.** Gate (same as §20/§21): suite with the switch on in `config/test.exs` fully green; then, with the switch on in dev, the P-030 census, the context-fit one-liner and the neighbour-term audit.
 - **[V-receipt, Bradley, laptop, 08:29]** HEAD `7a3177a`, switch on in `config/test.exs`: Brain **729 passed, 3 skipped**; Core **2042 passed**; **exit=0**; restored ("Updated 1 path"). P-030 census, v1, switch on in dev: weak 77/118, degraded 22/24, proxy 22/24, uncertain 57, understood 1 (identical to off). Context-fit count and neighbour audit not yet run for P-031b.
+- **[V-receipt, Bradley, laptop, 08:30]** P-031b neighbour audit (switch on; count line truncated by `tail`): label/meta terms gone and per-term counts fell to 1–2, but winners are frequently obscure senses lifted by one generic term (`check|verb|21` ← case, `cold|adjective|16` ← said, `sister|noun|12` ← close, `window|noun|7` ← containing, `like|verb|9` ← accept/system, `small|adjective|6` ← true); stemming artefact `previou`. **CLAUDE assessment:** stop lists cannot separate distinctive from semi-generic gloss words; the principled fix is corpus-rarity (IDF) weighting over `brain_cells` definitions (future P-032). **Decision (Bradley, 08:32): park context work; switch stays off; pursue P-029 and phrase handling first.**
+
+## 23. P-029 proposal — wh-word + auxiliary → pronoun (NOT authorized) · 2026-11-20 08:40 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Evidence [V-receipt §18 follow-up, Bradley 2026-11-19 22:07]:** for "hey symbrella what are you up to?", `what|pronoun|1` POS mass 0.463 vs determiner 0.336, particle 0.201; per-sense probabilities ≈0.10–0.12 across all three POS. `PosBias` has `@question_prefixes` but no rule using the token *after* a wh-word; `are` is in `@linking_verb_forms`, not `@predicate_auxiliaries`.
+
+**Proposal [H]:** new `wh_pronoun_bias/3` in `Brain.LIFG.Stage1.PosBias.window/3`: when the target token is one of `what which who whom whose` and the **next** token is in `@predicate_auxiliaries ∪ {am is are was were has have had}` (also contracted forms `what's`/`who's` are out of scope), add **+0.34** to `:pronoun` candidates and **−0.34** to `:determiner` and `:particle` candidates; otherwise 0.0. Magnitude matches the module's existing local rules (`fine_day_pos_bias`, `predicate_adjective_bias`). Simulation on the receipt above: pronoun mass 0.463 → **≈0.63** (pronoun-only +0.34 gives ≈0.55, below P-028's 0.6 floor).
+
+**Non-goals:** no determiner *reward* when the next token is a noun ("what time…", "which book…") — next-token POS is not yet resolved left-to-right, so that direction is left neutral.
+
+**Tests (new file):** "what are you" → pronoun chosen, pronoun mass ≥ 0.6; "who is" → pronoun; "what time is it" → `what` scores identical to no-rule baseline; bare "what" unchanged; "which can" → pronoun bias applied. **Gate:** full Brain + Core suites green; P-030 census before/after on v1; live probe on "hey symbrella what are you up to?" expecting `what` not uncertain.
+
+**Draft FileScope:** `apps/brain/lib/brain/lifg/stage1/pos_bias.ex`, NEW `apps/brain/test/brain/lifg/stage1/pos_bias_wh_pronoun_test.exs`, this log. Requires `Approve: P-029`.
+
+**Next (separate, read-only investigation first):** "up to" as a phrase. Wiktionary has the idiom *be up to* ("to be doing; to be scheming"); how MWE candidates reach Stage1 for "up to" will be traced before any proposal (P-033).
