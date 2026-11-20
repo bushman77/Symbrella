@@ -713,7 +713,7 @@ defmodule Brain.LIFG.Stage1 do
 
             context_report =
               if SenseFocus.evaluate_context?(focus, c) do
-                case neighbor_context_for(ctx, tok_index, token_phrase) do
+                case neighbor_context_for(ctx, tok_index, token_phrase, c, pos) do
                   [] -> ContextFit.explain(ctx.sent, token_phrase, c)
                   nb -> ContextFit.explain(ctx.sent, token_phrase, c, neighbor_context: nb)
                 end
@@ -2127,6 +2127,18 @@ defmodule Brain.LIFG.Stage1 do
     else
       []
     end
+  end
+
+  # P-031b: function-word / closed-class *targets* receive no neighbour
+  # context; their comprehension is grammatical, not topical.
+  defp neighbor_context_for(ctx, tok_index, token_phrase, cand, pos) do
+    function_target? =
+      String.downcase(to_string(pos || "")) in @neighbor_function_pos or
+        ClosedClass.closed_class_candidate?(cand)
+
+    if function_target?,
+      do: [],
+      else: neighbor_context_for(ctx, tok_index, token_phrase)
   end
 
   defp neighbor_context_for(ctx, tok_index, token_phrase) do

@@ -65,6 +65,47 @@ defmodule Brain.LIFG.NeighborGlossContextTest do
     end
   end
 
+  describe "P-031b filters" do
+    test "gloss meta-vocabulary and generic gloss words never count as neighbour evidence" do
+      cand = %{id: "pond|noun|1", lemma: "pond", pos: "noun",
+               definition: "(countable, uncountable) A common, simple body of still water, used especially by a person."}
+
+      nb =
+        ContextFit.explain("They walked to the pond.", "pond", cand,
+          neighbor_context: ["(uncountable, colloquial) Something common, simple and used especially by a person; water."])
+
+      assert nb.neighbor_gloss_matches.definition == ["water"]
+    end
+
+    test "function-word targets receive no neighbour context in Stage1" do
+      sentence = "the river"
+      si = %{
+        sentence: sentence,
+        tokens: [
+          %{index: 0, phrase: "the", n: 1, mw: false, span: {0, 3}},
+          %{index: 1, phrase: "river", n: 1, mw: false, span: {4, 9}}
+        ],
+        sense_candidates: %{
+          0 => [%{id: "the|determiner|1", lemma: "the", pos: "determiner",
+                  definition: "Used before a noun for a stream of water already known.",
+                  activation: 0.5}],
+          1 => [@river]
+        }
+      }
+
+      {:ok, %{choices: choices}} =
+        Stage1.run(si, scores: :all, preserve_sense_candidates: true,
+          cerebellum_learn?: false, neighbor_gloss_context?: true)
+
+      the = Enum.find(choices, &(&1.token_index == 0))
+
+      if the do
+        refute Enum.any?(List.wrap(Map.get(the, :definition_context_evidence)),
+                 &Map.has_key?(&1, :neighbor_gloss_matches))
+      end
+    end
+  end
+
   describe "Stage1 integration" do
     defp river_si do
       sentence = "I sat on the bank near the river."

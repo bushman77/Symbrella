@@ -211,6 +211,37 @@ defmodule Brain.LIFG.ContextFit do
 
   @max_neighbor_terms 40
 
+  # P-031b: Wiktionary label/meta vocabulary and generic gloss scaffolding.
+  # Audit (COLLAB §21.1) showed these dominated neighbour matches without
+  # carrying sense-discriminating meaning. Applied to neighbour terms only;
+  # literal sentence evidence is unchanged.
+  @gloss_stopwords MapSet.new(~w(
+    countable uncountable comparable uncomparable singular plural
+    transitive intransitive ambitransitive ergative reflexive
+    colloquial informal formal slang dated archaic obsolete rare
+    nonstandard dialectal dialect regional figurative figuratively
+    literally literal idiomatic idiom humorous derogatory pejorative
+    vulgar offensive euphemistic poetic literary technical
+    alt alternative form forms spelling variant abbreviation
+    initialism acronym clipping contraction diminutive
+    surname surnames given name names
+    english british american australian canadian
+    etc especially usually often sometimes generally typically
+    chiefly mainly mostly also used use using common commonly
+    something someone somebody anything anyone thing things
+    person people one ones another other others
+    very most more less same certain simple such kind type sort
+    phrase word words sense senses meaning term terms expression
+    noun nouns verb verbs adjective adjectives adverb adverbs
+    pronoun preposition conjunction determiner article particle
+    interjection prefix suffix
+    act action state quality condition manner way
+    being having making getting doing
+    see compare synonym synonyms antonym antonyms
+    obsolete regarded referring refers relating related
+    first second third
+  ))
+
   defp apply_neighbor_context(component_scores, unique_matches, evidence, context, target, weights, values) do
     neighbor_terms = neighbor_terms(values, context, target)
 
@@ -253,6 +284,8 @@ defmodule Brain.LIFG.ContextFit do
     |> Enum.filter(&is_binary/1)
     |> Enum.flat_map(&raw_tokens/1)
     |> reject_stopwords()
+    |> Enum.reject(&MapSet.member?(@gloss_stopwords, &1))
+    |> Enum.reject(&(String.length(&1) < 3))
     |> Enum.reject(&(MapSet.member?(excluded, &1) or MapSet.member?(context, &1)))
     |> Enum.uniq()
     |> Enum.take(@max_neighbor_terms)
