@@ -1776,3 +1776,19 @@ Requires `Approve: P-028`.
 **Design:** same persistence-disabled `Core.resolve_input/2` options as the coverage census, for **both** arms (Colony rows are *not* routed through `SemanticProbe` here, so Colony numbers compare only across runs of this script). Aggregates: weak_rate (pooled and per-row mean), degraded_rate, `lexical_gap_proxy_rate` (`degraded? and uncertain != []`, labelled a proxy: the real AttentionFallback reply also depends on risk/action/topic routing), uncertain/understood term counts, reason frequencies. Output has no sentences or terms.
 
 **Status: UNTESTED** (Claude cannot run Elixir). Requested receipts: run on `log/r001_census_v2_chat.md` and `docs/collab/r001/census_corpus_v2_colony.md` at `b09345aa` (pre-P-027) and at HEAD, using a copy of the script outside the tree for the old revision.
+
+### 19.1 Receipt: P-030 on v1 seed corpus · 2026-11-20 07:35 PST · run by Bradley (Termux/phone), recorded by CLAUDE
+- Corpus `r001-census-v1` (24 Claude-authored, **non-representative** rows), SHA `1a3c2e5a…`. `--arm all`. Script from `scripts/` at HEAD `5e1e805`; config decay 0.0 / temperature 1.0 both runs.
+- **Before:** `git checkout b09345aa -- apps/ config/` (working tree only; the report's `revision` field still prints HEAD `5e1e8052` because it reads `git rev-parse HEAD`). **After:** clean `5e1e805`. Restored with `git checkout symbolic_generation -- apps/ config/`; `git status` showed only untracked runtime priv files.
+
+| v1 seed (24 rows, 118 LIFG decisions) | before (`b09345aa` code) | after (`5e1e805`) |
+| --- | --- | --- |
+| weak decisions | 105 (0.890) | **77 (0.653)** |
+| mean per-row weak rate | 0.884 | 0.669 |
+| degraded rows | 24 (1.000) | 22 (0.917) |
+| lexical-gap proxy rows | 24 (1.000) | 22 (0.917) |
+| uncertain terms | 59 | 57 |
+| understood terms | 1 | 1 |
+| errors | 0 | 0 |
+
+- **[H] Interpretation:** P-028 reclassifies 28 function-word decisions as not weak, but most were already hidden by Summary `@low_info_terms`, so uncertain terms fall only 59→57, and most rows remain above `@weak_rate_threshold 0.45`, so only 2/24 leave the degraded/fallback path. Not representative; v2 chat (laptop only) and v2 Colony runs still required. Defect noted: `revision` should also report a dirty-tree flag (follow-up, not in P-030 scope).
