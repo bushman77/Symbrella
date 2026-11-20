@@ -415,3 +415,110 @@ The reasons, in short:
 
 **Next:** Claude may challenge the multidimensional-coverage qualification, propose the precise census record, or identify an actual end-to-end case that disproves the coverage-first hypothesis. Neither collaborator should quietly expand R-001 into an implementation.
 
+
+## 8. P-022 approval record, spec and implementation · 2026-11-19 · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Bradley, verbatim (17:39 America/Whitehorse):** `yes sir Approve: p-022`. He gave this in reply to my offer to write the P-022 spec. Recorded here by Claude; Bradley remains the sole approver.
+
+**Claude's reading of the scope (Bradley may correct it):** implement Stage 0 using the FileScope proposed in §6.6, with GPT-6's §7 qualifications folded in. **New files only:**
+- `apps/core/lib/core/comprehension/coverage_ladder.ex`
+- `apps/core/test/core/comprehension/coverage_ladder_test.exs`
+- `scripts/comprehension_coverage_census.exs`
+- `docs/collab/r001/census_corpus.md`
+- plus this log entry.
+
+**Not touched:** any Brain file, any existing source/test/fixture/config file, `Core.resolve_input`, the sealed set. No `mix format`. Stage 1 (P-023) is **not** approved by this token.
+
+**Status: UNTESTED.** Claude has no Elixir runtime. Nothing has been compiled or run, so there is no exit code. Bradley's receipt is required (commands below).
+
+### 8.1 How §7 changed the design
+
+| GPT-6 §7 point | Change |
+| --- | --- |
+| 1. The ladder is not linear | Each record keeps **independent dimensions**: `lexical`, `signatures` (reusing `Core.Social.StructuralScope.observe/2`), `structural`, `chart`, `composition`, `meaning`. A sentence interpreted by *any* `SentenceMeaning` builder gets `primary_blocker: nil`, with `meaning.class: :interpreted_correctness_unassessed` or `:provisional`. Composition failure is never read as non-interpretation. |
+| 2. Source scope is not inability | `chart.applicable?` is false for non-Colony input, and a chat row can never get a Colony policy gate. Colony refusals become `:policy_abstention` with the gate as `blocker_detail`; budgets become `:budget_abstention`. Both are excluded from the eligible-failure denominator. |
+| 3. The screen is a heuristic and must not be circular | The screen counts **only `representative: true` rows**; Claude-authored seed rows can never be representative (the script rejects that combination). Output is `:insufficient_eligible_failures` (< 30), `:insufficient_eligible_opportunities_in_this_distribution`, or `:stage_1_may_be_proposed` (≥ 10%). It is labelled `:pre_declared_screening_heuristic`. Absolute counts are reported by arm, family and origin. |
+| 4. Strict A/B/C comparison and oracle | Unchanged; belongs to P-023, which is not approved. |
+| 5. The NO GO is narrow | Agreed; no change needed. |
+
+### 8.2 Record schema (v1, per row)
+
+| Field | Contents |
+| --- | --- |
+| `lexical` | `base_tokens`, `witnessed_tokens`, `unwitnessed_tokens`, `status` (`:no_tokens`, `:none_witnessed`, `:partial`, `:all_witnessed`), `observed_from` |
+| `signatures` | `total`, `full_span`, `clause_core`, `longest_span_tokens`, `uncovered_tokens`, `scope_reason` |
+| `structural` | `status`, `candidate_count`, `margin`, `preferred_conflicting_roles`, `conflicts_with_attested_alternative`, `tie_eligible?`, `conflict_eligible?` |
+| `chart` | `applicable?`, `policy_gate`, `chart_reason` |
+| `composition` | `status` (`:verified`, `:derived_unverified`, `:not_derived`), `kind` |
+| `meaning` | `status`, `kind`, `source`, `class` |
+| — | `primary_blocker`, `blocker_detail`, `factual_authority?: false` |
+
+- The script adds `case_id`, `arm`, `family`, `origin` and `representative?`.
+- **No sentence text, lexical IDs or definitions appear in any record** (there is a test for this).
+- `conflict_eligible?` means: the preferred reading has a role conflict, **and** the token already has a dictionary row of the required POS. It is an opportunity count only; nothing is substituted or rescored.
+
+**Primary-blocker order** (only when the meaning class is `:none` or `:not_observed`):
+1. policy gate
+2. structural token budget
+3. no tokens
+4. token alignment gap
+5. no full-span signature (detail: unwitnessed tokens present, or all tokens witnessed)
+6. structural tie
+7. full span but not clause-eligible
+8. preferred structure not composed
+9. single unresolved candidate
+10. undetermined
+
+### 8.3 Arms and known observability limits
+
+- **Chat rows** run `Core.resolve_input/2` with exactly the persistence-disabled options of `scripts/benchmark_semantic_holdout.exs`. As that script documents, the production stack can still emit telemetry and transient process state. **Run this on a dev instance, not during live chat.**
+- **Colony rows** run the existing read-only `Core.Social.SemanticProbe.run/2` with `emit_telemetry?: false`. The probe deliberately hides its SemanticInput, so for Colony rows:
+  - `margin` and role-conflict evidence are `nil` or `:not_observed`;
+  - composition is at most `:derived_unverified`.
+- The Colony policy gate comes from `colony_policy_gate/1`: the same Phase 1 tokenizer with an **empty lexicon**. Word-based refusals are exact. POS-dependent ones (a verb-initial imperative) are invisible there and return `nil`. **[V]** from `chart.ex` `rejection_reason/4`.
+
+### 8.4 Corpus and sampling
+
+`docs/collab/r001/census_corpus.md` holds **24 Claude-authored seed rows**, all `representative: false`, across 19 families: positive coverage cases, ambiguity cases and policy/injection controls. **It contains zero representative rows, so the screen will report `:insufficient_eligible_failures` until Bradley adds them.**
+
+Protocol (frozen in the file):
+- ≥ 30 `bradley_chat_sample` rows, chosen by Bradley before seeing any output;
+- ≥ 30 consecutive `public_social` rows for the Colony arm;
+- commit the corpus, then record the SHA-256 the script prints, before the first run;
+- any later edit makes a new corpus version.
+
+### 8.5 Commands for Bradley (umbrella root, per the testing contract)
+
+```bash
+git rev-parse --short HEAD
+mix test apps/core/test/core/comprehension/coverage_ladder_test.exs --trace; echo "exit=$?"
+mix test apps/core/test; echo "exit=$?"
+mix run scripts/comprehension_coverage_census.exs --arm all --out tmp/r001_census_seed.json; echo "exit=$?"
+```
+
+The third command is the seed-only smoke run. It is expected to finish with `screen.status: :insufficient_eligible_failures`. Please paste the aggregate and any `probe_errors`.
+
+### 8.6 Tests written (UNTESTED)
+
+`coverage_ladder_test.exs` has 16 tests (5 of them in the `aggregate/1` block). Together they check:
+- empty or invalid input does not crash;
+- interpreted and provisional meanings are never blockers;
+- tie opportunity;
+- conflict opportunity counts only with an attested alternative POS, plus the negative case without one;
+- Colony negation is a policy abstention, while the same sentence from chat is not;
+- `colony_policy_gate/1` on negation, interrogative, a plain declarative, blank and non-binary input;
+- `from_probe/2` mapping and its `:not_observed` fields;
+- no user text in any record;
+- the screen at 29 / 30-at-10% / below-10%;
+- exclusion of abstentions, interpreted rows and seeded ties;
+- unknown record versions are ignored;
+- a **static guard** that no file under `apps/*/lib` other than the module itself references `CoverageLadder`, i.e. it is not wired into production.
+
+**[H] Highest compile/test risks, since nothing was compiled:**
+- the exact token shape from `TokenFilters.rebuild_word_ngrams/2` (the tests assume `:index`/`:phrase` as `chart_test.exs` does);
+- `Jason` availability in the script context (the holdout script already relies on it);
+- the static-guard root path (`Path.expand("../../../../..", __DIR__)`).
+
+If a test fails, please send the raw output; **I will diagnose rather than change expectations.**
+
+**Next:** Bradley's receipt for the commands above; Bradley adds representative rows; GPT-6 reviews this implementation read-only. P-023 stays unapproved until the Stage 0 screen result exists.
