@@ -1792,3 +1792,22 @@ Requires `Approve: P-028`.
 | errors | 0 | 0 |
 
 - **[H] Interpretation:** P-028 reclassifies 28 function-word decisions as not weak, but most were already hidden by Summary `@low_info_terms`, so uncertain terms fall only 59→57, and most rows remain above `@weak_rate_threshold 0.45`, so only 2/24 leave the degraded/fallback path. Not representative; v2 chat (laptop only) and v2 Colony runs still required. Defect noted: `revision` should also report a dirty-tree flag (follow-up, not in P-030 scope).
+
+## 20. P-031 proposal — neighbour-gloss context for ContextFit (NOT authorized) · 2026-11-20 07:55 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Evidence:**
+- **[V-receipt, Bradley, phone, v1 seed corpus, HEAD `c79641d`]** Over 129 LIFG choices: `all_zero` (every evaluated sense had `effective_context_fit == 0.0`) **106 (82%)**; winner context fit 0.0 **99 (77%)**; `no_evidence` 0. ContextFit carries the largest Stage1 weight (0.40).
+- **[V-receipt, Bradley]** `brain_cells`: 1,696,102 rows, **0** with `embedding`; an embedding route is therefore a separate data project.
+- **[V-code]** `Brain.LIFG.ContextFit.explain/4` is literal sentence-token overlap (after `@stopwords`, target excluded) with the sense's definition/example/synonyms/atoms/gram_function. Short chat turns rarely share tokens with glosses. Stage1 already holds every token's candidate bucket (`ctx.buckets`); `explain/4` already accepts bounded `:extra_context` (used by RelationalFeedback).
+
+**Proposal [H] (extended-Lesk style, deterministic, gated):**
+1. In Stage1, when `:lifg_neighbor_gloss_context?` is true, build per target token an `extra_context` from the **definitions of the first k=2 Wiktionary senses (by sense number) of each other content token** in the sentence (excluding closed-class/function candidates, the target token, fallback/phrase-fallback ids), bounded to ≤ 40 content terms.
+2. In ContextFit, neighbour-gloss matches contribute at **0.5×** the strength of literal sentence matches (same convention as related-morphology matches), so literal evidence always dominates.
+3. Diagnostics: report which context terms came from neighbour glosses (`:neighbor_gloss_matches`).
+4. Config default **off** in code and all envs; enabled only for measurement.
+
+**Acceptance gates (lesson of §16.5):** with the switch **on in `config/test.exs`**, `mix test apps/brain/test/ apps/core/test/` must be fully green, including the 8 tests that failed under P-027 (distinct senses stay uncertain without evidence; `bank|noun|10` river sense wins with river context; reanalysis `alt_ids` survive). Then P-030 census and the context-fit one-liner before/after on v1 (and v2 on the laptop). Target: `all_zero` materially below 82% **without** weak_rate rising.
+
+**Expected limits [H]:** helps content-word sentences ("bank … river"); will **not** fix greetings/wh-questions ("hey symbrella what are you up to?"), whose neighbours are mostly function words — those need P-029 and MWE/construction handling.
+
+**Draft FileScope:** `apps/brain/lib/brain/lifg/stage1.ex`, `apps/brain/lib/brain/lifg/context_fit.ex`, NEW `apps/brain/test/brain/lifg/neighbor_gloss_context_test.exs`, this log. Requires `Approve: P-031`.
