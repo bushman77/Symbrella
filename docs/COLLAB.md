@@ -973,3 +973,35 @@ Then rerun the D-1 command (§10.6).
 **Rollback:** `git revert f2cefb9`.
 
 **Note on order:** §10.8 recommended a representative v2 baseline *before* P-024. That baseline can still be produced afterwards by running the frozen v2 corpus with `git checkout 06f4460` (the pre-P-024 code), then rerunning at the P-024 commit.
+
+### 10.11 Receipt: P-024 targeted tests and D-1 rerun · 2026-11-19 18:56–18:58 PST · recorded by CLAUDE
+
+**RUN BY BRADLEY** (Termux on his phone, after `git pull`; Bradley confirmed the pull landed at the P-024 head, `dec5f57`). Claude did not execute anything.
+
+**1. Targeted test file.**
+- Command: `mix test apps/core/test/core/syntax/svo_be_predicate_exclusion_test.exs --trace`
+- Result: **7 tests, 0 failures**, exit 0. All 7 test names are listed, including the counterfactual twins.
+
+**2. D-1 rerun** (the §10.6 command):
+
+| Sentence | SVO signatures | Structural | Predicate role | Meaning |
+| --- | --- | --- | --- | --- |
+| The report is a draft. | `[]` | `:no_complete_candidate` | none | `:not_yet_interpreted` / `:unknown` |
+| The report was the problem. | `[]` | `:no_complete_candidate` | none | `:not_yet_interpreted` / `:unknown` |
+| It was the problem. | `[]` | `:no_complete_candidate` | none | `:not_yet_interpreted` / `:unknown` |
+| The reports were the problem. | `[]` | `:no_complete_candidate` | none | `:not_yet_interpreted` / `:unknown` |
+| The artist draws a picture. | finite_present_svo `{0,4}`, `{0,3}` | `:preferred` | `:supported` verb | `:structurally_interpreted` participant_assertion |
+| He bought some bread. | finite_past_svo `{0,3}` | `:preferred` | `:supported` verb | `:provisional` structural_hypothesis |
+
+**[V-receipt]:**
+- All four BE sentences lost the false SVO signature, the `:preferred` structure, the pre-LIFG verb-predicate role and the SVO-sourced provisional meaning.
+- Both controls are **field-for-field identical** to §10.9.
+- The BE sentences now abstain honestly. They will be interpreted only when chat gains a real copular construction (§10.8, step 3).
+
+**Still required before P-024 is fully VERIFIED:**
+- the related suites (`syntax`, `semantic`, `response`, `social`, `brain/lifg`);
+- the full Core suite (expected 2036);
+- the umbrella `mix test`;
+- the labelled census seed rerun.
+
+Bradley will run these on a desktop. **P-024 status: targeted tests and D-1 VERIFIED BY BRADLEY; regression suites pending.**
