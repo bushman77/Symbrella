@@ -542,3 +542,38 @@ If a test fails, please send the raw output; **I will diagnose rather than chang
 - the census script (`scripts/comprehension_coverage_census.exs`) has **not** been run, so the resolver and probe integration is unexercised.
 
 P-022 status: **Core suite VERIFIED BY BRADLEY**; script UNTESTED.
+
+### 8.8 Receipt: P-022 census seed run, and a census design defect · 2026-11-19 17:54 MST · recorded by CLAUDE
+
+**RUN BY BRADLEY** (local shell); output pasted to Claude.
+
+| Item | Result |
+| --- | --- |
+| SHA | `78b523aa` |
+| Command | `mix run scripts/comprehension_coverage_census.exs --arm all --out tmp/r001_census_seed.json` |
+| Exit | `0` |
+| Corpus | `r001-census-v1`, SHA-256 `1a3c2e5a2bf0e2eb37f77a8e6b917e8a085cda6a9640f40631cc546c06cde7b2` |
+| Rows | 24 (all seed, `representative: false`) |
+| `probe_errors` | none |
+| Screen | `:insufficient_eligible_failures`, as expected with 0 representative rows |
+| Warning | one compiler type warning at `comprehension_coverage_census.exs:108`: `is_atom(reason)` is always true |
+
+**Seed observations** (Claude-authored rows, **not representative, decides nothing**):
+- **[V]** 20 failed; 5 were policy abstentions (Colony interrogative, modal, negation, structured record, multiple clauses on the injection row), leaving 15 eligible failures.
+  - 10 of the 15: `no_full_span_signature:all_tokens_witnessed`.
+  - 5 of the 15: `structural_unresolved_single_candidate` (chat noun/verb ×2, noun/adjective, nonce, copular).
+- **[V]** 0 tie and 0 conflict opportunities.
+- **[V]** In chat, "The report is ready." fails with an unresolved single candidate, while the Colony copular row and the copular-passive-PP row are `:provisional`. This is consistent with the chart being Colony-only.
+- **[U]** Both `pp_attachment` rows reached no full-span signature in either arm, and the nonce row reached a full-span candidate. Lexicon and detector causes are not inspected.
+
+**Defect in the census definition (Claude's own) [V code / H effect]:**
+- `conflict_eligible?` requires structural status `:preferred`. But a single complete candidate whose lexical winners contradict its roles fails `adjudicate/1`'s `matched_roles >= conflicting_roles` guard. It therefore surfaces as `:unresolved`, which the census then cannot count.
+- For `:unresolved` results the record keeps no candidate-level conflict data (`preferred` is nil), so even the per-row JSON cannot test this.
+- **Effect:** the representative census would systematically undercount the conflict class that Stage 1's operators target, biasing the screen toward stopping.
+
+**Proposed P-022.1** (needs `Approve: P-022.1`). FileScope: `coverage_ladder.ex`, `coverage_ladder_test.exs`, `comprehension_coverage_census.exs`; nothing else.
+- (a) For every structural candidate, record `conflicting_roles` and whether any conflicting role's required POS is attested in `active_cells`. Count an `:unresolved` result whose best candidate has such an attested conflict as a conflict opportunity.
+- (b) Remove the always-true `is_atom/1` branch.
+- (c) Add tests for (a), including an `:unresolved` single-candidate conflict and its unattested negative.
+
+This changes a definition **after** a seed run but **before** any representative row exists; the screen counts representative rows only. The corpus and definitions are frozen once P-022.1 lands.
