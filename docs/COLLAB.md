@@ -642,3 +642,34 @@ Pre-existing compile warnings in `chart.ex` (ungrouped `combine/3` clauses at `:
 2. Bradley adds ≥ 30 `bradley_chat_sample` rows and ≥ 30 `public_social` rows under §8.4. This creates corpus v2: commit it, then record its SHA-256 before the run.
 3. Representative census run.
 4. GPT-6 read-only review of P-022 / P-022.1 at any time.
+
+### 8.11 Conflict diagnostic: the seed conflicts are a spurious SVO parse, not ambiguity · 2026-11-19 18:02 MST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**RUN BY BRADLEY** (local shell, `fa57bc82`; read-only `mix run -e` with the census resolver options). The command printed `role`, `token_index`, `expected_pos` and `selected_pos` of `:conflict` evidence for the four seed conflict rows.
+
+**[V] Result:** identical for all four sentences ("The report is ready.", "The blicket is ready.", "The present is ready.", "The fly is small."):
+
+| Role | Token | Expected POS | Selected POS |
+| --- | --- | --- | --- |
+| `:predicate` | 2 ("is") | `["verb"]` | `"auxiliary"` |
+| `:object_head` | 3 (the adjective) | `["noun"]` | `"adjective"` |
+
+**Correction of my §8.10 hypothesis.** The cause is **not** an article/determiner label mismatch. It *is* systematic, and unrelated to the ambiguous word.
+
+**[V/H] Interpretation:**
+- **[V]** In chat, the only full-span candidate for "D N *is* ADJ" is a finite-present SVO-shaped signature (roles `predicate`, `object_head`). It is admitted because LTM attests a verb row for "is" and noun rows for "ready"/"small".
+- **[H]** The exact detector is not traced; `finite_present_svo` (`signatures.ex` `@finite_present_patterns`) is the likely source.
+- **[V]** LIFG's selections (`auxiliary`, `adjective`) are **correct**, and they correctly prevent a structural preference.
+- **[V]** Chat has no copular-predication construction: the chart is Colony-only (`signatures.ex:112`). The Colony arm gives the same copular shape `:provisional` meanings.
+
+**Consequences:**
+1. **More evidence for coverage-first.** The failure is missing chat grammar plus a wrong-shape detector that over-matches, not missing deliberation.
+2. **Disconfirming observation for the planned Stage 1 operator O2.** Substituting the attested alternative POS (is → verb, ready → noun) would convert a correct rejection into a **wrong confident interpretation**. An attested alternative POS is necessary but **not sufficient** for a genuine repair opportunity.
+3. **The census over-counts conflict opportunities.** `conflict_eligible?` counts this pattern, so the representative screen could be pushed toward `:stage_1_may_be_proposed` by cases where repair is harmful.
+
+**Rule added without unfreezing the definitions (proposed, for Bradley):**
+- Before any P-023 proposal, every representative conflict opportunity must be manually audited (role, expected POS, selected POS).
+- A conflict where the alternative would re-read a copula or auxiliary as the main verb, or an adjectival complement as a noun object, is classified as a **correct rejection**. It is removed from the opportunity count, and the screen is recomputed by hand and reported both ways.
+- An optional **P-022.2** could emit `(role, expected, selected)` conflict patterns in census records automatically, without changing any count. It needs `Approve: P-022.2` and would unfreeze the definitions, so it is only worth doing if Bradley prefers automation to a manual audit.
+
+**[H] Likely highest-value coverage work this points to:** a chat copular-predication path. Extend the P-021a chart, or an equivalent, to chat behind a byte-for-byte differential test, so that only the copular family is newly admitted. This needs its own ticket and FileScope, after the P-021b obligations.
