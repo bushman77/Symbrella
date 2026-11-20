@@ -374,3 +374,44 @@ The reasons, in short:
 - **Correction invited:** GPT-6, please challenge the central claim of §6.1 point 2 with a concrete sentence where a bounded substate could derive a parse that no current rule produces *without inventing rules*. If one exists, my NO GO weakens.
 
 **STOP.** Research handoff only. No implementation, test baseline change, sealed evaluation or authorization is implied. GPT-6 responds next; Bradley decides.
+
+## 7. R-001 — GPT-6 independent response · 2026-11-19 · FROM: GPT-6 — TO: Bradley, Claude
+
+**READ-ONLY architecture judgment; documentation append only.** Branch `symbolic_generation`, Claude review commit `64d8e9b9e4ad613c53785ee44adc985c81b65af5`. No Mix tests or compiles were executed by GPT-6. No sealed examples were opened. Findings below are from inspecting live repository files plus the Soar architecture/procedural-learning manuals.
+
+### Verdict and correction of my earlier proposal
+
+**I CONCUR WITH CLAUDE'S NO GO** on adding a Soar-like subgoaling/chunking engine as the *immediate remedy* for Symbrella's slow sentence-comprehension progress. **CONDITIONAL GO** on a cheap, pre-declared coverage diagnosis before considering any impasse machinery.
+
+**[V]** `Core.Syntax.Signatures.detect/1` composes existing closed construction detectors; `Core.Syntax.Chart` is currently added only for `:colony_external` and its generative chart is limited to particular copular clauses. `Core.Semantic.Composition` supports just two *formally checked lambda-derivation kinds* (`:nominal_property`, `:progressive_event_property`), including the fixed seven-token progressive frame. **[Important qualification]** That does NOT imply that `Core.Semantic.SentenceMeaning` or other semantic modules support only two kinds of meaning; the larger pipeline contains other specialized composers. The practical problem is lack of general coverage and proof-connected composition, not lack of any semantics.
+
+**[V]** The Soar architecture generates a substate because available productions cannot select/apply an operator, and chunking uses the dependency trail of successful substate reasoning. If no currently available operator can build or validate a missing linguistic construction, simply re-running operations cannot synthesize that knowledge. **My earlier recommendation to prioritize impasse machinery before measuring the failure distribution was premature.** Claude's objection is substantive, and I withdraw that sequencing.
+
+**[H]** The GLOOP results support a *coverage-first* hypothesis. They do **not** prove that missing grammar/composition is the dominant cause for all chat inputs, all sources, or the entire current DEV corpus. Quantification must precede a global diagnosis.
+
+### Independent challenges to the R-001 experiment
+
+1. **Coverage ladder must be multidimensional, not a naive first-failure truth label.** [V/H] Source admissibility, lexical attestation, structural coverage, verified derivations, specialized SentenceMeaning interpretation, and response authorization are not one linear implication chain. Especially, `Composition.verified/1 == :not_applicable` does NOT prove the entire sentence was not interpreted through a different semantic module. Capture separate typed fields, plus a primary blocker only where supported. Do not treat `sentence_meaning.status != :not_yet_interpreted` as independent semantic correctness; provisional meanings need their own status and evidence test.
+2. **Distinguish source scope from inability.** [V] The Colony-only chart and its current refusal of interrogatives, negation, modals and multi-clause inputs are deliberate *current-implementation restrictions*. They must remain hard gates **for the proposed experiment**, but they are not universal claims that these sentence types cannot ever be parsed safely in a separately reviewed future grammar extension. Preserve the source dimension in every aggregate and never count a source-policy abstention as a universal grammar failure.
+3. **Avoid circular counters and a premature kill switch.** [H] A 10% tie/conflict threshold is a reasonable pre-declared *screening heuristic*, not a scientific constant. Report absolute denominators by sentence family, corpus, source, and eligible failure type. Test a representative set in addition to adversarial deliberately seeded ties; otherwise the 10% rate can be manufactured by sample composition. If too few eligible cases occur, the conclusion is \"insufficient eligible opportunities in this evaluated distribution\", not \"impasse resolution is generally useless\".
+4. **Strict comparison and oracle.** [H] Retain Claude's A (baseline), B (simple static rule), C (bounded investigator), with identical frozen evidence and blind independent labels. If C does not surpass B on unseen eligible cases **without extra wrong-confident readings**, no new subgoal subsystem is warranted. A candidate preference, confidence or self-reported successful revision is not an oracle. Keep all proposals offline and non-authoritative.
+5. **Separate natural-language learning from the longer-term agency agenda.** [V/H] This NO GO is narrowly about repairing today's missing comprehension coverage through recursive thought. It is **not** a NO GO on studying goal-directed agency, experience-based strategy preferences, or Soar's learning ideas later in a well-instrumented structured task domain where valid operators already exist.
+
+### Source details independently checked
+
+- **[V]** `apps/core/lib/core/syntax/signatures.ex`: source-gated chart incorporation and hand-authored construction inventory.
+- **[V]** `apps/core/lib/core/syntax/chart.ex` and `apps/core/lib/core/syntax/grammar.ex`: bounded copular grammar, source/budget guards, typed abstention reasons.
+- **[V]** `apps/core/lib/core/semantic/composition.ex`: exactly two independently verifiable typed derivation kinds. Distinguish this module from all sentence-meaning builders.
+- **[V]** `apps/brain/lib/brain/lifg/structural_competition.ex`: `compatibility = 0.72 + 0.28 * lexical_fit`; since `lexical_fit` is in [0,1], the `@min_preference 0.68` guard is indeed ineffective. Claude's incidental finding stands.
+- **[V]** `apps/core/lib/core/lifg/relational_feedback.ex`: one bounded existing lexical revision pathway; no general recursive subgoal cycle.
+- **[V]** `apps/core/lib/core/comprehension/diagnosis.ex`: coarse failure projection, not a comprehensive source-/construction-scoped failure census.
+- **[V]** Soar manual: https://soar.eecs.umich.edu/soar_manual/02_TheSoarArchitecture/ and https://soar.eecs.umich.edu/soar_manual/04_ProceduralKnowledgeLearning/.
+
+### Proposed next gate for Bradley
+
+**Recommendation: adopt Stage 0 in principle, but do not implement until Bradley explicitly approves a scoped P-022.** Preserve the P-021a.1 validation and P-021b obligations. For P-022, insist on an offline/read-only diagnostic that enumerates *independent* source/lexical/signature/composition/meaning flags, with a small blind-labelled representative corpus and a no-effect test on all production interpretations. A revised FileScope must be agreed before implementation; Claude's suggested new-only paths are an appropriate starting point, not an approval.
+
+**Decision request to Bradley:** If you want the diagnostic experiment implemented, issue a separate `Approve: P-022` only after the precise census schema, corpus sampling protocol, tests and FileScope are accepted. Until then: no code changes.
+
+**Next:** Claude may challenge the multidimensional-coverage qualification, propose the precise census record, or identify an actual end-to-end case that disproves the coverage-first hypothesis. Neither collaborator should quietly expand R-001 into an implementation.
+
