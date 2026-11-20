@@ -238,6 +238,9 @@ defmodule Brain.LIFG.Stage1 do
           buckets: buckets,
           grammar_weight: Keyword.get(opts, :grammar_weight, 0.0),
           sense_focus?: Keyword.get(opts, :sense_focus?, true),
+          neighbor_gloss_context?:
+            Keyword.get(opts, :neighbor_gloss_context?,
+              Application.get_env(:brain, :lifg_neighbor_gloss_context?, false)) == true,
           spatial_pp_senses?: Keyword.get(opts, :spatial_pp_senses?, false),
           usage_register?: Keyword.get(opts, :usage_register?,
             Application.get_env(:brain, :lifg_usage_register?, true)),
@@ -579,7 +582,9 @@ defmodule Brain.LIFG.Stage1 do
       GrammarEvidence.prepare(Map.get(ctx, :si, %{}))
 
     ctx =
-      Map.put(ctx, :grammar_context, grammar_context)
+      ctx
+      |> Map.put(:grammar_context, grammar_context)
+      |> Map.put(:neighbor_glosses, neighbor_glosses(tokens, ctx))
 
     acc0 = %{
       choices: [],
@@ -708,7 +713,10 @@ defmodule Brain.LIFG.Stage1 do
 
             context_report =
               if SenseFocus.evaluate_context?(focus, c) do
-                ContextFit.explain(ctx.sent, token_phrase, c)
+                case neighbor_context_for(ctx, tok_index, token_phrase) do
+                  [] -> ContextFit.explain(ctx.sent, token_phrase, c)
+                  nb -> ContextFit.explain(ctx.sent, token_phrase, c, neighbor_context: nb)
+                end
               else
                 nil
               end
@@ -2056,6 +2064,69 @@ defmodule Brain.LIFG.Stage1 do
 
     adj = if phrase_like?, do: 0.02, else: -0.02
     clamp01(base_pos + adj)
+  end
+
+  # P-031: neighbour-gloss context (extended-Lesk style).
+  #
+  # For each content token, collect the definitions of its first
+  # @neighbor_senses_per_token Wiktionary senses (lowest sense number; the
+  # numbering follows Wiktionary order per POS, Db.Jsonl.Populate). Function /
+  # closed-class candidates, synthetic tag-0 entries and fallbacks are
+  # excluded. A target token later receives the glosses of every *other*
+  # token whose phrase differs from its own. ContextFit weighs these at half
+  # strength and never lets them displace literal sentence evidence.
+  #
+  # Off unless `config :brain, :lifg_neighbor_gloss_context?, true` or the
+  # Stage1.run/2 option `neighbor_gloss_context?: true`.
+  @neighbor_senses_per_token 2
+  @neighbor_function_pos ~w(interjection pronoun determiner article auxiliary preposition conjunction particle)
+
+  defp neighbor_glosses(tokens, ctx) do
+    if Map.get(ctx, :neighbor_gloss_context?, false) == true do
+      buckets = Map.get(ctx, :buckets, %{})
+
+      tokens
+      |> Enum.map(fn tok ->
+        idx = token_index(tok, 0)
+        phrase = tok |> token_raw_phrase() |> norm()
+
+        glosses =
+          buckets
+          |> Map.get(idx, [])
+          |> Enum.map(&Safe.to_plain/1)
+          |> Enum.filter(&is_map/1)
+          |> Enum.flat_map(fn c ->
+            id = to_string(Safe.get(c, :id) || "")
+            definition = Safe.get(c, :definition)
+
+            with {_lemma, pos, tag} <- parse_sense_id(id),
+                 {n, ""} when n >= 1 <- Integer.parse(tag),
+                 false <- String.downcase(pos) in @neighbor_function_pos,
+                 false <- ClosedClass.closed_class_candidate?(c),
+                 true <- is_binary(definition) and definition != "" do
+              [{n, pos, definition}]
+            else
+              _ -> []
+            end
+          end)
+          |> Enum.sort()
+          |> Enum.uniq_by(fn {_n, _pos, d} -> d end)
+          |> Enum.take(@neighbor_senses_per_token)
+          |> Enum.map(fn {_n, _pos, d} -> d end)
+
+        {idx, phrase, glosses}
+      end)
+      |> Enum.reject(fn {_idx, _phrase, glosses} -> glosses == [] end)
+    else
+      []
+    end
+  end
+
+  defp neighbor_context_for(ctx, tok_index, token_phrase) do
+    ctx
+    |> Map.get(:neighbor_glosses, [])
+    |> Enum.reject(fn {idx, phrase, _} -> idx == tok_index or phrase == token_phrase end)
+    |> Enum.flat_map(fn {_idx, _phrase, glosses} -> glosses end)
   end
 
   # Wiktionary-imported sense ids are "word|pos|n", numbered from 1 in

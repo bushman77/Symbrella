@@ -145,6 +145,21 @@ defmodule Brain.LIFG.ContextFit do
         {field, exact_strength + 0.5 * max(total_strength - exact_strength, 0.0)}
       end)
 
+    # P-031: optional neighbour-gloss context (extended-Lesk style). Terms
+    # from other tokens' leading dictionary glosses that are NOT already
+    # literal sentence context may add evidence at half the incremental
+    # strength of a literal match. Absent/empty option => byte-identical.
+    {component_scores, neighbor_gloss_matches} =
+      apply_neighbor_context(
+        component_scores,
+        unique_matches,
+        evidence,
+        context,
+        target,
+        weights,
+        Keyword.get(opts, :neighbor_context, [])
+      )
+
     contributions =
       Map.new(@default_weights, fn {field, _default_weight} ->
         weight = Map.get(weights, field, 0.0)
@@ -177,6 +192,7 @@ defmodule Brain.LIFG.ContextFit do
       weights: weights,
       antonym_matches: overlap(context, evidence.antonyms)
     }
+    |> maybe_put_neighbor_matches(neighbor_gloss_matches)
   end
 
   def explain(_sentence, _target, _candidate, _opts) do
@@ -192,6 +208,61 @@ defmodule Brain.LIFG.ContextFit do
       antonym_matches: []
     }
   end
+
+  @max_neighbor_terms 40
+
+  defp apply_neighbor_context(component_scores, unique_matches, evidence, context, target, weights, values) do
+    neighbor_terms = neighbor_terms(values, context, target)
+
+    if MapSet.size(neighbor_terms) == 0 do
+      {component_scores, nil}
+    else
+      literal_seen =
+        unique_matches |> Map.values() |> List.flatten() |> MapSet.new()
+
+      neighbor_matches =
+        @evidence_priority
+        |> Map.new(fn field ->
+          {field,
+           neighbor_terms
+           |> overlap(Map.fetch!(evidence, field))
+           |> Enum.reject(&MapSet.member?(literal_seen, &1))}
+        end)
+        |> unique_evidence_matches(weights)
+
+      scores =
+        Map.new(component_scores, fn {field, literal_component} ->
+          literal_terms = Map.get(unique_matches, field, [])
+          extra = Map.get(neighbor_matches, field, [])
+
+          gain =
+            overlap_strength(literal_terms ++ extra) - overlap_strength(literal_terms)
+
+          {field, min(literal_component + 0.5 * max(gain, 0.0), 1.0)}
+        end)
+
+      {scores, neighbor_matches}
+    end
+  end
+
+  defp neighbor_terms(values, context, target) do
+    excluded = MapSet.new(raw_tokens(target))
+
+    values
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.flat_map(&raw_tokens/1)
+    |> reject_stopwords()
+    |> Enum.reject(&(MapSet.member?(excluded, &1) or MapSet.member?(context, &1)))
+    |> Enum.uniq()
+    |> Enum.take(@max_neighbor_terms)
+    |> MapSet.new()
+  end
+
+  defp maybe_put_neighbor_matches(report, nil), do: report
+
+  defp maybe_put_neighbor_matches(report, matches),
+    do: Map.put(report, :neighbor_gloss_matches, matches)
 
   # Count each lexical context cue at most once across dictionary fields.
   # No extra linguistic evidence is manufactured by this deduplication.

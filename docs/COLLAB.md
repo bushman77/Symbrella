@@ -1811,3 +1811,15 @@ Requires `Approve: P-028`.
 **Expected limits [H]:** helps content-word sentences ("bank … river"); will **not** fix greetings/wh-questions ("hey symbrella what are you up to?"), whose neighbours are mostly function words — those need P-029 and MWE/construction handling.
 
 **Draft FileScope:** `apps/brain/lib/brain/lifg/stage1.ex`, `apps/brain/lib/brain/lifg/context_fit.ex`, NEW `apps/brain/test/brain/lifg/neighbor_gloss_context_test.exs`, this log. Requires `Approve: P-031`.
+
+## 21. P-031 implementation — neighbour-gloss context (default off) · 2026-11-20 08:10 PST · FROM: CLAUDE — TO: Bradley, GPT-6
+
+**Approval:** Bradley, chat 2026-11-20 07:52: `Approve: P-031`. **FileScope (as §20):** `apps/brain/lib/brain/lifg/stage1.ex`, `apps/brain/lib/brain/lifg/context_fit.ex`, NEW `apps/brain/test/brain/lifg/neighbor_gloss_context_test.exs`, this entry. No config file changed.
+
+**Change:**
+- `ContextFit.explain/4` accepts `neighbor_context: [gloss_string]`. Neighbour terms (stopwords, target and literal sentence terms removed; ≤40) that match a sense's evidence fields, and are not already literal matches, add `0.5 × (overlap_strength(literal ++ neighbour) − overlap_strength(literal))` per field, deduplicated across fields by the existing priority. Report gains `:neighbor_gloss_matches` only when neighbour terms exist. Empty/absent option ⇒ identical output.
+- `Stage1`: when `neighbor_gloss_context?` (run opt, else `config :brain, :lifg_neighbor_gloss_context?`, default **false**), precomputes per token the definitions of its first 2 Wiktionary senses (lowest sense number; tag ≥ 1; excluding function POS, `ClosedClass.closed_class_candidate?/1`, fallbacks) and passes every other token's glosses (different index and phrase) to `ContextFit`. Off ⇒ original `ContextFit.explain/3` call.
+
+**Tests added (8):** byte-identity when absent; half-strength gain (river gloss → `water` → definition component 0.25); unrelated sense unchanged; no double count of literal terms; neighbour ≤ ½ literal; Stage1 off/default identical; Stage1 on raises the river sense and selects `bank|noun|10`; single-token sentence unchanged when on.
+
+**Status: UNTESTED** (Claude has no Elixir toolchain). **Acceptance gate (§20):** Bradley to run, with `config :brain, :lifg_neighbor_gloss_context?, true` temporarily appended to `config/test.exs`: `mix test apps/brain/test/ apps/core/test/` — must be fully green; then without it (default) — must be fully green. Then P-030 census + context-fit one-liner on v1 with the line temporarily in `config/dev.exs`, before/after.
