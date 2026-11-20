@@ -1072,6 +1072,13 @@ defmodule Brain.LIFG.Stage1 do
                 matches: row.context_report.unique_matches,
                 contributions: row.context_report.contributions
               }
+              |> then(fn ev ->
+                # P-031 diagnostic: neighbour-gloss terms, only when present.
+                case Map.get(row.context_report, :neighbor_gloss_matches) do
+                  %{} = nb -> Map.put(ev, :neighbor_gloss_matches, nb)
+                  _ -> ev
+                end
+              end)
             end),
           margin_weak?: margin_weak?,
           low_confidence?: low_confidence?,
