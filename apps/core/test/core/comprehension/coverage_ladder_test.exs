@@ -135,6 +135,73 @@ defmodule Core.Comprehension.CoverageLadderTest do
     assert unattested.structural.preferred_conflicting_roles == 1
   end
 
+  test "P-022.1: an unresolved single candidate with an attested role conflict is a conflict opportunity" do
+    candidate = %{
+      conflicting_roles: 1,
+      lexical_role_evidence: [
+        %{role: :subject_head, token_index: 1, expected_pos: ["noun"], selected_pos: "verb", status: :conflict}
+      ]
+    }
+
+    structural = %{
+      status: :unresolved,
+      candidates: [candidate],
+      discrimination_margin: nil,
+      preferred: nil
+    }
+
+    base = [cell("the", "determiner"), cell("fly", "verb"), cell("is", "auxiliary"), cell("small", "adjective")]
+
+    build = fn active_cells ->
+      "The fly is small."
+      |> input(active_cells, :user)
+      |> uninterpreted()
+      |> Map.put(:sentence_signatures, [full_span(3, %{subject_head: 1, copula: 2, predicate: 3})])
+      |> Map.put(:structural_competition, structural)
+      |> CoverageLadder.assess()
+    end
+
+    attested = build.([cell("fly", "noun") | base])
+    assert attested.structural.tie_eligible? == false
+    assert attested.structural.conflict_eligible? == true
+    assert attested.structural.focus_conflicting_roles == 1
+    assert attested.structural.preferred_conflicting_roles == 0
+    assert attested.structural.candidate_conflicts == [%{conflicting_roles: 1, attested_alternative?: true}]
+    assert attested.primary_blocker == :structural_unresolved_single_candidate
+    assert attested.blocker_detail == :attested_role_conflict
+
+    unattested = build.(base)
+    assert unattested.structural.conflict_eligible? == false
+    assert unattested.structural.candidate_conflicts == [%{conflicting_roles: 1, attested_alternative?: false}]
+    assert unattested.blocker_detail == nil
+
+    summary = CoverageLadder.aggregate([Map.put(attested, :representative?, true)])
+    assert summary.representative.conflict_opportunities == 1
+    assert summary.representative.opportunities == 1
+  end
+
+  test "P-022.1: an unresolved tie counts once even when its best candidate also has a conflict" do
+    conflicted = %{
+      conflicting_roles: 1,
+      lexical_role_evidence: [
+        %{role: :subject_head, token_index: 1, expected_pos: ["noun"], selected_pos: "verb", status: :conflict}
+      ]
+    }
+
+    record =
+      "The fly is small."
+      |> input([cell("fly", "noun"), cell("fly", "verb") | cells()], :user)
+      |> uninterpreted()
+      |> Map.put(:sentence_signatures, [full_span(3, %{subject_head: 1, copula: 2, predicate: 3})])
+      |> Map.put(:structural_competition, %{status: :unresolved, candidates: [conflicted, %{}], preferred: nil})
+      |> CoverageLadder.assess()
+
+    assert record.structural.tie_eligible? == true
+    assert record.structural.conflict_eligible? == true
+    assert record.primary_blocker == :structural_tie
+    assert CoverageLadder.aggregate([Map.put(record, :representative?, true)]).representative.opportunities == 1
+  end
+
   test "a Colony chart refusal is a policy abstention, not a grammar failure" do
     record =
       "The cat is not ready."

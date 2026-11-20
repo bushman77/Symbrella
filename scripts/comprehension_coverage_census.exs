@@ -105,7 +105,7 @@ defmodule Census.Runner do
         result |> Core.Comprehension.CoverageLadder.from_probe(gate) |> with_meta(row, :colony)
 
       {:error, reason} ->
-        {:probe_error, %{case_id: row["case_id"], reason: if(is_atom(reason), do: reason, else: :other)}}
+        {:probe_error, %{case_id: row["case_id"], reason: reason}}
     end
   end
 

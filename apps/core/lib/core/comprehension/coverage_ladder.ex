@@ -47,6 +47,7 @@ defmodule Core.Comprehension.CoverageLadder do
   @screen_ratio 0.10
   @min_eligible_failures 30
   @max_conflicts 16
+  @max_candidates 12
   @max_count 10_000
 
   @doc "Census record for a SemanticInput returned by the chat resolver."
@@ -98,7 +99,9 @@ defmodule Core.Comprehension.CoverageLadder do
       candidate_count: candidates,
       margin: nil,
       preferred_conflicting_roles: nil,
+      focus_conflicting_roles: nil,
       conflicts_with_attested_alternative: nil,
+      candidate_conflicts: nil,
       tie_eligible?: status == :unresolved and candidates >= 2,
       conflict_eligible?: :not_observed,
       detail: :probe_summary
@@ -257,7 +260,8 @@ defmodule Core.Comprehension.CoverageLadder do
         {:preferred_structure_not_composed, nil}
 
       structure.status == :unresolved ->
-        {:structural_unresolved_single_candidate, nil}
+        {:structural_unresolved_single_candidate,
+         if(structure.conflict_eligible? == true, do: :attested_role_conflict, else: nil)}
 
       true ->
         {:undetermined, nil}
@@ -294,23 +298,45 @@ defmodule Core.Comprehension.CoverageLadder do
     status = allowed(Map.get(structural, :status), @structural_statuses)
     candidates = structural |> Map.get(:candidates, []) |> List.wrap()
     preferred = Map.get(structural, :preferred)
-    conflicts = conflict_evidence(preferred, nodes)
+
+    # P-022.1: the reading whose conflicts define the opportunity is the
+    # preferred one when it exists, otherwise the best-ranked unresolved
+    # candidate. A single candidate whose lexical winners contradict its roles
+    # fails adjudication and surfaces as :unresolved, not :preferred.
+    focus =
+      case status do
+        :preferred -> preferred
+        :unresolved -> List.first(candidates)
+        _ -> nil
+      end
+
+    conflicts = conflict_evidence(focus, nodes)
 
     %{
       status: status,
       candidate_count: min(length(candidates), @max_count),
       margin: margin(Map.get(structural, :discrimination_margin)),
       preferred_conflicting_roles: conflicting_roles(preferred),
+      focus_conflicting_roles: conflicting_roles(focus),
       conflicts_with_attested_alternative: length(conflicts),
+      candidate_conflicts:
+        candidates
+        |> Enum.take(@max_candidates)
+        |> Enum.map(fn candidate ->
+          %{
+            conflicting_roles: conflicting_roles(candidate),
+            attested_alternative?: conflict_evidence(candidate, nodes) != []
+          }
+        end),
       tie_eligible?: status == :unresolved and length(candidates) >= 2,
-      conflict_eligible?: status == :preferred and conflicts != [],
+      conflict_eligible?: status in [:preferred, :unresolved] and conflicts != [],
       detail: :observed
     }
   end
 
-  # A preferred reading whose lexical winner contradicts a grammatical role,
-  # while the token already has an attested row of the required POS. This is
-  # an *opportunity* count only; nothing is substituted or re-scored.
+  # A reading whose lexical winner contradicts a grammatical role, while the
+  # token already has an attested row of the required POS. This is an
+  # *opportunity* count only; nothing is substituted or re-scored.
   defp conflict_evidence(%{} = preferred, nodes) do
     by_index = Map.new(nodes, fn node -> {node.index, node.pos} end)
 
